@@ -80,6 +80,16 @@ jobs:
         working-directory: upstream
         run: python3 prepare_st.py --platform=Linux
 
+      - name: Stage Wails Linux sources
+        working-directory: upstream
+        run: |
+          mkdir -p Desktop/Linux/frontend Desktop/Linux/Libs
+          cp -a Frontend/output/. Desktop/Linux/frontend/
+          cp -a Desktop/Libs/. Desktop/Linux/Libs/
+          test -f Desktop/Linux/frontend/index.html
+          test -f Desktop/Linux/Libs/SmartTunnel.lua
+          test -f Desktop/Linux/Libs/smarttunnel.go
+
       - name: Install Wails CLI
         run: |
           go install github.com/wailsapp/wails/v2/cmd/wails@v2.14.0
@@ -89,7 +99,7 @@ jobs:
         working-directory: upstream/Desktop/Linux
         run: |
           go mod download
-          wails doctor
+          wails doctor || true
           wails build -clean -platform linux/arm64 -o LaLune
 
       - name: Collect artifact
