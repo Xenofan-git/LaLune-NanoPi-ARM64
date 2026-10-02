@@ -100,7 +100,7 @@ jobs:
         run: |
           go mod download
           wails doctor || true
-          wails build -clean -platform linux/arm64 -o LaLune
+          wails build -clean -platform linux/arm64 -tags webkit2_41 -o LaLune
 
       - name: Collect artifact
         run: |
