@@ -76,6 +76,10 @@ jobs:
           name: flutter-web
           path: upstream/Frontend/output
 
+      - name: Prepare SmartTunnel runtime library
+        working-directory: upstream
+        run: python3 prepare_st.py --platform=Linux
+
       - name: Install Wails CLI
         run: |
           go install github.com/wailsapp/wails/v2/cmd/wails@v2.14.0
