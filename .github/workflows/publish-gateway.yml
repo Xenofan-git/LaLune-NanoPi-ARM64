@@ -26,7 +26,8 @@ jobs:
       - name: Publish release asset
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: \${{ github.run_number }}
-          name: LaLune NanoPi Gateway \${{ github.run_number }}
+          tag_name: nanopi-gateway-build
+          name: LaLune NanoPi Gateway build
           generate_release_notes: false
           files: lalune-gateway-linux-arm64
+          overwrite_files: true
