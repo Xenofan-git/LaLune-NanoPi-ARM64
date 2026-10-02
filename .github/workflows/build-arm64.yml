@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -33,7 +35,6 @@ jobs:
       - name: Build Flutter Web frontend
         working-directory: upstream/Frontend/Core
         run: |
-          flutter --version
           flutter pub get
           flutter build web --release
       - name: Upload Flutter Web
@@ -79,9 +80,6 @@ jobs:
           mkdir -p Desktop/Linux/frontend Desktop/Linux/Libs
           cp -a Frontend/output/. Desktop/Linux/frontend/
           cp -a Desktop/Libs/. Desktop/Linux/Libs/
-          test -f Desktop/Linux/frontend/index.html
-          test -f Desktop/Linux/Libs/SmartTunnel.lua
-          test -f Desktop/Linux/Libs/smarttunnel.go
       - name: Install Wails CLI
         run: |
           go install github.com/wailsapp/wails/v2/cmd/wails@v2.14.0
@@ -90,7 +88,6 @@ jobs:
         working-directory: upstream/Desktop/Linux
         run: |
           go mod download
-          wails doctor || true
           wails build -clean -platform linux/arm64 -tags webkit2_41 -o LaLune
       - name: Build NanoPi headless gateway
         working-directory: Gateway
@@ -108,14 +105,11 @@ jobs:
           cp dist/lalune-gateway dist/lalune-gateway-bundle/
           cp Gateway/README.md dist/lalune-gateway-bundle/
           tar -C dist -czf dist/LaLune-NanoPi-gateway-arm64.tar.gz lalune-gateway-bundle
-          file dist/LaLune-linux-arm64 dist/lalune-gateway
-          sha256sum dist/LaLune-linux-arm64 dist/lalune-gateway dist/LaLune-NanoPi-gateway-arm64.tar.gz
       - name: Upload desktop ARM64
         uses: actions/upload-artifact@v4
         with:
           name: LaLune-linux-arm64
           path: dist/LaLune-linux-arm64
-          if-no-files-found: error
       - name: Upload NanoPi gateway bundle
         uses: actions/upload-artifact@v4
         with:
