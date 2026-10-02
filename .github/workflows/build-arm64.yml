@@ -24,7 +24,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: Endlad2/LaLune
-          ref: e4a6d08
+          ref: e4a6d08b63aef6025bf8ad8f77da660ea552e04b
           path: upstream
 
       - name: Install Linux build dependencies
