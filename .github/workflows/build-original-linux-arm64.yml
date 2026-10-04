@@ -2,6 +2,9 @@ name: Build original LaLune Linux ARM64
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - original-lalune-linux-arm64-policy
 
 jobs:
   build:
@@ -27,10 +30,9 @@ jobs:
           p = Path("upstream-lalune/Backend/Desktop/src/core_manager.rs")
           s = p.read_text()
           old = '"client-linux-x86_64"'
-          new = '"client-linux-arm64"'
           if old not in s:
               raise SystemExit("core asset marker not found")
-          p.write_text(s.replace(old, new, 1))
+          p.write_text(s.replace(old, '"client-linux-arm64"', 1))
 
           p = Path("upstream-lalune/Backend/Desktop/src/vpn.rs")
           s = p.read_text()
@@ -108,7 +110,6 @@ jobs:
           chmod +x dist/lalune-backend-linux-arm64
           sha256sum dist/lalune-backend-linux-arm64 > dist/SHA256SUMS
           tar -C dist -czf lalune-original-linux-arm64.tar.gz .
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
