@@ -1,0 +1,65 @@
+diff --git a/Backend/Desktop/src/core_manager.rs b/Backend/Desktop/src/core_manager.rs
+--- a/Backend/Desktop/src/core_manager.rs
++++ b/Backend/Desktop/src/core_manager.rs
+@@
+     #[cfg(target_os = "linux")]
+     {
+-        "client-linux-x86_64"
++        "client-linux-arm64"
+     }
+diff --git a/Backend/Desktop/src/vpn.rs b/Backend/Desktop/src/vpn.rs
+--- a/Backend/Desktop/src/vpn.rs
++++ b/Backend/Desktop/src/vpn.rs
+@@
+ pub const DEFAULT_DNS: &str = "8.8.8.8,8.8.4.4";
++pub const POLICY_TABLE: u32 = 200;
++pub const POLICY_PREF: u32 = 22000;
++pub const CLIENT_SUBNET: &str = "192.168.5.0/24";
+@@
+ #[cfg(target_os = "linux")]
+ fn setup_routes_linux(tun_ip: &str, tun_dns: &str, events: &EventBus) {
+@@
+-    run_sudo(
+-        &format!("ip route add default dev {}" , TUN_NAME),
+-        events,
+-    );
++    // LaLune must not replace NanoPi's main default route. Traffic arriving
++    // from the downstream/client subnet is selected through a dedicated
++    // policy-routing table.
++    run_sudo(
++        &format!("ip route flush table {} 2>/dev/null || true", POLICY_TABLE),
++        events,
++    );
++    run_sudo(
++        &format!("ip route replace 192.168.4.0/24 dev eth0 table {}", POLICY_TABLE),
++        events,
++    );
++    run_sudo(
++        &format!("ip route replace {} dev eth1 table {}", CLIENT_SUBNET, POLICY_TABLE),
++        events,
++    );
++    run_sudo(
++        &format!("ip route replace default dev {} table {}", TUN_NAME, POLICY_TABLE),
++        events,
++    );
++    run_sudo(
++        &format!(
++            "ip rule add pref {} from {} lookup {} 2>/dev/null || true",
++            POLICY_PREF, CLIENT_SUBNET, POLICY_TABLE
++        ),
++        events,
++    );
+     let _ = tun_ip;
+ }
+ 
+ #[cfg(target_os = "linux")]
+ fn cleanup_routes_linux(events: &EventBus) {
+     run_sudo(
+-        &format!("ip route del default dev {} 2>/dev/null || true", TUN_NAME),
++        &format!(
++            "ip rule del pref {} 2>/dev/null || true; ip route flush table {} 2>/dev/null || true",
++            POLICY_PREF, POLICY_TABLE
++        ),
+         events,
+     );
+ }
