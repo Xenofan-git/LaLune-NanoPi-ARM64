@@ -20,12 +20,15 @@ diff --git a/Backend/Desktop/src/vpn.rs b/Backend/Desktop/src/vpn.rs
  fn setup_routes_linux(tun_ip: &str, tun_dns: &str, events: &EventBus) {
 @@
 -    run_sudo(
--        &format!("ip route add default dev {}" , TUN_NAME),
+-        &format!("ip route add default dev {}", TUN_NAME),
 -        events,
 -    );
-+    // LaLune must not replace NanoPi's main default route. Traffic arriving
-+    // from the downstream/client subnet is selected through a dedicated
-+    // policy-routing table.
++    // Never replace NanoPi's main default route. Only traffic from the
++    // downstream/client subnet is selected for the LaLune table.
++    run_sudo(
++        &format!("ip rule del pref {} 2>/dev/null || true", POLICY_PREF),
++        events,
++    );
 +    run_sudo(
 +        &format!("ip route flush table {} 2>/dev/null || true", POLICY_TABLE),
 +        events,
@@ -44,7 +47,7 @@ diff --git a/Backend/Desktop/src/vpn.rs b/Backend/Desktop/src/vpn.rs
 +    );
 +    run_sudo(
 +        &format!(
-+            "ip rule add pref {} from {} lookup {} 2>/dev/null || true",
++            "ip rule add pref {} from {} lookup {}",
 +            POLICY_PREF, CLIENT_SUBNET, POLICY_TABLE
 +        ),
 +        events,
