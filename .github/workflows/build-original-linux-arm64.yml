@@ -37,8 +37,8 @@ jobs:
           p = Path("upstream-lalune/Backend/Desktop/src/vpn.rs")
           s = p.read_text()
           marker = 'pub const DEFAULT_DNS: &str = "8.8.8.8,8.8.4.4";'
-          additions = '''pub const POLICY_TABLE: u32 = 200;
-          pub const POLICY_PREF: u32 = 22000;
+          additions = '''pub const POLICY_TABLE: u32 = 202;
+          pub const POLICY_PREF: u32 = 22020;
           pub const CLIENT_SUBNET: &str = "192.168.5.0/24";'''
           if marker not in s:
               raise SystemExit("vpn constants marker not found")
