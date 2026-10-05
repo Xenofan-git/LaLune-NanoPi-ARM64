@@ -6,98 +6,23 @@ on:
       - original-lalune-linux-arm64-policy
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
       - name: Install ARM64 toolchain
         run: |
-          set -eux
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu pkg-config
           rustup target add aarch64-unknown-linux-gnu
 
-      - name: Clone upstream
-        run: |
-          set -eux
-          git clone --depth 1 https://github.com/Endlad2/LaLune.git upstream-lalune
+      - name: Clone upstream LaLune
+        run: git clone --depth 1 https://github.com/Endlad2/LaLune.git upstream-lalune
 
       - name: Apply NanoPi patch
-        run: |
-          set -eux
-          python3 - <<'PY'
-from pathlib import Path
-
-core = Path("upstream-lalune/Backend/Desktop/src/core_manager.rs")
-s = core.read_text()
-s = s.replace('"client-linux-x86_64"', '"client-linux-arm64"', 1)
-core.write_text(s)
-
-vpn = Path("upstream-lalune/Backend/Desktop/src/vpn.rs")
-s = vpn.read_text()
-
-marker = 'pub const DEFAULT_DNS: &str = "8.8.8.8,8.8.4.4";'
-constants = '''pub const POLICY_TABLE: u32 = 202;
-pub const POLICY_PREF: u32 = 22020;
-pub const CLIENT_SUBNET: &str = "192.168.5.0/24";'''
-if marker not in s:
-    raise SystemExit("vpn constants marker not found")
-s = s.replace(marker, marker + "\n" + constants, 1)
-
-old = '''    run_sudo(
-        &format!("ip route add default dev {}", TUN_NAME),
-        events,
-    );'''
-new = '''    // Keep NanoPi main routing untouched; route only eth1 clients via LaLune.
-    run_sudo(
-        &format!("ip rule del pref {} 2>/dev/null || true", POLICY_PREF),
-        events,
-    );
-    run_sudo(
-        &format!("ip route flush table {} 2>/dev/null || true", POLICY_TABLE),
-        events,
-    );
-    run_sudo(
-        &format!("ip route replace 192.168.4.0/24 dev eth0 table {}", POLICY_TABLE),
-        events,
-    );
-    run_sudo(
-        &format!("ip route replace {} dev eth1 table {}", CLIENT_SUBNET, POLICY_TABLE),
-        events,
-    );
-    run_sudo(
-        &format!("ip route replace default dev {} table {}", TUN_NAME, POLICY_TABLE),
-        events,
-    );
-    run_sudo(
-        &format!("ip rule add pref {} from {} lookup {}", POLICY_PREF, CLIENT_SUBNET, POLICY_TABLE),
-        events,
-    );'''
-if old not in s:
-    raise SystemExit("Linux route block not found")
-s = s.replace(old, new, 1)
-
-old = '''    run_sudo(
-        &format!("ip route del default dev {} 2>/dev/null || true", TUN_NAME),
-        events,
-    );'''
-new = '''    run_sudo(
-        &format!(
-            "ip rule del pref {} 2>/dev/null || true; ip route flush table {} 2>/dev/null || true",
-            POLICY_PREF, POLICY_TABLE
-        ),
-        events,
-    );'''
-if old not in s:
-    raise SystemExit("Linux cleanup block not found")
-vpn.write_text(s.replace(old, new, 1))
-PY
+        run: python3 adapt/apply-original-linux-arm64.py
 
       - name: Build ARM64
         working-directory: upstream-lalune/Backend/Desktop
@@ -108,7 +33,7 @@ PY
           CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
         run: cargo build --release --target aarch64-unknown-linux-gnu
 
-      - name: Package
+      - name: Verify and package
         run: |
           set -eux
           file upstream-lalune/Backend/Desktop/target/aarch64-unknown-linux-gnu/release/lalune-backend
