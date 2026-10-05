@@ -45,7 +45,8 @@ route_new = '''    // Keep NanoPi main routing untouched; route only eth1 client
     run_sudo(
         &format!("ip rule add pref {} from {} lookup {}", POLICY_PREF, CLIENT_SUBNET, POLICY_TABLE),
         events,
-    );if route_old not in s:
+    );'''
+if route_old not in s:
     raise SystemExit("Linux route block not found")
 s = s.replace(route_old, route_new, 1)
 
@@ -56,8 +57,9 @@ cleanup_new = '''    run_sudo(
             POLICY_PREF, POLICY_TABLE
         ),
         events,
-    );if cleanup_old not in s:
+    );'''
+if cleanup_old not in s:
     raise SystemExit("Linux cleanup block not found")
-
 vpn.write_text(s.replace(cleanup_old, cleanup_new, 1))
+
 print("NanoPi LaLune patch applied: table=202 pref=22020 subnet=192.168.5.0/24")
