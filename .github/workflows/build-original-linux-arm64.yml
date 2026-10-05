@@ -101,7 +101,15 @@ jobs:
         working-directory: upstream-lalune/Backend/Desktop
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+          CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
         run: cargo build --release --target aarch64-unknown-linux-gnu
+
+      - name: Verify ARM64 binary
+        run: |
+          file upstream-lalune/Backend/Desktop/target/aarch64-unknown-linux-gnu/release/lalune-backend
+          aarch64-linux-gnu-readelf -h upstream-lalune/Backend/Desktop/target/aarch64-unknown-linux-gnu/release/lalune-backend | grep -E 'Class:|Machine:'
 
       - name: Package
         run: |
