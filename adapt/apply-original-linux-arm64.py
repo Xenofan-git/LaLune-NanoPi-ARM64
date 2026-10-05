@@ -20,10 +20,7 @@ if dns_marker not in s:
     raise SystemExit("vpn constants marker not found")
 s = s.replace(dns_marker, dns_marker + "\n" + constants, 1)
 
-route_old = '''    run_sudo(
-        &format!("ip route add default dev {}", TUN_NAME),
-        events,
-    );'''
+route_old = '''    run_sudo(&format!("ip route add default dev {}", "csqtt0"), events);'''
 route_new = '''    // Keep NanoPi main routing untouched; route only eth1 clients via LaLune.
     run_sudo(
         &format!("ip rule del pref {} 2>/dev/null || true", POLICY_PREF),
@@ -42,29 +39,24 @@ route_new = '''    // Keep NanoPi main routing untouched; route only eth1 client
         events,
     );
     run_sudo(
-        &format!("ip route replace default dev {} table {}", TUN_NAME, POLICY_TABLE),
+        &format!("ip route replace default dev {} table {}", "csqtt0", POLICY_TABLE),
         events,
     );
     run_sudo(
         &format!("ip rule add pref {} from {} lookup {}", POLICY_PREF, CLIENT_SUBNET, POLICY_TABLE),
         events,
-    );'''
-if route_old not in s:
+    );if route_old not in s:
     raise SystemExit("Linux route block not found")
 s = s.replace(route_old, route_new, 1)
 
-cleanup_old = '''    run_sudo(
-        &format!("ip route del default dev {} 2>/dev/null || true", TUN_NAME),
-        events,
-    );'''
+cleanup_old = '''    run_sudo("ip route del default dev csqtt0 2>/dev/null || true", events);'''
 cleanup_new = '''    run_sudo(
         &format!(
             "ip rule del pref {} 2>/dev/null || true; ip route flush table {} 2>/dev/null || true",
             POLICY_PREF, POLICY_TABLE
         ),
         events,
-    );'''
-if cleanup_old not in s:
+    );if cleanup_old not in s:
     raise SystemExit("Linux cleanup block not found")
 
 vpn.write_text(s.replace(cleanup_old, cleanup_new, 1))
