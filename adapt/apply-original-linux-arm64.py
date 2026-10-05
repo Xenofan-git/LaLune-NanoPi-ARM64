@@ -20,8 +20,23 @@ if dns_marker not in s:
     raise SystemExit("vpn constants marker not found")
 s = s.replace(dns_marker, dns_marker + "\n" + constants, 1)
 
-route_old = '''    run_sudo(&format!("ip route add default dev {}", "csqtt0"), events);'''
-route_new = '''    // Keep NanoPi main routing untouched; route only eth1 clients via LaLune.
+setup_start = s.find('#[cfg(target_os = "linux")]\nfn setup_routes_linux(')
+cleanup_start = s.find('#[cfg(target_os = "linux")]\nfn cleanup_routes_linux(')
+run_sudo_start = s.find('#[cfg(target_os = "linux")]\nfn run_sudo(')
+if min(setup_start, cleanup_start, run_sudo_start) < 0 or not (setup_start < cleanup_start < run_sudo_start):
+    raise SystemExit("Linux route function boundaries not found")
+
+setup_fn = '''#[cfg(target_os = "linux")]
+fn setup_routes_linux(tun_ip: &str, tun_dns: &str, events: &EventBus) {
+    for dns in tun_dns.split(',') {
+        let dns = dns.trim();
+        if dns.is_empty() {
+            continue;
+        }
+        run_sudo(&format!("echo 'nameserver {}' >> /etc/resolv.conf", dns), events);
+    }
+
+    // Keep NanoPi main routing untouched; route only eth1 clients via LaLune.
     run_sudo(
         &format!("ip rule del pref {} 2>/dev/null || true", POLICY_PREF),
         events,
@@ -45,21 +60,31 @@ route_new = '''    // Keep NanoPi main routing untouched; route only eth1 client
     run_sudo(
         &format!("ip rule add pref {} from {} lookup {}", POLICY_PREF, CLIENT_SUBNET, POLICY_TABLE),
         events,
-    );'''
-if route_old not in s:
-    raise SystemExit("Linux route block not found")
-s = s.replace(route_old, route_new, 1)
+    );
 
-cleanup_old = '''    run_sudo("ip route del default dev csqtt0 2>/dev/null || true", events);'''
-cleanup_new = '''    run_sudo(
+    let _ = tun_ip;
+}
+
+'''
+s = s[:setup_start] + setup_fn + s[cleanup_start:]
+
+cleanup_fn = '''#[cfg(target_os = "linux")]
+fn cleanup_routes_linux(events: &EventBus) {
+    run_sudo(
         &format!(
             "ip rule del pref {} 2>/dev/null || true; ip route flush table {} 2>/dev/null || true",
             POLICY_PREF, POLICY_TABLE
         ),
         events,
-    );'''
-if cleanup_old not in s:
-    raise SystemExit("Linux cleanup block not found")
-vpn.write_text(s.replace(cleanup_old, cleanup_new, 1))
+    );
+}
 
+'''
+cleanup_start = s.find('#[cfg(target_os = "linux")]\nfn cleanup_routes_linux(')
+run_sudo_start = s.find('#[cfg(target_os = "linux")]\nfn run_sudo(')
+if cleanup_start < 0 or run_sudo_start < 0 or cleanup_start >= run_sudo_start:
+    raise SystemExit("Linux cleanup boundaries not found")
+s = s[:cleanup_start] + cleanup_fn + s[run_sudo_start:]
+
+vpn.write_text(s)
 print("NanoPi LaLune patch applied: table=202 pref=22020 subnet=192.168.5.0/24")
