@@ -1,0 +1,39 @@
+name: Build original LaLune Web UI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - original-lalune-web-arm64
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout adaptation
+        uses: actions/checkout@v4
+
+      - name: Clone upstream LaLune
+        run: git clone --depth 1 https://github.com/Endlad2/LaLune.git upstream-lalune
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Prepare and build original Flutter web UI
+        run: bash adapt/build-original-web.sh upstream-lalune
+
+      - name: Package web UI
+        run: |
+          tar -C upstream-lalune/Frontend/build -czf lalune-web-arm64.tar.gz web
+          sha256sum lalune-web-arm64.tar.gz > SHA256SUMS
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lalune-web-arm64
+          path: |
+            lalune-web-arm64.tar.gz
+            SHA256SUMS
