@@ -6,23 +6,43 @@ on:
       - original-lalune-linux-arm64-policy
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
+    name: Build ARM64 backend
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate workflow inputs
+        run: |
+          set -euxo pipefail
+          test -f adapt/apply-original-linux-arm64.py
+
       - name: Install ARM64 toolchain
         run: |
+          set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu pkg-config
           rustup target add aarch64-unknown-linux-gnu
 
       - name: Clone upstream LaLune
-        run: git clone --depth 1 https://github.com/Endlad2/LaLune.git upstream-lalune
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/Endlad2/LaLune.git upstream-lalune
 
       - name: Apply NanoPi patch
-        run: python3 adapt/apply-original-linux-arm64.py
+        run: |
+          set -euxo pipefail
+          python3 adapt/apply-original-linux-arm64.py
+
+      - name: Show applied patch
+        run: |
+          set -euxo pipefail
+          grep -nE 'client-linux-arm64|POLICY_TABLE|POLICY_PREF|CLIENT_SUBNET'             upstream-lalune/Backend/Desktop/src/{core_manager.rs,vpn.rs}
 
       - name: Build ARM64
         working-directory: upstream-lalune/Backend/Desktop
@@ -31,17 +51,20 @@ jobs:
           CARGO_PROFILE_RELEASE_LTO: "false"
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
           CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
-        run: cargo build --release --target aarch64-unknown-linux-gnu
+        run: |
+          set -euxo pipefail
+          cargo build --release --target aarch64-unknown-linux-gnu
 
       - name: Verify and package
         run: |
-          set -eux
+          set -euxo pipefail
           file upstream-lalune/Backend/Desktop/target/aarch64-unknown-linux-gnu/release/lalune-backend
           aarch64-linux-gnu-readelf -h upstream-lalune/Backend/Desktop/target/aarch64-unknown-linux-gnu/release/lalune-backend | grep -E 'Class:|Machine:'
+          rm -rf dist
           mkdir -p dist
           cp upstream-lalune/Backend/Desktop/target/aarch64-unknown-linux-gnu/release/lalune-backend dist/lalune-backend-linux-arm64
           chmod +x dist/lalune-backend-linux-arm64
-          sha256sum dist/lalune-backend-linux-arm64 > dist/SHA256SUMS
+          sha256sum dist/lalune-backend-linux-arm64 | tee dist/SHA256SUMS
           tar -C dist -czf lalune-original-linux-arm64.tar.gz .
 
       - uses: actions/upload-artifact@v4
