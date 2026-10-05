@@ -12,8 +12,8 @@ diff --git a/Backend/Desktop/src/vpn.rs b/Backend/Desktop/src/vpn.rs
 +++ b/Backend/Desktop/src/vpn.rs
 @@
  pub const DEFAULT_DNS: &str = "8.8.8.8,8.8.4.4";
-+pub const POLICY_TABLE: u32 = 200;
-+pub const POLICY_PREF: u32 = 22000;
++pub const POLICY_TABLE: u32 = 202;
++pub const POLICY_PREF: u32 = 22020;
 +pub const CLIENT_SUBNET: &str = "192.168.5.0/24";
 @@
  #[cfg(target_os = "linux")]
@@ -24,7 +24,7 @@ diff --git a/Backend/Desktop/src/vpn.rs b/Backend/Desktop/src/vpn.rs
 -        events,
 -    );
 +    // Never replace NanoPi's main default route. Only traffic from the
-+    // downstream/client subnet is selected for the LaLune table.
++    // downstream/client subnet is selected for the isolated LaLune table.
 +    run_sudo(
 +        &format!("ip rule del pref {} 2>/dev/null || true", POLICY_PREF),
 +        events,
