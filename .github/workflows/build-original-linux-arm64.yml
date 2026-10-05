@@ -11,59 +11,50 @@ permissions:
 
 jobs:
   build:
-    name: Build ARM64 backend
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
-
+    timeout-minutes: 25
     steps:
-      - name: Checkout adaptation repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install ARM64 toolchain
-        shell: bash
         run: |
-          set -euxo pipefail
+          set -eux
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu pkg-config
           rustup target add aarch64-unknown-linux-gnu
 
-      - name: Clone upstream LaLune
-        shell: bash
+      - name: Clone upstream
         run: |
-          set -euxo pipefail
+          set -eux
           git clone --depth 1 https://github.com/Endlad2/LaLune.git upstream-lalune
 
-      - name: Apply NanoPi ARM64 and isolated policy routing
-        shell: bash
+      - name: Apply NanoPi patch
         run: |
-          set -euxo pipefail
-          python3 <<'PY'
-          from pathlib import Path
+          set -eux
+          python3 - <<'PY'
+from pathlib import Path
 
-          core = Path("upstream-lalune/Backend/Desktop/src/core_manager.rs")
-          text = core.read_text()
-          marker = '"client-linux-x86_64"'
-          if marker not in text:
-              raise SystemExit("core asset marker not found")
-          core.write_text(text.replace(marker, '"client-linux-arm64"', 1))
+core = Path("upstream-lalune/Backend/Desktop/src/core_manager.rs")
+s = core.read_text()
+s = s.replace('"client-linux-x86_64"', '"client-linux-arm64"', 1)
+core.write_text(s)
 
-          vpn = Path("upstream-lalune/Backend/Desktop/src/vpn.rs")
-          text = vpn.read_text()
+vpn = Path("upstream-lalune/Backend/Desktop/src/vpn.rs")
+s = vpn.read_text()
 
-          dns_marker = 'pub const DEFAULT_DNS: &str = "8.8.8.8,8.8.4.4";'
-          constants = """pub const POLICY_TABLE: u32 = 202;
+marker = 'pub const DEFAULT_DNS: &str = "8.8.8.8,8.8.4.4";'
+constants = '''pub const POLICY_TABLE: u32 = 202;
 pub const POLICY_PREF: u32 = 22020;
-pub const CLIENT_SUBNET: &str = "192.168.5.0/24";"""
-          if dns_marker not in text:
-              raise SystemExit("vpn constants marker not found")
-          text = text.replace(dns_marker, dns_marker + "\n" + constants, 1)
+pub const CLIENT_SUBNET: &str = "192.168.5.0/24";'''
+if marker not in s:
+    raise SystemExit("vpn constants marker not found")
+s = s.replace(marker, marker + "\n" + constants, 1)
 
-          route_old = """    run_sudo(
+old = '''    run_sudo(
         &format!("ip route add default dev {}", TUN_NAME),
         events,
-    );"""
-          route_new = """    // Keep NanoPi main routing untouched.
-    // Only downstream clients on eth1 use LaLune table 202.
+    );'''
+new = '''    // Keep NanoPi main routing untouched; route only eth1 clients via LaLune.
     run_sudo(
         &format!("ip rule del pref {} 2>/dev/null || true", POLICY_PREF),
         events,
@@ -87,65 +78,48 @@ pub const CLIENT_SUBNET: &str = "192.168.5.0/24";"""
     run_sudo(
         &format!("ip rule add pref {} from {} lookup {}", POLICY_PREF, CLIENT_SUBNET, POLICY_TABLE),
         events,
-    );"""
-          if route_old not in text:
-              raise SystemExit("Linux default-route block not found")
-          text = text.replace(route_old, route_new, 1)
+    );'''
+if old not in s:
+    raise SystemExit("Linux route block not found")
+s = s.replace(old, new, 1)
 
-          cleanup_old = """    run_sudo(
+old = '''    run_sudo(
         &format!("ip route del default dev {} 2>/dev/null || true", TUN_NAME),
         events,
-    );"""
-          cleanup_new = """    run_sudo(
+    );'''
+new = '''    run_sudo(
         &format!(
             "ip rule del pref {} 2>/dev/null || true; ip route flush table {} 2>/dev/null || true",
             POLICY_PREF, POLICY_TABLE
         ),
         events,
-    );"""
-          if cleanup_old not in text:
-              raise SystemExit("Linux cleanup block not found")
-          vpn.write_text(text.replace(cleanup_old, cleanup_new, 1))
-          PY
-
-      - name: Show applied routing patch
-        shell: bash
-        run: |
-          set -euxo pipefail
-          grep -nE 'POLICY_TABLE|POLICY_PREF|CLIENT_SUBNET|ip rule|ip route' upstream-lalune/Backend/Desktop/src/vpn.rs
+    );'''
+if old not in s:
+    raise SystemExit("Linux cleanup block not found")
+vpn.write_text(s.replace(old, new, 1))
+PY
 
       - name: Build ARM64
         working-directory: upstream-lalune/Backend/Desktop
-        shell: bash
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_PROFILE_RELEASE_LTO: "false"
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
           CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
-        run: |
-          set -euxo pipefail
-          cargo build --release --target aarch64-unknown-linux-gnu
-
-      - name: Verify ARM64 binary
-        shell: bash
-        run: |
-          set -euxo pipefail
-          file upstream-lalune/Backend/Desktop/target/aarch64-unknown-linux-gnu/release/lalune-backend
-          aarch64-linux-gnu-readelf -h upstream-lalune/Backend/Desktop/target/aarch64-unknown-linux-gnu/release/lalune-backend | grep -E 'Class:|Machine:'
+        run: cargo build --release --target aarch64-unknown-linux-gnu
 
       - name: Package
-        shell: bash
         run: |
-          set -euxo pipefail
-          rm -rf dist
+          set -eux
+          file upstream-lalune/Backend/Desktop/target/aarch64-unknown-linux-gnu/release/lalune-backend
+          aarch64-linux-gnu-readelf -h upstream-lalune/Backend/Desktop/target/aarch64-unknown-linux-gnu/release/lalune-backend | grep -E 'Class:|Machine:'
           mkdir -p dist
           cp upstream-lalune/Backend/Desktop/target/aarch64-unknown-linux-gnu/release/lalune-backend dist/lalune-backend-linux-arm64
           chmod +x dist/lalune-backend-linux-arm64
-          sha256sum dist/lalune-backend-linux-arm64 | tee dist/SHA256SUMS
+          sha256sum dist/lalune-backend-linux-arm64 > dist/SHA256SUMS
           tar -C dist -czf lalune-original-linux-arm64.tar.gz .
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: lalune-original-linux-arm64
           path: lalune-original-linux-arm64.tar.gz
