@@ -139,9 +139,9 @@ if old_runner_guard not in s:
     raise SystemExit("LinuxRunner.StartCore marker not found")
 s = s.replace(old_runner_guard, new_runner_guard, 1)
 
-old_runner = """        if tun, ok := bridge.Tun.(*LinuxTun); ok {
-            tun.SetupRoutes(tunIP, tunDNS)
-        }"""
+old_runner = """		if tun, ok := bridge.Tun.(*LinuxTun); ok {
+			tun.SetupRoutes(tunIP, tunDNS)
+		}"""
 new_runner = """        if tun, ok := bridge.Tun.(*LinuxTun); ok {
             tun.SetupRoutes(tunIP, tunDNS)
             bridge.StartTunnel(coreListenPort)
