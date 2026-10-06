@@ -50,6 +50,9 @@ jobs:
         run: |
           set -euxo pipefail
           ln -s ../Libs upstream-lalune/Desktop/Linux/Libs
+          cp upstream-lalune/Desktop/Windows/go.mod upstream-lalune/Desktop/Linux/go.mod
+          cp upstream-lalune/Desktop/Windows/go.sum upstream-lalune/Desktop/Linux/go.sum
+          cp upstream-lalune/Core/SmartTunnel.lua upstream-lalune/Desktop/Linux/SmartTunnel.lua
           mv upstream-lalune/Desktop/Linux/app.go upstream-lalune/Desktop/Linux/app_gui.go.disabled
           cat > upstream-lalune/Desktop/Linux/headless_main.go <<'EOF'
           package main
