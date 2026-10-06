@@ -86,6 +86,7 @@ jobs:
           mkdir -p dist
           cp csqtt-core/rust-client/target/release/client dist/client-linux-arm64-tun-uds
           chmod +x dist/client-linux-arm64-tun-uds
+      - name: Stage Wails Linux sources
         working-directory: upstream
         run: |
           mkdir -p Desktop/Linux/frontend Desktop/Linux/Libs
