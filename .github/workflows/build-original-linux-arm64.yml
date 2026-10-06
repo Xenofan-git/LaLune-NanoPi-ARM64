@@ -63,25 +63,10 @@ jobs:
           cp upstream-lalune/Desktop/Windows/go.sum upstream-lalune/Desktop/Linux/go.sum
           cp upstream-lalune/Core/SmartTunnel.lua upstream-lalune/Desktop/Libs/SmartTunnel.lua
           mv upstream-lalune/Desktop/Linux/app.go upstream-lalune/Desktop/Linux/app_gui.go.disabled
-          cat > upstream-lalune/Desktop/Linux/headless_main.go <<'EOF'
-          package main
-
-          import (
-            "context"
-            "os"
-            "os/signal"
-            "syscall"
-          )
-
-          func main() {
-            app := NewApp()
-            app.startup(context.Background())
-            ch := make(chan os.Signal, 1)
-            signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-            <-ch
-            app.Disconnect()
-          }
-          EOF
+          cp adapt/headless_main.go upstream-lalune/Desktop/Linux/headless_main.go
+          grep -Fq 'const headlessListen = "127.0.0.1:1062"' upstream-lalune/Desktop/Linux/headless_main.go
+          grep -Fq 'mux.HandleFunc("/vpn/connect"' upstream-lalune/Desktop/Linux/headless_main.go
+          grep -Fq 'mux.HandleFunc("/configs"' upstream-lalune/Desktop/Linux/headless_main.go
       - name: Download Go modules
         working-directory: upstream-lalune/Desktop/Linux
         run: |
