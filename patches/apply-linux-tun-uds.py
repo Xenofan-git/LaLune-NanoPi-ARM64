@@ -4,6 +4,7 @@ root = Path("upstream")
 
 app = root / "Desktop/Linux/app_linux.go"
 s = app.read_text()
+s = s.replace('\n\t"net"\n', '\n', 1)
 
 old = """type LinuxTun struct {
 \tapp          *App
