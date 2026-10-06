@@ -81,7 +81,7 @@ jobs:
       - name: Build patched Linux ARM64 CSQTT core
         run: |
           git clone --depth 1 --branch 2026.09.16.17.59 https://github.com/Endlad2/csqtt-core.git csqtt-core
-          cp patches/csqqtt-tun.rs csqtt-core/rust-client/tun.rs
+          cp patches/csqtt-tun.rs csqtt-core/rust-client/tun.rs
           cargo build --locked --release --manifest-path csqtt-core/rust-client/Cargo.toml
           mkdir -p dist
           cp csqtt-core/rust-client/target/release/client dist/client-linux-arm64-tun-uds
