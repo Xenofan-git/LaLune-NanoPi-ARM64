@@ -40,15 +40,19 @@ jobs:
       - name: Apply NanoPi adaptation to pinned source
         run: |
           set -euxo pipefail
-          python3 adapt/apply-pinned-original-linux-arm64.py
-      - name: Verify provenance and adaptation
+          python3 adapt/apply-pinned-original-linux-arm64-policy.py
+      - name: Verify provenance and exact adaptation
         run: |
           set -euxo pipefail
           test "$(git -C upstream-lalune rev-parse HEAD)" = "e4a6d08b63aef6025bf8ad8f77da660ea552e04b"
-          grep -n 'client-linux-arm64' upstream-lalune/Desktop/Libs/protocols.go
-          grep -n 'policy table 202' upstream-lalune/Desktop/Linux/app_linux.go
-          grep -n 'Core уже запущен' upstream-lalune/Desktop/Linux/app_linux.go
-          grep -n 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -Fq 'return "client-linux-arm64"' upstream-lalune/Desktop/Libs/protocols.go
+          grep -Fq 'ip route replace default dev csqtt0 table 202' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -Fq 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -Fq 'Core уже запущен — второй экземпляр не стартую' upstream-lalune/Desktop/Linux/app_linux.go
+          test "$(grep -Fc 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go)" = "1"
+          test "$(grep -Fc 'Core уже запущен — второй экземпляр не стартую' upstream-lalune/Desktop/Linux/app_linux.go)" = "1"
+          sha256sum upstream-lalune/Desktop/Linux/app_linux.go | tee adaptation-source.sha256
+          sha256sum upstream-lalune/Desktop/Libs/protocols.go | tee protocols-source.sha256
       - name: Prepare original Go module layout
         run: |
           set -euxo pipefail
@@ -78,7 +82,6 @@ jobs:
             app.Disconnect()
           }
           EOF
-
       - name: Download Go modules
         working-directory: upstream-lalune/Desktop/Linux
         run: |
@@ -93,12 +96,15 @@ jobs:
         run: |
           set -euxo pipefail
           go build -trimpath -ldflags="-s -w" -o lalune-original-linux-arm64 .
+          strings lalune-original-linux-arm64 | grep -Fq 'Core уже запущен — второй экземпляр не стартую'
       - name: Verify and package
         run: |
           set -euxo pipefail
           file upstream-lalune/Desktop/Linux/lalune-original-linux-arm64
           rm -rf dist && mkdir -p dist
           cp upstream-lalune/Desktop/Linux/lalune-original-linux-arm64 dist/
+          cp adaptation-source.sha256 dist/
+          cp protocols-source.sha256 dist/
           printf '%s\n' 'e4a6d08b63aef6025bf8ad8f77da660ea552e04b' > dist/UPSTREAM_COMMIT
           sha256sum dist/lalune-original-linux-arm64 | tee dist/SHA256SUMS
           tar -C dist -czf lalune-original-linux-arm64.tar.gz .
