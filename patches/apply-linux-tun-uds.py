@@ -32,9 +32,10 @@ assert old in s
 s = s.replace(old, new, 1)
 
 # LaLune must remain an independent connection: never install a default route in main.
-for forbidden in ('\tt.app.runSudo("ip route add default dev csqtt0")', '\tt.app.runSudo("ip route replace default dev csqtt0")'):
-    if forbidden in s:
-        s = s.replace(forbidden, '\t# global default route intentionally omitted; routing is owned by the separate gateway/policy table\\n', 1)
+old = '''\tt.app.runSudo("ip route add default dev csqtt0")
+'''
+assert old in s
+s = s.replace(old, "", 1)
 
 old = '''\tt.app.runSudo("ip route del default dev csqtt0 2>/dev/null || true")
 \tt.app.runSudo("ip tuntap del dev csqtt0 mode tun 2>/dev/null || true")
