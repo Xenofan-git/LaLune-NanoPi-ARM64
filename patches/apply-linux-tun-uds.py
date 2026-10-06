@@ -31,7 +31,7 @@ new = 'cmd := fmt.Sprintf("ip addr add %s/32 dev csqtt0 && ip link set csqtt0 up
 assert old in s
 s = s.replace(old, new, 1)
 
-old = '''\tt.app.runSudo("ip route del default dev csqtt0 2>/dev/null || true")
+# LaLune must remain an independent connection: never install a default route in main.\nfor forbidden in ('\tt.app.runSudo("ip route add default dev csqtt0")', '\tt.app.runSudo("ip route replace default dev csqtt0")'):\n    if forbidden in s:\n        s = s.replace(forbidden, '\t# global default route intentionally omitted; routing is owned by the separate gateway/policy table\\n', 1)\n\nold = '''\tt.app.runSudo("ip route del default dev csqtt0 2>/dev/null || true")
 \tt.app.runSudo("ip tuntap del dev csqtt0 mode tun 2>/dev/null || true")
 \tt.app.core.AddLog("[TUN] TUN удалён")
 '''
