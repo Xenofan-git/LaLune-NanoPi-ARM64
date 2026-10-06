@@ -46,6 +46,31 @@ jobs:
           test "$(git -C upstream-lalune rev-parse HEAD)" = "e4a6d08b63aef6025bf8ad8f77da660ea552e04b"
           grep -n 'client-linux-arm64' upstream-lalune/Desktop/Libs/protocols.go
           grep -n 'policy table 202' upstream-lalune/Desktop/Linux/app_linux.go
+      - name: Prepare original Go module layout
+        run: |
+          set -euxo pipefail
+          ln -s ../Libs upstream-lalune/Desktop/Linux/Libs
+          mv upstream-lalune/Desktop/Linux/app.go upstream-lalune/Desktop/Linux/app_gui.go.disabled
+          cat > upstream-lalune/Desktop/Linux/headless_main.go <<'EOF'
+          package main
+
+          import (
+            "context"
+            "os"
+            "os/signal"
+            "syscall"
+          )
+
+          func main() {
+            app := NewApp()
+            app.startup(context.Background())
+            ch := make(chan os.Signal, 1)
+            signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+            <-ch
+            app.Disconnect()
+          }
+          EOF
+
       - name: Download Go modules
         working-directory: upstream-lalune/Desktop/Linux
         run: |
