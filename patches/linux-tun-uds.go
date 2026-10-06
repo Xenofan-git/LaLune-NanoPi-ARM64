@@ -83,6 +83,9 @@ func tunUDSPath() string {
 	return filepath.Join(os.TempDir(), fmt.Sprintf("lalune-tun-%d.sock", os.Getpid()))
 }
 
+// Start is intentionally a no-op on Linux: the TUN FD is passed to the Rust core over UDS.
+func (t *LinuxTun) Start(_ net.Conn, _ *bool) {}
+
 func (t *LinuxTun) Setup() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
