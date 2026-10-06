@@ -1,4 +1,5 @@
 name: Build pinned original LaLune Linux ARM64
+# pinned-reference: Endlad2/LaLune @ e4a6d08
 
 on:
   push:
