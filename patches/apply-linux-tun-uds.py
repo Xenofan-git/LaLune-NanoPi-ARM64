@@ -98,6 +98,6 @@ app.write_text(s)
 
 # Stage the helper into the upstream Linux package.
 helper = root / "Desktop/Linux/tun_uds.go"
-helper.write_text(Path("../patches/linux-tun-uds.go").read_text())
+helper.write_text(Path("patches/linux-tun-uds.go").read_text())
 
 print("Linux LaLune TUN UDS patch applied")
