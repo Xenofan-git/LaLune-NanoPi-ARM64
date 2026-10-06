@@ -47,6 +47,8 @@ jobs:
           test "$(git -C upstream-lalune rev-parse HEAD)" = "e4a6d08b63aef6025bf8ad8f77da660ea552e04b"
           grep -n 'client-linux-arm64' upstream-lalune/Desktop/Libs/protocols.go
           grep -n 'policy table 202' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -n 'Core уже запущен' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -n 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go
       - name: Prepare original Go module layout
         run: |
           set -euxo pipefail
