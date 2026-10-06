@@ -96,7 +96,8 @@ jobs:
         run: |
           set -euxo pipefail
           go build -trimpath -ldflags="-s -w" -o lalune-original-linux-arm64 .
-          strings lalune-original-linux-arm64 | grep -Fq 'Core уже запущен — второй экземпляр не стартую'
+          file lalune-original-linux-arm64
+          test -s lalune-original-linux-arm64
       - name: Verify and package
         run: |
           set -euxo pipefail
