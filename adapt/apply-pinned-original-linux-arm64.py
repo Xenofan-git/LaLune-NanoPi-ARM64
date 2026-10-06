@@ -17,6 +17,112 @@ replace_once(
 )
 
 s = LINUX.read_text()
+
+# NanoPi dataplane adaptation: the pinned original leaves LinuxTun.Start empty.
+# Keep the original UDP core protocol, but bridge Linux TUN packets to that UDP
+# socket using /dev/net/tun. This is intentionally the only dataplane deviation.
+s=s.replace(
+'''type LinuxTun struct {
+\tapp          *App
+\tbypassRoutes []string
+\tmu           sync.Mutex
+}''',
+'''type LinuxTun struct {
+\tapp          *App
+\tbypassRoutes []string
+\tmu           sync.Mutex
+\ttunFile      *os.File
+}''', 1)
+
+s=s.replace(
+'''import "lalune-desktop/Libs"''',
+'''import "lalune-desktop/Libs"
+
+import "golang.org/x/sys/unix"''', 1)
+
+old='''func (t *LinuxTun) Setup() error              { return nil }
+func (t *LinuxTun) Start(_ net.Conn, _ *bool) {}
+func (t *LinuxTun) Stop()                     {}'''
+new='''func (t *LinuxTun) Setup() error { return nil }
+
+func (t *LinuxTun) Start(udpConn net.Conn, running *bool) {
+\tt.mu.Lock()
+\tif t.tunFile != nil {
+\t\tt.mu.Unlock()
+\t\treturn
+\t}
+
+\tf, err := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
+\tif err != nil {
+\t\tt.mu.Unlock()
+\t\tt.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось открыть /dev/net/tun: %v", err))
+\t\treturn
+\t}
+
+\tifr, err := unix.NewIfreq("csqtt0")
+\tif err != nil {
+\t\tf.Close()
+\t\tt.mu.Unlock()
+\t\tt.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось создать ifreq: %v", err))
+\t\treturn
+\t}
+\tifr.SetUint16(unix.IFF_TUN | unix.IFF_NO_PI)
+\tif err := unix.IoctlIfreq(int(f.Fd()), unix.TUNSETIFF, ifr); err != nil {
+\t\tf.Close()
+\t\tt.mu.Unlock()
+\t\tt.app.core.AddLog(fmt.Sprintf("[TUN] TUNSETIFF csqtt0: %v", err))
+\t\treturn
+\t}
+
+\tt.tunFile = f
+\tt.mu.Unlock()
+\tt.app.core.AddLog("[TUN] Linux TUN↔UDP bridge запущен")
+
+\tgo func() {
+\t\tbuf := make([]byte, 65535)
+\t\tfor *running {
+\t\t\tn, err := f.Read(buf)
+\t\t\tif err != nil {
+\t\t\t\treturn
+\t\t\t}
+\t\t\tif n > 0 {
+\t\t\t\tif _, err := udpConn.Write(buf[:n]); err != nil {
+\t\t\t\t\treturn
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}()
+
+\tgo func() {
+\t\tbuf := make([]byte, 65535)
+\t\tfor *running {
+\t\t\tn, err := udpConn.Read(buf)
+\t\t\tif err != nil {
+\t\t\t\treturn
+\t\t\t}
+\t\t\tif n > 0 {
+\t\t\t\tif _, err := f.Write(buf[:n]); err != nil {
+\t\t\t\t\treturn
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}()
+}
+
+func (t *LinuxTun) Stop() {
+\tt.mu.Lock()
+\tf := t.tunFile
+\tt.tunFile = nil
+\tt.mu.Unlock()
+\tif f != nil {
+\t\t_ = f.Close()
+\t}
+}'''
+if old not in s:
+    raise SystemExit("LinuxTun Start/Stop marker not found")
+s=s.replace(old,new,1)
+
+s = LINUX.read_text()
 start = s.index("func (t *LinuxTun) SetupRoutes")
 end = s.index("\n}\n\nfunc (t *LinuxTun) CleanupRoutes", start) + 2
 setup = '''func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) {
