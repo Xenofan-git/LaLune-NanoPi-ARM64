@@ -1,5 +1,3 @@
-Ran on nanopi-r3s-lts.tail93b564.ts.net (user root), exit code 0:
-
 from pathlib import Path
 
 UPSTREAM = Path("upstream-lalune")
