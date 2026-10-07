@@ -96,6 +96,20 @@ jobs:
           go build -trimpath -ldflags="-s -w" -o lalune-original-linux-arm64 .
           file lalune-original-linux-arm64
           test -s lalune-original-linux-arm64
+      - name: Fetch official CSQTT 2.1.9 server assets
+        run: |
+          set -euxo pipefail
+          mkdir -p server-assets
+          curl -fL --retry 3 https://github.com/amurcanov/csqtt/releases/download/v2.1.9/CSQTT-arm64-v8a.apk -o /tmp/csqтt-v2.1.9-arm64.apk
+          unzip -p /tmp/csqтt-v2.1.9-arm64.apk assets/csqtt-linux-arm64 > server-assets/csqtt-linux-arm64
+          unzip -p /tmp/csqтt-v2.1.9-arm64.apk assets/csqtt-linux-amd64 > server-assets/csqtt-linux-amd64
+          unzip -p /tmp/csqтt-v2.1.9-arm64.apk assets/csqtt.server-provenance.json > server-assets/csqtt.server-provenance.json
+          chmod 0755 server-assets/csqtt-linux-arm64 server-assets/csqtt-linux-amd64
+          sha256sum server-assets/* | tee server-assets/SHA256SUMS
+          grep -Fq '"version":  "2.1.9"' server-assets/csqtt.server-provenance.json
+          grep -Fq '"assetName":  "csqtt-linux-arm64"' server-assets/csqtt.server-provenance.json
+          grep -Fq '"assetName":  "csqtt-linux-amd64"' server-assets/csqtt.server-provenance.json
+
       - name: Verify and package
         run: |
           set -euxo pipefail
@@ -103,6 +117,7 @@ jobs:
           rm -rf dist && mkdir -p dist
           cp upstream-lalune/Desktop/Linux/lalune-original-linux-arm64 dist/
           cp upstream-lalune/Core/DeployManager/target/aarch64-unknown-linux-gnu/release/deploy-manager dist/
+          cp -a server-assets dist/server-assets
           cp adaptation-source.sha256 dist/
           cp protocols-source.sha256 dist/
           printf '%s\n' 'e4a6d08b63aef6025bf8ad8f77da660ea552e04b' > dist/UPSTREAM_COMMIT
