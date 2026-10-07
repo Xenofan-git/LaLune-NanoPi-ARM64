@@ -164,6 +164,8 @@ jobs:
           grep -Fq 'mux.HandleFunc("/configs"' upstream-lalune/Desktop/Linux/headless_main.go
       - name: Build ARM64 DeployManager
         working-directory: upstream-lalune/Core/DeployManager
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: |
           set -euxo pipefail
           cargo build --release --target aarch64-unknown-linux-gnu
