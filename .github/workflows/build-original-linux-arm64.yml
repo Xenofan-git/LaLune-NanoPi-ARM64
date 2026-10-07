@@ -244,4 +244,3 @@ jobs:
           name: lalune-original-linux-arm64
           path: lalune-original-linux-arm64.tar.gz
           if-no-files-found: error
-# native-bridge validation trigger
