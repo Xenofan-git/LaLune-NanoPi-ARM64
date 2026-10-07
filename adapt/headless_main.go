@@ -1,8 +1,11 @@
+Ran on nanopi-r3s-lts.tail93b564.ts.net (user root), exit code 0:
+
 //go:build linux
 
 package main
 
 import (
+    "sync"
     "context"
     "embed"
     "io/fs"
@@ -55,6 +58,10 @@ func method(w http.ResponseWriter, r *http.Request, want string) bool {
     }
     return true
 }
+
+var vkAutoMu sync.Mutex
+var vkAutoResult = "{\"pending\":false}"
+var vkAutoRunning bool
 
 func apiHandler(app *App) http.Handler {
     mux := http.NewServeMux()
@@ -205,6 +212,61 @@ func apiHandler(app *App) http.Handler {
     mux.HandleFunc("/deploy/status", func(w http.ResponseWriter, r *http.Request) {
         if !method(w, r, http.MethodGet) { return }
         writeJSON(w, map[string]bool{"deploying": libs.DeployBusy()})
+    })
+
+    mux.HandleFunc("/updates/core", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        writeJSON(w, map[string]bool{"ok": app.UpdateCore()})
+    })
+    mux.HandleFunc("/updates/core/wait", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        writeJSON(w, map[string]bool{"ok": app.UpdateCoreAndWait()})
+    })
+    mux.HandleFunc("/updates/core/check", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeRaw(w, app.CheckUpdate())
+    })
+    mux.HandleFunc("/updates/core/status", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeJSON(w, map[string]bool{"downloading": app.IsCoreDownloading()})
+    })
+    mux.HandleFunc("/updates/lalune", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeJSON(w, app.CheckLaLuneUpdate())
+    })
+    mux.HandleFunc("/vk/state", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeJSON(w, app.GetVKTokenState())
+    })
+    mux.HandleFunc("/vk/login", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        writeJSON(w, map[string]bool{"ok": app.LoginVK()})
+    })
+    mux.HandleFunc("/vk/delete", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        writeJSON(w, map[string]bool{"ok": app.DeleteVKToken()})
+    })
+    mux.HandleFunc("/vk/validate", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeJSON(w, app.ValidateVKToken())
+    })
+    mux.HandleFunc("/vk/auto", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        vkAutoMu.Lock()
+        if vkAutoRunning { vkAutoMu.Unlock(); writeRaw(w, "{\"pending\":true}"); return }
+        vkAutoRunning = true; vkAutoResult = "{\"pending\":true}"; vkAutoMu.Unlock()
+        go func() { result := app.RunVkAutoApiCalls(); vkAutoMu.Lock(); vkAutoResult = result; vkAutoRunning = false; vkAutoMu.Unlock() }()
+        writeRaw(w, "{\"pending\":true}")
+    })
+    mux.HandleFunc("/vk/auto/poll", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        vkAutoMu.Lock(); result := vkAutoResult; vkAutoMu.Unlock(); writeRaw(w, result)
+    })
+    mux.HandleFunc("/vk/finish", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        var ids []string
+        if err := json.NewDecoder(r.Body).Decode(&ids); err != nil { http.Error(w, "bad json", http.StatusBadRequest); return }
+        writeJSON(w, map[string]bool{"ok": app.FinishVkCalls(ids)})
     })
 
     mux.HandleFunc("/shutdown", func(w http.ResponseWriter, r *http.Request) {
