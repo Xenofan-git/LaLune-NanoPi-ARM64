@@ -107,7 +107,7 @@ jobs:
             'echo "[install] downloading $URL"',
             """if [ -n "{local_dir}" ] && [ "{proto}" = "csqtt" ]; then
             SOURCE="{local_dir}/csqtt-linux-${ASSET_ARCH}"
-            [ -s "$SOURCE" ] || { echo "[install] bundled CSQTT asset missing: $SOURCE" >&2; exit 1; }
+            if [ ! -s "$SOURCE" ]; then echo "[install] bundled CSQTT asset missing: $SOURCE" >&2; exit 1; fi
             install -m 0755 "$SOURCE" "$DEST"
             rm -rf "{local_dir}"
           else
