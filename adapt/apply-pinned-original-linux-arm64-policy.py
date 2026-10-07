@@ -1,3 +1,5 @@
+Ran on nanopi-r3s-lts.tail93b564.ts.net (user root), exit code 0:
+
 from pathlib import Path
 
 UPSTREAM = Path("upstream-lalune")
@@ -202,3 +204,26 @@ cleanup = '''func (t *LinuxTun) CleanupRoutes() {
 s = s[:start] + cleanup + s[end:]
 LINUX.write_text(s)
 print("Pinned original LaLune NanoPi adaptation applied")
+
+# NanoPi headless panel: use installed DeployManager and bundled CSQTT assets.
+s = DEPLOY_GO.read_text()
+old = 'if wd, err := os.Getwd(); err == nil {'
+new = 'if st, err := os.Stat("/usr/local/lib/lalune/deploy-manager"); err == nil && !st.IsDir() {\n\t\treturn "/usr/local/lib/lalune/deploy-manager"\n\t}\n\tif wd, err := os.Getwd(); err == nil {'
+if old not in s: raise SystemExit("deploy manager path marker missing")
+s = s.replace(old, new, 1)
+old = '\tif req.ManualPorts {'
+new = '\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") {\n\t\tif st, err := os.Stat("/usr/local/lib/lalune/server-assets"); err == nil && st.IsDir() {\n\t\t\targs = append(args, "--local-binary-dir", "/usr/local/lib/lalune/server-assets")\n\t\t}\n\t}\n\tif req.ManualPorts {'
+if old not in s: raise SystemExit("manual ports marker missing")
+DEPLOY_GO.write_text(s.replace(old, new, 1))
+
+# Restore the original Deploy tab and connect the Flutter Web UI to NanoPi HTTP API.
+MAIN = UPSTREAM / "Frontend/Core/lib/main.dart"
+NAV = UPSTREAM / "Frontend/Core/lib/widgets/navbar.dart"
+INDEX = UPSTREAM / "Frontend/Core/web/index.html"
+API_JS = UPSTREAM / "Frontend/Core/web/api.js"
+NANOPI_JS = Path(__file__).with_name("nanopi.js")
+replace_once(MAIN, "import 'pages/logs_page.dart';", "import 'pages/logs_page.dart';\nimport 'pages/deploy_page.dart';")
+replace_once(MAIN, """      case 3:\n        return const LogsPage();\n      // case 4 (Деплой) убран из UI — вкладка отключена, страница сохранена.\n      default:""", """      case 3:\n        return const LogsPage();\n      case 4:\n        return const DeployPage();\n      default:""")
+replace_once(NAV, """    _NavItem(icon: 'assets/logs.png', label: 'Логи'),\n    // Вкладка \"Деплой\" временно убрана из UI (логика в deploy_page.dart сохранена).""", """    _NavItem(icon: 'assets/logs.png', label: 'Логи'),\n    _NavItem(icon: 'assets/info.png', label: 'Деплой'),""")
+replace_once(INDEX, "    {{flutter_bootstrap_js}}", "    <script src=\"api.js\"></script>\n    {{flutter_bootstrap_js}}")
+API_JS.write_text(NANOPI_JS.read_text())

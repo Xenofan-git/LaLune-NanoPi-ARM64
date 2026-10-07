@@ -1,3 +1,5 @@
+Ran on nanopi-r3s-lts.tail93b564.ts.net (user root), exit code 0:
+
 name: Build pinned original LaLune Linux ARM64
 # pinned-reference: Endlad2/LaLune @ e4a6d08
 
@@ -25,6 +27,13 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.25.0'
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.2
+          channel: stable
+          architecture: x64
+          cache: true
       - name: Install ARM64 toolchain
         run: |
           set -euxo pipefail
@@ -45,6 +54,13 @@ jobs:
         run: |
           set -euxo pipefail
           python3 adapt/apply-pinned-original-linux-arm64-policy.py
+      - name: Build original Flutter Web panel for NanoPi
+        working-directory: upstream-lalune/Frontend/Core
+        run: |
+          set -euxo pipefail
+          cp ../../../adapt/nanopi.js web/api.js
+          flutter pub get
+          flutter build web --release
       - name: Verify provenance and exact adaptation
         run: |
           set -euxo pipefail
@@ -162,6 +178,11 @@ jobs:
           cp upstream-lalune/Core/SmartTunnel.lua upstream-lalune/Desktop/Libs/SmartTunnel.lua
           mv upstream-lalune/Desktop/Linux/app.go upstream-lalune/Desktop/Linux/app_gui.go.disabled
           cp adapt/headless_main.go upstream-lalune/Desktop/Linux/headless_main.go
+          mkdir -p upstream-lalune/Desktop/Linux/frontend
+          cp -a upstream-lalune/Frontend/Core/build/web/. upstream-lalune/Desktop/Linux/frontend/
+          test -s upstream-lalune/Desktop/Linux/frontend/index.html
+          test -s upstream-lalune/Desktop/Linux/frontend/api.js
+          grep -Fq 'go:embed frontend' upstream-lalune/Desktop/Linux/headless_main.go
           grep -Fq 'const headlessListen = "127.0.0.1:1062"' upstream-lalune/Desktop/Linux/headless_main.go
           grep -Fq 'mux.HandleFunc("/vpn/connect"' upstream-lalune/Desktop/Linux/headless_main.go
           grep -Fq 'mux.HandleFunc("/configs"' upstream-lalune/Desktop/Linux/headless_main.go

@@ -1,9 +1,13 @@
+Ran on nanopi-r3s-lts.tail93b564.ts.net (user root), exit code 0:
+
 //go:build linux
 
 package main
 
 import (
     "context"
+    "embed"
+    "io/fs"
     "encoding/json"
     "fmt"
     "net/http"
@@ -13,9 +17,15 @@ import (
     "strings"
     "syscall"
     "time"
+
+    "lalune-desktop/Libs"
 )
 
 const headlessListen = "127.0.0.1:1062"
+const panelListen = "192.168.4.26:1061"
+
+//go:embed frontend
+var panelAssets embed.FS
 
 type connectBody struct {
     ID int64 `json:"id"`
@@ -31,6 +41,8 @@ func writeRaw(w http.ResponseWriter, value string) {
     w.WriteHeader(http.StatusOK)
     _, _ = w.Write([]byte(value))
 }
+
+func mustJSON(value string) string { b, _ := json.Marshal(value); return string(b) }
 
 func writeJSON(w http.ResponseWriter, value any) {
     w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -177,6 +189,26 @@ func apiHandler(app *App) http.Handler {
         writeRaw(w, app.GetLogsJson())
     })
 
+    mux.HandleFunc("/logs/clear", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        writeJSON(w, map[string]bool{"ok": app.ClearLogs()})
+    })
+
+    mux.HandleFunc("/deploy", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        var raw json.RawMessage
+        if err := json.NewDecoder(r.Body).Decode(&raw); err != nil { http.Error(w, "bad json", http.StatusBadRequest); return }
+        writeJSON(w, map[string]bool{"ok": libs.DeployProtocol(string(raw))})
+    })
+    mux.HandleFunc("/deploy/log", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeRaw(w, mustJSON(libs.DeployLog()))
+    })
+    mux.HandleFunc("/deploy/status", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeJSON(w, map[string]bool{"deploying": libs.DeployBusy()})
+    })
+
     mux.HandleFunc("/shutdown", func(w http.ResponseWriter, r *http.Request) {
         if !method(w, r, http.MethodPost) { return }
         writeJSON(w, map[string]bool{"ok": true})
@@ -202,17 +234,28 @@ func main() {
     app := NewApp()
     app.startup(context.Background())
 
-    srv := &http.Server{
-        Addr:              headlessListen,
-        Handler:           apiHandler(app),
-        ReadHeaderTimeout: 5 * time.Second,
-    }
+    api := apiHandler(app)
+    srv := &http.Server{Addr: headlessListen, Handler: api, ReadHeaderTimeout: 5 * time.Second}
+    panelFS, _ := fs.Sub(panelAssets, "frontend")
+    panelHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
+            u := *r.URL
+            u.Path = strings.TrimPrefix(r.URL.Path, "/api")
+            if u.Path == "" { u.Path = "/" }
+            rr := r.Clone(r.Context()); rr.URL = &u
+            api.ServeHTTP(w, rr)
+            return
+        }
+        p := strings.TrimPrefix(r.URL.Path, "/")
+        if p == "" { p = "index.html" }
+        if _, err := fs.Stat(panelFS, p); err != nil { p = "index.html" }
+        http.ServeFileFS(w, r, panelFS, p)
+    })
+    panelSrv := &http.Server{Addr: panelListen, Handler: panelHandler, ReadHeaderTimeout: 5 * time.Second}
 
-    errCh := make(chan error, 1)
-    go func() {
-        app.core.AddLog(fmt.Sprintf("[INFO] Headless API: http://%s", headlessListen))
-        errCh <- srv.ListenAndServe()
-    }()
+    errCh := make(chan error, 2)
+    go func() { app.core.AddLog(fmt.Sprintf("[INFO] Headless API: http://%s", headlessListen)); errCh <- srv.ListenAndServe() }()
+    go func() { app.core.AddLog(fmt.Sprintf("[INFO] LaLune panel: http://%s", panelListen)); errCh <- panelSrv.ListenAndServe() }()
 
     sigCh := make(chan os.Signal, 1)
     signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -226,4 +269,5 @@ func main() {
 
     _ = app.Disconnect()
     _ = srv.Shutdown(context.Background())
+    _ = panelSrv.Shutdown(context.Background())
 }
