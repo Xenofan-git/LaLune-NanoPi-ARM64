@@ -1,3 +1,5 @@
+Ran on nanopi-r3s-lts.tail93b564.ts.net (user root), exit code 0:
+
 (function () {
   'use strict';
   const base = '/api';
@@ -32,18 +34,18 @@
     GetStatusJson: () => cache.status,
     Connect: id => post('/vpn/connect', {id}),
     Disconnect: () => post('/vpn/disconnect'),
-    CheckCoreUpdate: () => cache.coreUpdate,
-    UpdateCore: () => false,
-    UpdateCoreAndWait: () => false,
-    CheckLaLuneUpdate: () => cache.laluneUpdate,
+    CheckCoreUpdate: () => { fetch(base + "/updates/core/check").then(r=>r.text()).then(x=>cache.coreUpdate=x).catch(()=>{}); return cache.coreUpdate; },
+    UpdateCore: () => post("/updates/core"),
+    UpdateCoreAndWait: () => post("/updates/core/wait"),
+    CheckLaLuneUpdate: () => { fetch(base + "/updates/lalune").then(r=>r.text()).then(x=>cache.laluneUpdate=x).catch(()=>{}); return cache.laluneUpdate; },
     OpenLaLuneReleases: () => { window.open('https://github.com/Endlad2/LaLune/releases/latest','_blank'); return true; },
-    GetVKTokenState: () => cache.vk,
-    VkLogin: () => false,
-    DeleteVKToken: () => false,
+    GetVKTokenState: () => { fetch(base + "/vk/state").then(r=>r.text()).then(x=>cache.vk=x).catch(()=>{}); return cache.vk; },
+    VkLogin: () => post("/vk/login"),
+    DeleteVKToken: () => post("/vk/delete"),
     ValidateVKToken: () => cache.vk,
-    RunVkAutoApiCalls: () => '{"error":"not supported in NanoPi web panel"}',
+    RunVkAutoApiCalls: () => { post("/vk/auto"); return "{\"pending\":true}"; },
     PollAutoApiResult: () => '{"pending":false,"error":"not supported"}',
-    FinishVkCalls: () => false,
+    FinishVkCalls: callIdsJson => { try { post("/vk/finish", JSON.parse(callIdsJson)); return true; } catch (_) { return false; } },
     GetDeviceId: () => { try { return JSON.parse(cache.settings).deviceId || ''; } catch (_) { return ''; } },
     RegenerateDeviceId: () => '',
     SetSelectedConfigJson: j => post('/configs/selected', JSON.parse(j)),
