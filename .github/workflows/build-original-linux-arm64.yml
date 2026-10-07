@@ -58,6 +58,96 @@ jobs:
           test "$(grep -Fc 'Core уже запущен — второй экземпляр не стартую' upstream-lalune/Desktop/Linux/app_linux.go)" = "1"
           sha256sum upstream-lalune/Desktop/Linux/app_linux.go | tee adaptation-source.sha256
           sha256sum upstream-lalune/Desktop/Libs/protocols.go | tee protocols-source.sha256
+      - name: Patch bundled CSQTT deploy
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          u=Path("upstream-lalune")
+          def r(p,a,b):
+              s=p.read_text()
+              if a not in s: raise SystemExit(f"missing marker: {p}")
+              p.write_text(s.replace(a,b,1))
+          r(u/"Core/DeployManager/src/main.rs",
+            "    pub listen_port: Option<u16>,",
+            "    pub listen_port: Option<u16>,\n\n    #[arg(long)]\n    pub local_binary_dir: Option<String>,")
+          r(u/"Core/DeployManager/src/protocol.rs",
+            '            Protocol::Csqtt => "csqtt-core",',
+            '            Protocol::Csqtt => "csqtt",')
+          r(u/"Core/DeployManager/src/deploy.rs",
+            "    let script = install_script(proto, ports);",
+            """    let remote_tmp = format!("/tmp/lalune-deploy-{}", std::process::id());
+          if let Some(dir)=&args.local_binary_dir {
+              if proto==Protocol::Csqtt {
+                  run_scp(args,&remote,dir,&remote_tmp)?;
+              }
+          }
+          let script=install_script(proto,ports,args.local_binary_dir.as_deref().map(|_|remote_tmp.as_str()));""")
+          r(u/"Core/DeployManager/src/deploy.rs",
+            "fn run_ssh(args: &DeployArgs, remote: &str, script: &str) -> Result<std::process::Output> {",
+            """fn run_scp(args:&DeployArgs,remote:&str,local:&str,tmp:&str)->Result<()> {
+              let mut a=vec!["-r".into(),"-o".into(),"StrictHostKeyChecking=accept-new".into(),"-P".into(),args.ssh_port.to_string()];
+              if let Some(k)=&args.key { a.push("-i".into()); a.push(k.clone()); }
+              let mut v=vec!["-e".into(),"scp".into()]; v.extend(a.clone());
+              v.push(local.into()); v.push(format!("{remote}:{tmp}"));
+              let mut c=if args.password.is_some() && have_sshpass() { let mut c=Command::new("sshpass"); c.args(&v); c } else { let mut c=Command::new("scp"); c.args(&a); c.arg(local); c.arg(format!("{remote}:{tmp}")); c };
+              if let Some(p)=&args.password { c.env("SSHPASS",p); }
+              let o=c.output().context("scp failed")?;
+              if !o.status.success(){ anyhow::bail!("scp failed: {}",String::from_utf8_lossy(&o.stderr)); }
+              Ok(())
+          }
+          fn run_ssh(args: &DeployArgs, remote: &str, script: &str) -> Result<std::process::Output> {""")
+          r(u/"Core/DeployManager/src/deploy.rs",
+            "fn install_script(proto: Protocol, ports: &Ports) -> String {",
+            "fn install_script(proto: Protocol, ports: &Ports, local_dir: Option<&str>) -> String {")
+          r(u/"Core/DeployManager/src/deploy.rs",
+            "    let flags = ports.flags();",
+            '    let flags = ports.flags();\n    let local_dir = local_dir.unwrap_or("");')
+          r(u/"Core/DeployManager/src/deploy.rs",
+            'echo "[install] downloading $URL"',
+            """if [ -n "{local_dir}" ] && [ "{proto}" = "csqtt" ]; then
+            SOURCE="{local_dir}/csqtt-linux-${ASSET_ARCH}"
+            [ -s "$SOURCE" ] || { echo "[install] bundled CSQTT asset missing: $SOURCE" >&2; exit 1; }
+            install -m 0755 "$SOURCE" "$DEST"
+            rm -rf "{local_dir}"
+          else
+            echo "[install] downloading $URL" """)
+          r(u/"Core/DeployManager/src/deploy.rs",
+            "if [ ! -s \"$DEST\" ]; then",
+            """if [ ! -s "$DEST" ]; then
+            echo "[install] error: installed file is empty" >&2
+            exit 1
+          fi
+          if [ "{proto}" != "csqtt" ] && [ -n "{local_dir}" ]; then rm -rf "{local_dir}"; fi
+          if [ "{proto}" = "csqtt" ]; then
+            : # bundled branch already installed the binary
+          fi
+          # continue with the common executable checks""")
+          r(u/"Desktop/Libs/deploy.go",
+            "\tif req.ManualPorts {",
+            """\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") {
+          \t\tif dir := resolveBundledServerDir(); dir != "" {
+          \t\t\targs = append(args, "--local-binary-dir", dir)
+          \t\t}
+          \t}
+          \tif req.ManualPorts {""")
+          r(u/"Desktop/Libs/deploy.go",
+            "func deployManagerName() string {",
+            """func resolveBundledServerDir() string {
+          \tif exe, err := os.Executable(); err == nil {
+          \t\tc := filepath.Join(filepath.Dir(exe), "server-assets")
+          \t\tif st, err := os.Stat(c); err == nil && st.IsDir() { return c }
+          \t}
+          \tif wd, err := os.Getwd(); err == nil {
+          \t\tc := filepath.Join(wd, "server-assets")
+          \t\tif st, err := os.Stat(c); err == nil && st.IsDir() { return c }
+          \t}
+          \treturn ""
+          }
+
+          func deployManagerName() string {""")
+          PY
+
       - name: Prepare original Go module layout
         run: |
           set -euxo pipefail
