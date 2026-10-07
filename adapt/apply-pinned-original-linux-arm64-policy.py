@@ -16,6 +16,17 @@ replace_once(
     '''\t\tdefault:\n\t\t\tif goarch == "arm64" {\n\t\t\t\treturn "client-linux-arm64"\n\t\t\t}\n\t\t\treturn "client-linux-x86_64"'''
 )
 
+# The pinned Go wrapper invokes DeployManager with --port, but the original
+# DeployManager CLI calls this option --ssh-port. Keep the original UI/API
+# contract while fixing the actual CLI invocation.
+DEPLOY_GO = UPSTREAM / "Desktop/Libs/deploy.go"
+s = DEPLOY_GO.read_text()
+old = '"--port", itoa(req.SSHPort)'
+new = '"--ssh-port", itoa(req.SSHPort)'
+if old not in s:
+    raise SystemExit(f"marker not found in {DEPLOY_GO}: {old!r}")
+DEPLOY_GO.write_text(s.replace(old, new, 1))
+
 s = LINUX.read_text()
 
 # NanoPi dataplane adaptation: the pinned original leaves LinuxTun.Start empty.
