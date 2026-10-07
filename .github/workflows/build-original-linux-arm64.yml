@@ -100,7 +100,7 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p server-assets
-          curl -fL --retry 3 https://github.com/amurcanov/csqtt/releases/download/v2.1.9/CSQTT-arm64-v8a.apk -o /tmp/csqтt-v2.1.9-arm64.apk
+          curl -fL --retry 3 https://github.com/amurcanov/csqtt/releases/download/v2.1.9/CSQTT-arm64-v8a.apk -o /tmp/csqtt-v2.1.9-arm64.apk
           unzip -p /tmp/csqтt-v2.1.9-arm64.apk assets/csqtt-linux-arm64 > server-assets/csqtt-linux-arm64
           unzip -p /tmp/csqтt-v2.1.9-arm64.apk assets/csqtt-linux-amd64 > server-assets/csqtt-linux-amd64
           unzip -p /tmp/csqтt-v2.1.9-arm64.apk assets/csqtt.server-provenance.json > server-assets/csqtt.server-provenance.json
