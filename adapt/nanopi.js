@@ -17,6 +17,10 @@
     try { cache.selected = await req('/configs/selected'); } catch (_) {}
     try { cache.deployLog = await json('/deploy/log'); } catch (_) {}
     try { const x = await json('/deploy/status'); cache.deploying = !!x.deploying; } catch (_) {}
+    try { const x = await json('/updates/core/check'); cache.coreUpdate = JSON.stringify(x); } catch (_) {}
+    try { const x = await json('/updates/lalune'); cache.laluneUpdate = JSON.stringify({update:!!x.hasUpdate, version:x.remoteTag||'', error:x.error||''}); } catch (_) {}
+    try { const x = await json('/updates/core/status'); cache.coreDownloading = !!x.downloading; } catch (_) {}
+    try { const x = await json('/vk/state'); cache.vk = JSON.stringify(x); } catch (_) {}
   }
   setInterval(refresh, 1200);
   setTimeout(refresh, 50);
