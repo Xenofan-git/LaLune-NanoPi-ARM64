@@ -20,7 +20,7 @@ jobs:
       - name: Validate adaptation
         run: |
           set -euxo pipefail
-          test -f adapt/apply-pinned-original-linux-arm64.py
+          test -f adapt/apply-pinned-original-linux-arm64-policy.py
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
