@@ -73,7 +73,10 @@ jobs:
             "    pub listen_port: Option<u16>,\n\n    #[arg(long)]\n    pub local_binary_dir: Option<String>,")
           r(u/"Core/DeployManager/src/protocol.rs",
             '            Protocol::Csqtt => "csqtt-core",',
-            '            Protocol::Csqtt => "csqtt",')
+            '            Protocol::Csqtt => "csqtt-lalune",')
+          r(u/"Core/DeployManager/src/protocol.rs",
+            "            Protocol::Csqtt => (443, 0, 1080),",
+            "            Protocol::Csqtt => (47000, 47002, 1080),")
           r(u/"Core/DeployManager/src/deploy.rs",
             "    let script = install_script(proto, ports);",
             """    let remote_tmp = format!("/tmp/lalune-deploy-{}", std::process::id());
@@ -102,7 +105,12 @@ jobs:
             "fn install_script(proto: Protocol, ports: &Ports, local_dir: Option<&str>) -> String {")
           r(u/"Core/DeployManager/src/deploy.rs",
             "    let flags = ports.flags();",
-            '    let flags = ports.flags();\n    let local_dir = local_dir.unwrap_or("");')
+            '    let flags = if proto == Protocol::Csqtt {
+        format!(" --listen {} --web-port {} --config-dir /etc/csqtt-lalune", ports.core.unwrap_or(47000), ports.warp.unwrap_or(47002))
+    } else {
+        ports.flags()
+    };
+    let local_dir = local_dir.unwrap_or("");')
           r(u/"Core/DeployManager/src/deploy.rs",
             'echo "[install] downloading $URL"',
             """if [ -n "{local_dir}" ] && [ "{proto}" = "csqtt" ]; then
