@@ -30,6 +30,10 @@ jobs:
           set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Set up Rust ARM64 target
+        run: |
+          set -euxo pipefail
+          rustup target add aarch64-unknown-linux-gnu
       - name: Clone pinned original LaLune
         run: |
           set -euxo pipefail
@@ -46,6 +50,7 @@ jobs:
           set -euxo pipefail
           test "$(git -C upstream-lalune rev-parse HEAD)" = "e4a6d08b63aef6025bf8ad8f77da660ea552e04b"
           grep -Fq 'return "client-linux-arm64"' upstream-lalune/Desktop/Libs/protocols.go
+          grep -Fq '"--ssh-port", itoa(req.SSHPort)' upstream-lalune/Desktop/Libs/deploy.go
           grep -Fq 'ip route replace default dev csqtt0 table 202' upstream-lalune/Desktop/Linux/app_linux.go
           grep -Fq 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go
           grep -Fq 'Core уже запущен — второй экземпляр не стартую' upstream-lalune/Desktop/Linux/app_linux.go
@@ -67,6 +72,14 @@ jobs:
           grep -Fq 'const headlessListen = "127.0.0.1:1062"' upstream-lalune/Desktop/Linux/headless_main.go
           grep -Fq 'mux.HandleFunc("/vpn/connect"' upstream-lalune/Desktop/Linux/headless_main.go
           grep -Fq 'mux.HandleFunc("/configs"' upstream-lalune/Desktop/Linux/headless_main.go
+      - name: Build ARM64 DeployManager
+        working-directory: upstream-lalune/Core/DeployManager
+        run: |
+          set -euxo pipefail
+          cargo build --release --target aarch64-unknown-linux-gnu
+          file target/aarch64-unknown-linux-gnu/release/deploy-manager
+          test -s target/aarch64-unknown-linux-gnu/release/deploy-manager
+
       - name: Download Go modules
         working-directory: upstream-lalune/Desktop/Linux
         run: |
@@ -89,6 +102,7 @@ jobs:
           file upstream-lalune/Desktop/Linux/lalune-original-linux-arm64
           rm -rf dist && mkdir -p dist
           cp upstream-lalune/Desktop/Linux/lalune-original-linux-arm64 dist/
+          cp upstream-lalune/Core/DeployManager/target/aarch64-unknown-linux-gnu/release/deploy-manager dist/
           cp adaptation-source.sha256 dist/
           cp protocols-source.sha256 dist/
           printf '%s\n' 'e4a6d08b63aef6025bf8ad8f77da660ea552e04b' > dist/UPSTREAM_COMMIT
