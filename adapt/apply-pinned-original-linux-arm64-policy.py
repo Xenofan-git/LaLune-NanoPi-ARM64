@@ -234,15 +234,7 @@ LINUX.write_text(s)
 
 # Start the original Bridge TUN↔UDP packet bridge after Linux route setup.
 s = LINUX.read_text()
-# Prevent concurrent core workers sharing one Bridge/TUN state on NanoPi.
-old_runner_guard = """func (r *LinuxRunner) StartCore(cmdArgs []string, listenPort int, bridge *libs.Bridge) {
-	r.startCoreWithSudo(cmdArgs, listenPort, bridge)
-}"""
-new_runner_guard = old_runner_guard
-if old_runner_guard not in s:
-    raise SystemExit("LinuxRunner.StartCore marker not found")
-s = s.replace(old_runner_guard, new_runner_guard, 1)
-
+# Core single-process guard is applied above; keep the original runner block unchanged here.
 old_runner = """		if tun, ok := bridge.Tun.(*LinuxTun); ok {
 			tun.SetupRoutes(tunIP, tunDNS)
 		}"""
