@@ -53,6 +53,51 @@ s = s.replace(old, new, 1)
 s = s.replace('\t"time"\n)', '\t"time"\n\t"io"\n)', 1)
 LINUX.write_text(s)
 
+# NanoPi core lifecycle hardening: one live core per App, process-group cleanup.
+s = LINUX.read_text()
+old = """func (r *LinuxRunner) StartCore(cmdArgs []string, listenPort int, bridge *libs.Bridge) {
+	r.startCoreWithSudo(cmdArgs, listenPort, bridge)
+}"""
+new = """func (r *LinuxRunner) StartCore(cmdArgs []string, listenPort int, bridge *libs.Bridge) {
+	r.app.mu.Lock()
+	if r.app.clientPID > 0 {
+		pid := r.app.clientPID
+		r.app.mu.Unlock()
+		bridge.Core.AddLog(fmt.Sprintf("[CORE] Второй запуск заблокирован: уже работает PID %d", pid))
+		return
+	}
+	r.app.mu.Unlock()
+	r.startCoreWithSudo(cmdArgs, listenPort, bridge)
+}"""
+if old not in s: raise SystemExit("StartCore guard marker not found")
+s = s.replace(old, new, 1)
+
+old = 'cmd := exec.Command("sh", "-c", r.app.runSudoCommand(cmdLine))'
+new = 'cmd := exec.Command("sh", "-c", r.app.runSudoCommand(cmdLine))\n\tcmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}'
+if old not in s: raise SystemExit("cmd marker not found")
+s = s.replace(old, new, 1)
+
+old = '''\t\tcase <-time.After(90 * time.Second):
+\t\t\tbridge.Core.AddLog("[TUN] Таймаут ожидания")
+\t\t\tbridge.Core.SetConnected(false)
+\t\t\treturn'''
+new = '''\t\tcase <-time.After(90 * time.Second):
+\t\t\tbridge.Core.AddLog("[TUN] Таймаут ожидания — останавливаем core")
+\t\t\tbridge.Core.SetConnected(false)
+\t\t\tr.app.mu.Lock()
+\t\t\tpid := r.app.clientPID
+\t\t\tr.app.mu.Unlock()
+\t\t\tif pid > 0 {
+\t\t\t\t_ = syscall.Kill(-pid, syscall.SIGTERM)
+\t\t\t\ttime.Sleep(1 * time.Second)
+\t\t\t\t_ = syscall.Kill(-pid, syscall.SIGKILL)
+\t\t\t}
+\t\t\treturn'''
+if old not in s: raise SystemExit("timeout marker not found")
+s = s.replace(old, new, 1)
+
+LINUX.write_text(s)
+
 # Keep the core stdin pipe alive for asynchronous CAPTCHA_RESULT responses.
 s = LINUX.read_text()
 s = s.replace("type LinuxRunner struct {", "var linuxRunnerInputs sync.Map\n\ntype LinuxRunner struct {", 1)
