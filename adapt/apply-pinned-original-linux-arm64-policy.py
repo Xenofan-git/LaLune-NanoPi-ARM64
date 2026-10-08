@@ -60,11 +60,11 @@ s = s.replace("type LinuxRunner struct {", "var linuxRunnerInputs sync.Map\n\nty
 s = s.replace("\tlinuxRunnerInputs.Store(r, stdin)\n\tif bootstrap := bridge.AutoVkBootstrap(); bootstrap != \"\" {", "\\tlinuxRunnerInputs.Store(r, stdin)\\n\\tif bootstrap := bridge.AutoVkBootstrap(); bootstrap != \"\" {", 1)
 s = s.replace("\\tcmd.Wait()", "\tcmd.Wait()\n\tif v, ok := linuxRunnerInputs.LoadAndDelete(r); ok { _ = v.(io.WriteCloser).Close() }", 1)
 method = '''func (r *LinuxRunner) SubmitCaptchaResult(result string) bool {
-\\tif len(result) == 0 || len(result) > 16384 || strings.ContainsAny(result, "\\\\r\\\\n") { return false }
+\tif len(result) == 0 || len(result) > 16384 || strings.ContainsAny(result, "\\r\\n") { return false }
 \tv, ok := linuxRunnerInputs.Load(r)
 \tif !ok { return false }
-\\t_, err := io.WriteString(v.(io.WriteCloser), "CAPTCHA_RESULT|"+result+"\\\\n")
-\\treturn err == nil
+\t_, err := io.WriteString(v.(io.WriteCloser), "CAPTCHA_RESULT|"+result+"\\n")
+\treturn err == nil
 }
 '''
 s = s.replace("func NewApp() *App {", method + "\nfunc NewApp() *App {", 1)
