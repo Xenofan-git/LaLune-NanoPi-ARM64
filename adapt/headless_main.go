@@ -21,7 +21,7 @@ import (
 )
 
 const headlessListen = "127.0.0.1:1062"
-const panelListen = "192.168.4.26:1061"
+const panelListen = "0.0.0.0:1061"
 
 //go:embed frontend
 var panelAssets embed.FS
@@ -57,6 +57,49 @@ func method(w http.ResponseWriter, r *http.Request, want string) bool {
     return true
 }
 
+var captchaMu sync.Mutex
+var captchaPending bool
+var captchaMode string
+var captchaRedirectURI string
+var captchaSessionToken string
+var captchaHandledSession string
+var captchaUpdated time.Time
+
+func refreshCaptchaState(app *App) {
+    raw := app.GetLogsJson()
+    var logs []string
+    if json.Unmarshal([]byte(raw), &logs) != nil { return }
+    captchaMu.Lock()
+    defer captchaMu.Unlock()
+    for i := len(logs)-1; i >= 0; i-- {
+        parts := strings.SplitN(strings.TrimSpace(logs[i]), "|", 4)
+        if len(parts) != 4 || parts[0] != "CAPTCHA_SOLVE" { continue }
+        if parts[3] == "" || parts[3] == captchaHandledSession { break }
+        captchaPending = true
+        captchaMode = parts[1]
+        captchaRedirectURI = parts[2]
+        captchaSessionToken = parts[3]
+        captchaUpdated = time.Now()
+        break
+    }
+}
+
+func captchaState(app *App) map[string]any {
+    refreshCaptchaState(app)
+    captchaMu.Lock(); defer captchaMu.Unlock()
+    return map[string]any{"pending": captchaPending, "mode": captchaMode, "redirectUri": captchaRedirectURI, "updated": captchaUpdated.UnixMilli()}
+}
+
+func finishCaptcha(app *App, sessionToken, result string) bool {
+    captchaMu.Lock()
+    if !captchaPending || sessionToken == "" || sessionToken != captchaSessionToken { captchaMu.Unlock(); return false }
+    captchaMu.Unlock()
+    result = strings.TrimSpace(result)
+    if result == "" || len(result) > 16384 || strings.ContainsAny(result, "\r\n") { return false }
+    if !app.SubmitCaptchaResult(result) { return false }
+    captchaMu.Lock(); captchaHandledSession = sessionToken; captchaPending = false; captchaMode = ""; captchaRedirectURI = ""; captchaSessionToken = ""; captchaUpdated = time.Time{}; captchaMu.Unlock()
+    return true
+}
 var vkAutoMu sync.Mutex
 var vkAutoResult = "{\"pending\":false}"
 var vkAutoRunning bool
@@ -267,6 +310,22 @@ func apiHandler(app *App) http.Handler {
         writeJSON(w, map[string]bool{"ok": app.FinishVkCalls(ids)})
     })
 
+    mux.HandleFunc("/captcha/state", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeJSON(w, captchaState(app))
+    })
+    mux.HandleFunc("/captcha/result", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        var body struct { SessionToken string `json:"sessionToken"`; Result string `json:"result"` }
+        if err := json.NewDecoder(r.Body).Decode(&body); err != nil { http.Error(w, "bad json", http.StatusBadRequest); return }
+        writeJSON(w, map[string]bool{"ok": finishCaptcha(app, body.SessionToken, body.Result)})
+    })
+    mux.HandleFunc("/captcha/cancel", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        captchaMu.Lock(); token := captchaSessionToken; captchaMu.Unlock()
+        ok := token != "" && finishCaptcha(app, token, "error:cancelled")
+        writeJSON(w, map[string]bool{"ok": ok})
+    })
     mux.HandleFunc("/shutdown", func(w http.ResponseWriter, r *http.Request) {
         if !method(w, r, http.MethodPost) { return }
         writeJSON(w, map[string]bool{"ok": true})
