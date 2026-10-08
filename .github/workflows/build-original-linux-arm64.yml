@@ -67,9 +67,9 @@ jobs:
           grep -Fq '"--ssh-port", itoa(req.SSHPort)' upstream-lalune/Desktop/Libs/deploy.go
           grep -Fq 'ip route replace default dev csqtt0 table 202' upstream-lalune/Desktop/Linux/app_linux.go
           grep -Fq 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go
-          grep -Fq 'Core уже запущен — второй экземпляр не стартую' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -Fq 'func (r *LinuxRunner) StartCore' upstream-lalune/Desktop/Linux/app_linux.go
           test "$(grep -Fc 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go)" = "1"
-          test "$(grep -Fc 'Core уже запущен — второй экземпляр не стартую' upstream-lalune/Desktop/Linux/app_linux.go)" = "1"
+          test "$(grep -Fc 'func (r *LinuxRunner) StartCore' upstream-lalune/Desktop/Linux/app_linux.go)" = "1"
           sha256sum upstream-lalune/Desktop/Linux/app_linux.go | tee adaptation-source.sha256
           sha256sum upstream-lalune/Desktop/Libs/protocols.go | tee protocols-source.sha256
       - name: Patch bundled CSQTT deploy
