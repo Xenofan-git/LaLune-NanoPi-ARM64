@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const laluneSocksMark = 0x4c4c
+const laluneSocksMark = 0x4d53
 
 type Socks5Server struct {
 	addr string
