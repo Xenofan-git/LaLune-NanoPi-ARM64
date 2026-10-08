@@ -19,6 +19,20 @@ replace_once(
 # The pinned Go wrapper invokes DeployManager with --port, but the original
 # DeployManager CLI calls this option --ssh-port. Keep the original UI/API
 # contract while fixing the actual CLI invocation.
+BRIDGE = UPSTREAM / "Desktop/Libs/bridge.go"
+
+# New CSQTT core Auto VK protocol: stdin bootstrap replaces obsolete --token.
+bs = BRIDGE.read_text()
+bs = bs.replace('import (\n\t"fmt"', 'import (\n\t"encoding/base64"\n\t"encoding/json"\n\t"fmt"', 1)
+old = '\tif isAutoVk {\n\t\ttoken := b.Core.ReadTokenFromFile()\n\t\tif token == "" {\n\t\t\tb.Core.AddLog("[АВТО ВК] ПРЕДУПРЕЖДЕНИЕ: token.json не найден или пуст — ядро упадёт")\n\t\t} else {\n\t\t\tcmd = append(cmd, "--token", token)\n\t\t\tb.Core.AddLog("[АВТО ВК] Токен передан из token.json")\n\t\t}\n\t}\n'
+new = '\tif isAutoVk {\n\t\ttoken := b.Core.ReadTokenFromFile()\n\t\tif token == "" {\n\t\t\tb.Core.AddLog("[АВТО ВК] ПРЕДУПРЕЖДЕНИЕ: token.json не найден или пуст — ядро не запустит Auto JS")\n\t\t} else {\n\t\t\tb.Core.AddLog("[АВТО ВК] VK bootstrap подготовлен для stdin")\n\t\t}\n\t}\n'
+if old not in bs: raise SystemExit("bridge auto-vk marker not found")
+bs = bs.replace(old, new, 1)
+anchor = 'func (b *Bridge) ParseTunconf(line string) (string, string) {'
+method = 'func (b *Bridge) AutoVkBootstrap() string {\n\tsettings := b.Core.GetSettings()\n\tif settings.AuthMode != "autoVk" { return "" }\n\ttoken := b.Core.ReadTokenFromFile()\n\tif token == "" { return "" }\n\tpayload, err := json.Marshal(map[string]string{"token": token})\n\tif err != nil { return "" }\n\treturn "VK_JS_BOOTSTRAP:" + base64.StdEncoding.EncodeToString(payload) + "\\n"\n}\n\n'
+if anchor not in bs: raise SystemExit("bridge anchor not found")
+bs = bs.replace(anchor, method + anchor, 1)
+BRIDGE.write_text(bs)
 DEPLOY_GO = UPSTREAM / "Desktop/Libs/deploy.go"
 s = DEPLOY_GO.read_text()
 old = '"--port", itoa(req.SSHPort)'
