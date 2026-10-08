@@ -56,10 +56,10 @@ LINUX.write_text(s)
 
 # Keep the CSQTT stdin pipe open for asynchronous CAPTCHA_RESULT commands.
 s = LINUX.read_text()
-s = s.replace('type LinuxRunner struct {', 'var linuxRunnerInputs sync.Map\\n\\ntype LinuxRunner struct {', 1)
-s = s.replace('\\tr.app.mu.Lock()', '\\tlinuxRunnerInputs.Store(r, stdin)\\n\\tr.app.mu.Lock()', 1)
-s = s.replace('\\tcmd.Wait()\\n\\tbridge.Core.AddLog("=== Процесс завершён ===")', '\\tcmd.Wait()\\n\\tif input, ok := linuxRunnerInputs.LoadAndDelete(r); ok { _ = input.(io.WriteCloser).Close() }\\n\\tbridge.Core.AddLog("=== Процесс завершён ===")', 1)
-s = s.replace('func NewApp() *App {', 'func (r *LinuxRunner) SubmitCaptchaResult(result string) bool {\\n\\tvalue, ok := linuxRunnerInputs.Load(r)\\n\\tif !ok { return false }\\n\\tinput := value.(io.WriteCloser)\\n\\t_, err := io.WriteString(input, "CAPTCHA_RESULT|"+result+"\\\\n")\\n\\treturn err == nil\\n}\\n\\nfunc NewApp() *App {', 1)
+s = s.replace('type LinuxRunner struct {', 'var linuxRunnerInputs sync.Map\n\ntype LinuxRunner struct {', 1)
+s = s.replace('\tr.app.mu.Lock()', '\tlinuxRunnerInputs.Store(r, stdin)\n\tr.app.mu.Lock()', 1)
+s = s.replace('\tcmd.Wait()\n\tbridge.Core.AddLog("=== Процесс завершён ===")', '\tcmd.Wait()\n\tif input, ok := linuxRunnerInputs.LoadAndDelete(r); ok { _ = input.(io.WriteCloser).Close() }\n\tbridge.Core.AddLog("=== Процесс завершён ===")', 1)
+s = s.replace('func NewApp() *App {', 'func (r *LinuxRunner) SubmitCaptchaResult(result string) bool {\n\tvalue, ok := linuxRunnerInputs.Load(r)\n\tif !ok { return false }\n\tinput := value.(io.WriteCloser)\n\t_, err := io.WriteString(input, "CAPTCHA_RESULT|"+result+"\\n")\n\treturn err == nil\n}\n\nfunc NewApp() *App {', 1)
 LINUX.write_text(s)
 
 # NanoPi dataplane adaptation: the pinned original leaves LinuxTun.Start empty.
