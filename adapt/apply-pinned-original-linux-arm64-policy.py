@@ -78,27 +78,26 @@ new = 'cmd := exec.Command("sh", "-c", r.app.runSudoCommand(cmdLine))\n\tcmd.Sys
 if old not in s: raise SystemExit("cmd marker not found")
 s = s.replace(old, new, 1)
 
-old = '''\t\tcase <-time.After(90 * time.Second):
-\t\t\tbridge.Core.AddLog("[TUN] Таймаут ожидания")
-\t\t\tbridge.Core.SetConnected(false)
-\t\t\treturn'''
-new = '''\t\tcase <-time.After(90 * time.Second):
-\t\t\tbridge.Core.AddLog("[TUN] Таймаут ожидания — останавливаем core")
-\t\t\tbridge.Core.SetConnected(false)
-\t\t\tr.app.mu.Lock()
-\t\t\tpid := r.app.clientPID
-\t\t\tr.app.mu.Unlock()
-\t\t\tif pid > 0 {
-\t\t\t\t_ = syscall.Kill(-pid, syscall.SIGTERM)
-\t\t\t\ttime.Sleep(1 * time.Second)
-\t\t\t\t_ = syscall.Kill(-pid, syscall.SIGKILL)
-\t\t\t}
-\t\t\treturn'''
-if old not in s:
-    raise SystemExit("timeout marker not found")
-s = s.replace(old, new, 1)
+# Timeout cleanup is handled by process-group cleanup on Disconnect; do not patch the upstream wait block here.
 LINUX.write_text(s)
 
+# Ensure explicit Disconnect kills the complete core process group.
+s = LINUX.read_text()
+old = """\tif pid > 0 {
+\t\ta.core.AddLog(fmt.Sprintf("[INFO] Останавливаем клиент (PID: %d)...", pid))
+\t\tsyscall.Kill(pid, syscall.SIGTERM)
+\t\ttime.Sleep(1 * time.Second)
+\t\tsyscall.Kill(pid, syscall.SIGKILL)
+\t}"""
+new = """\tif pid > 0 {
+\t\ta.core.AddLog(fmt.Sprintf("[INFO] Останавливаем клиент и process group (PID: %d)...", pid))
+\t\t_ = syscall.Kill(-pid, syscall.SIGTERM)
+\t\ttime.Sleep(1 * time.Second)
+\t\t_ = syscall.Kill(-pid, syscall.SIGKILL)
+\t}"""
+if old not in s:
+    raise SystemExit("Disconnect marker not found")
+s = s.replace(old, new, 1)
 # Keep the core stdin pipe alive for asynchronous CAPTCHA_RESULT responses.
 s = LINUX.read_text()
 s = s.replace("type LinuxRunner struct {", "var linuxRunnerInputs sync.Map\n\ntype LinuxRunner struct {", 1)
