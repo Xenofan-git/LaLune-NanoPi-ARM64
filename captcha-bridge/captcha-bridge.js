@@ -6,7 +6,7 @@
   function panelOrigin() {
     try {
       const hash = location.hash || '';
-      const m = hash.match(/(?:^|#)lalune_panel=([^&]+)/);
+      const m = hash.match(/(?:^|[#&])lalune_panel=([^&]+)/);
       if (m) return decodeURIComponent(m[1]);
     } catch (_) {}
     try {
@@ -25,7 +25,7 @@
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        sessionToken: new URL(location.href).searchParams.get('session_token') || '',
+        sessionToken: (function(){ try { const h=location.hash||''; const m=h.match(/(?:^|[#&])lalune_session=([^&]+)/); return m ? decodeURIComponent(m[1]) : (new URL(location.href).searchParams.get('session_token') || ''); } catch (_) { return ''; } })(),
         result: String(token)
       }),
       credentials: 'omit'
