@@ -425,20 +425,24 @@ func (t *LinuxTun) CleanupDirectRouting() {
 
 '''
 marker = 'func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) {'
-if (!old.includes(marker)) throw new Error("SetupRoutes marker missing");
-let s = old.replace(marker, linux_direct + marker, 1);
+if marker not in s:
+    raise SystemExit("SetupRoutes marker missing")
+let s = LINUX.read_text()
+s = s.replace(marker, linux_direct + marker, 1)
 
-const setupOld = '\tt.app.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")\n\n\tt.app.core.AddLog("[TUN] TUN настроен успешно (policy table 202)")';
-const setupNew = '\tt.app.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")\n\n\tif err := t.applyDirectRoutingLocked(); err != nil {\n\t\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Ошибка применения: %v", err))\n\t}\n\tt.app.core.AddLog("[TUN] TUN настроен успешно (policy table 202)")';
-if (!s.includes(setupOld)) throw new Error("Setup body marker missing");
-s = s.replace(setupOld, setupNew, 1);
+setup_old = '\tt.app.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")\n\n\tt.app.core.AddLog("[TUN] TUN настроен успешно (policy table 202)")';
+setup_new = '\tt.app.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")\n\n\tif err := t.applyDirectRoutingLocked(); err != nil {\n\t\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Ошибка применения: %v", err))\n\t}\n\tt.app.core.AddLog("[TUN] TUN настроен успешно (policy table 202)")';
+if setup_old not in s:
+    raise SystemExit("Setup body marker missing")
+s = s.replace(setup_old, setup_new, 1)
 
-const cleanupOld = '\tt.app.core.AddLog("[TUN] Удаление TUN...")\n\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")';
-const cleanupNew = '\tt.app.core.AddLog("[TUN] Удаление TUN...")\n\tt.cleanupDirectRoutingLocked()\n\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")';
-if (!s.includes(cleanupOld)) throw new Error("Cleanup marker missing");
-s = s.replace(cleanupOld, cleanupNew, 1);
+cleanup_old = '\tt.app.core.AddLog("[TUN] Удаление TUN...")\n\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")';
+cleanup_new = '\tt.app.core.AddLog("[TUN] Удаление TUN...")\n\tt.cleanupDirectRoutingLocked()\n\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")';
+if cleanup_old not in s:
+    raise SystemExit("Cleanup marker missing")
+s = s.replace(cleanup_old, cleanup_new, 1)
 
-const saveOld = 'func (a *App) SaveSettings(j string) bool { return a.core.SaveSettings(j) }';
+save_old = 'func (a *App) SaveSettings(j string) bool { return a.core.SaveSettings(j) }';
 const saveNew = [
   'func (a *App) SaveSettings(j string) bool {',
   '\tok := a.core.SaveSettings(j)',
@@ -454,8 +458,9 @@ const saveNew = [
   '\treturn true',
   '}'
 ].join("\n");
-if (!s.includes(saveOld)) throw new Error("SaveSettings marker missing");
-s = s.replace(saveOld, saveNew, 1);
+if save_old not in s:
+    raise SystemExit("SaveSettings marker missing")
+s = s.replace(save_old, save_new, 1)
 
 LINUX.write_text(s)
 
@@ -493,8 +498,9 @@ s = s.replace(
 s = s.replace(
 '''      authMode: _authMode,\n      enableSmartTunnel: _enableSmartTunnel,''',
 '''      authMode: _authMode,\n      directDomains: _directDomainsCtl.text.trim(),\n      directIPs: _directIPsCtl.text.trim(),\n      enableSmartTunnel: _enableSmartTunnel,''', 1)
-const uiMarker = '''              const SizedBox(height: 18),\n\n              _sectionTitle('Device ID'),''';
-const uiInsert = '''              const SizedBox(height: 18),\n\n              _sectionTitle('Direct — обход CSQTT'),\n              GlassCard(\n                child: Column(\n                  crossAxisAlignment: CrossAxisAlignment.start,\n                  children: [\n                    Text('Только указанные назначения идут напрямую через LTE. Всё остальное остаётся через CSQTT.',\n                      style: TextStyle(fontSize: 11.5, height: 1.45, color: Colors.white.withOpacity(0.55))),\n                    const SizedBox(height: 12),\n                    Text('Домены', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),\n                    const SizedBox(height: 5),\n                    TextField(\n                      controller: _directDomainsCtl,\n                      minLines: 3,\n                      maxLines: 8,\n                      style: const TextStyle(fontSize: 13),\n                      decoration: const InputDecoration(hintText: 'example.com\\ncdn.example.com'),\n                      onChanged: (_) => _markDirty(),\n                    ),\n                    const SizedBox(height: 12),\n                    Text('IP / CIDR', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),\n                    const SizedBox(height: 5),\n                    TextField(\n                      controller: _directIPsCtl,\n                      minLines: 3,\n                      maxLines: 8,\n                      style: const TextStyle(fontSize: 13),\n                      decoration: const InputDecoration(hintText: '1.2.3.4\\n1.2.3.0/24'),\n                      onChanged: (_) => _markDirty(),\n                    ),\n                    const SizedBox(height: 7),\n                    Text('По одному значению в строке; также принимаются запятые. Сейчас IPv4.',\n                      style: TextStyle(fontSize: 10.5, color: Colors.white.withOpacity(0.45))),\n                  ],\n                ),\n              ),\n              const SizedBox(height: 18),\n\n              _sectionTitle('Device ID'),''';
-if (!s.includes(uiMarker)) throw new Error("settings UI marker missing");
-s = s.replace(uiMarker, uiInsert, 1);
+ui_marker = '''              const SizedBox(height: 18),\n\n              _sectionTitle('Device ID'),''';
+ui_insert = '''              const SizedBox(height: 18),\n\n              _sectionTitle('Direct — обход CSQTT'),\n              GlassCard(\n                child: Column(\n                  crossAxisAlignment: CrossAxisAlignment.start,\n                  children: [\n                    Text('Только указанные назначения идут напрямую через LTE. Всё остальное остаётся через CSQTT.',\n                      style: TextStyle(fontSize: 11.5, height: 1.45, color: Colors.white.withOpacity(0.55))),\n                    const SizedBox(height: 12),\n                    Text('Домены', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),\n                    const SizedBox(height: 5),\n                    TextField(\n                      controller: _directDomainsCtl,\n                      minLines: 3,\n                      maxLines: 8,\n                      style: const TextStyle(fontSize: 13),\n                      decoration: const InputDecoration(hintText: 'example.com\\ncdn.example.com'),\n                      onChanged: (_) => _markDirty(),\n                    ),\n                    const SizedBox(height: 12),\n                    Text('IP / CIDR', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),\n                    const SizedBox(height: 5),\n                    TextField(\n                      controller: _directIPsCtl,\n                      minLines: 3,\n                      maxLines: 8,\n                      style: const TextStyle(fontSize: 13),\n                      decoration: const InputDecoration(hintText: '1.2.3.4\\n1.2.3.0/24'),\n                      onChanged: (_) => _markDirty(),\n                    ),\n                    const SizedBox(height: 7),\n                    Text('По одному значению в строке; также принимаются запятые. Сейчас IPv4.',\n                      style: TextStyle(fontSize: 10.5, color: Colors.white.withOpacity(0.45))),\n                  ],\n                ),\n              ),\n              const SizedBox(height: 18),\n\n              _sectionTitle('Device ID'),''';
+if ui_marker not in s:
+    raise SystemExit("settings UI marker missing")
+s = s.replace(ui_marker, ui_insert, 1)
 SETTINGS_PAGE.write_text(s)
