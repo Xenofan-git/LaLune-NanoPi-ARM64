@@ -173,6 +173,11 @@ if old not in s:
     raise SystemExit("LinuxTun Start/Stop marker not found")
 s=s.replace(old,new,1)
 
+# Remove the upstream Linux deadlock: TUNCONF must be enough to create the TUN.
+# The first traffic cannot appear until the TUN and routes already exist.
+s = LINUX.read_text()
+s = s.replace("\t\thasConf, hasTraffic := false, false", "\t\t// TUNCONF is sufficient; do not wait for first traffic.\n\t\thasConf, hasTraffic := false, true", 1)
+
 # Start the original Bridge TUN↔UDP packet bridge after Linux route setup.
 s = LINUX.read_text()
 # Prevent concurrent core workers sharing one Bridge/TUN state on NanoPi.
