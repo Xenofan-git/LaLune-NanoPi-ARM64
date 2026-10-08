@@ -94,9 +94,9 @@ new = '''\t\tcase <-time.After(90 * time.Second):
 \t\t\t\t_ = syscall.Kill(-pid, syscall.SIGKILL)
 \t\t\t}
 \t\t\treturn'''
-if old not in s: raise SystemExit("timeout marker not found")
+if old not in s:
+    raise SystemExit("timeout marker not found")
 s = s.replace(old, new, 1)
-
 LINUX.write_text(s)
 
 # Keep the core stdin pipe alive for asynchronous CAPTCHA_RESULT responses.
