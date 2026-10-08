@@ -4,7 +4,7 @@
   const cache = {
     configs: '[]', settings: '{}', logs: '[]', status: '{"connected":false}', selected: '{}',
     coreUpdate: '{"update":false,"version":""}', laluneUpdate: '{"update":false,"version":""}',
-    vk: '{"hasToken":false,"fetcherOk":false,"fetching":false,"message":"","progress":0}',
+    vk: '{"hasToken":false,"fetcherOk":false,"fetching":false,"message":"","progress":0}', vkAuto: '{"pending":true}',
     deployLog: '', deploying: false, coreDownloading: false
   };
   const req = (path, options) => fetch(base + path, options || {}).then(r => r.text());
@@ -39,20 +39,39 @@
     CheckCoreUpdate: () => { fetch(base + "/updates/core/check").then(r=>r.text()).then(x=>cache.coreUpdate=x).catch(()=>{}); return cache.coreUpdate; },
     UpdateCore: () => post("/updates/core"),
     UpdateCoreAndWait: () => post("/updates/core/wait"),
-    CheckLaLuneUpdate: () => { fetch(base + "/updates/lalune").then(r=>r.text()).then(x=>cache.laluneUpdate=x).catch(()=>{}); return cache.laluneUpdate; },
+    CheckLaLuneUpdate: () => {
+      fetch(base + "/updates/lalune").then(r=>r.json()).then(x => {
+        cache.laluneUpdate = JSON.stringify({
+          update: !!(x.hasUpdate || x.HasUpdate),
+          version: x.remoteTag || x.RemoteTag || ''
+        });
+      }).catch(()=>{});
+      return cache.laluneUpdate;
+    },
     OpenLaLuneReleases: () => { window.open('https://github.com/Endlad2/LaLune/releases/latest','_blank'); return true; },
     GetVKTokenState: () => { fetch(base + "/vk/state").then(r=>r.text()).then(x=>cache.vk=x).catch(()=>{}); return cache.vk; },
     VkLogin: () => post("/vk/login"),
     DeleteVKToken: () => post("/vk/delete"),
-    ValidateVKToken: () => cache.vk,
+    ValidateVKToken: () => {
+      fetch(base + "/vk/validate").then(r=>r.text()).then(x=>cache.vk=x).catch(()=>{});
+      return cache.vk;
+    },
     RunVkAutoApiCalls: () => { post("/vk/auto"); return "{\"pending\":true}"; },
-    PollAutoApiResult: () => '{"pending":false,"error":"not supported"}',
+    PollAutoApiResult: () => {
+      fetch(base + "/vk/auto/poll").then(r=>r.text()).then(x=>cache.vkAuto=x).catch(()=>{});
+      return cache.vkAuto;
+    },
     FinishVkCalls: callIdsJson => { try { post("/vk/finish", JSON.parse(callIdsJson)); return true; } catch (_) { return false; } },
     GetDeviceId: () => { try { return JSON.parse(cache.settings).deviceId || ''; } catch (_) { return ''; } },
     RegenerateDeviceId: () => '',
     SetSelectedConfigJson: j => post('/configs/selected', JSON.parse(j)),
     GetSelectedConfigJson: () => cache.selected,
-    IsCoreDownloading: () => cache.coreDownloading,
+    IsCoreDownloading: () => {
+      fetch(base + "/updates/core/status").then(r=>r.json()).then(x=>{
+        cache.coreDownloading = !!x.downloading;
+      }).catch(()=>{});
+      return cache.coreDownloading;
+    },
     DeployProtocol: j => post('/deploy', JSON.parse(j)),
     DeployLog: () => cache.deployLog,
     IsDeploying: () => cache.deploying
