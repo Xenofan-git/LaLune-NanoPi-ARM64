@@ -12,10 +12,9 @@ def replace_once(path, old, new):
 
 replace_once(
     PROTO,
-    '''\t\tdefault:\n\t\t\treturn "client-linux-x86_64"''',
-    '''\t\tdefault:\n\t\t\tif goarch == "arm64" {\n\t\t\t\treturn "client-linux-arm64"\n\t\t\t}\n\t\t\treturn "client-linux-x86_64"'''
+    '''\t\tcase "darwin":\n\t\t\treturn "client-macos-x86_64"\n\t\tdefault:\n\t\t\treturn "client-linux-x86_64"''',
+    '''\t\tcase "darwin":\n\t\t\treturn "client-macos-x86_64"\n\t\tdefault:\n\t\t\tif goarch == "arm64" {\n\t\t\t\treturn "client-linux-arm64"\n\t\t\t}\n\t\t\treturn "client-linux-x86_64"'''
 )
-
 # The pinned Go wrapper invokes DeployManager with --port, but the original
 # DeployManager CLI calls this option --ssh-port. Keep the original UI/API
 # contract while fixing the actual CLI invocation.
