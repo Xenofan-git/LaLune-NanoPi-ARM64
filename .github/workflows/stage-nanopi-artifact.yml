@@ -31,7 +31,7 @@ jobs:
           rm -rf /tmp/extracted
           mkdir -p /tmp/extracted
           tar -xzf "$tarball" -C /tmp/extracted
-          bin=$(find /tmp/extracted -type f -name 'lalune-backend-native' -print -quit)
+          bin=$(find /tmp/extracted -type f -name 'lalune-original-linux-arm64' -print -quit)
           test -n "$bin"
           cp "$bin" /tmp/lalune-backend-native
           sha256sum /tmp/lalune-backend-native
