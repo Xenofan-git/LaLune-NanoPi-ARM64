@@ -83,7 +83,7 @@ s = s.replace(old, new, 1)
 # Timeout cleanup is handled by process-group cleanup on Disconnect; do not patch the upstream wait block here.
 LINUX.write_text(s)
 
-\n# Kill the whole core process group if the original 90s TUN wait expires.
+# Kill the whole core process group if the original 90s TUN wait expires.
 s = LINUX.read_text()
 old = '''\t\t\tcase <-time.After(90 * time.Second):
 \t\t\t\tbridge.Core.AddLog("[TUN] Таймаут ожидания")
