@@ -83,6 +83,27 @@ s = s.replace(old, new, 1)
 # Timeout cleanup is handled by process-group cleanup on Disconnect; do not patch the upstream wait block here.
 LINUX.write_text(s)
 
+\n# Kill the whole core process group if the original 90s TUN wait expires.
+s = LINUX.read_text()
+old = '''\t\t\tcase <-time.After(90 * time.Second):
+\t\t\t\tbridge.Core.AddLog("[TUN] Таймаут ожидания")
+\t\t\t\tbridge.Core.SetConnected(false)
+\t\t\t\treturn'''
+new = '''\t\t\tcase <-time.After(90 * time.Second):
+\t\t\t\tbridge.Core.AddLog("[TUN] Таймаут ожидания — останавливаем core")
+\t\t\t\tbridge.Core.SetConnected(false)
+\t\t\t\tr.app.mu.Lock()
+\t\t\t\tpid := r.app.clientPID
+\t\t\t\tr.app.mu.Unlock()
+\t\t\t\tif pid > 0 {
+\t\t\t\t\t_ = syscall.Kill(-pid, syscall.SIGTERM)
+\t\t\t\t\ttime.Sleep(1 * time.Second)
+\t\t\t\t\t_ = syscall.Kill(-pid, syscall.SIGKILL)
+\t\t\t\t}
+\t\t\t\treturn'''
+if old not in s: raise SystemExit("timeout source marker not found")
+s = s.replace(old, new, 1)
+LINUX.write_text(s)
 # Ensure explicit Disconnect kills the complete core process group.
 s = LINUX.read_text()
 old = """\tif pid > 0 {
