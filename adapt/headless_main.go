@@ -96,7 +96,7 @@ func finishCaptcha(app *App, sessionToken, result string) bool {
     captchaMu.Unlock()
     result = strings.TrimSpace(result)
     if result == "" || len(result) > 16384 || strings.ContainsAny(result, "\r\n") { return false }
-    if !app.SubmitCaptchaResult(result) { return false }
+    if app.runner == nil || !app.runner.SubmitCaptchaResult(result) { return false }
     captchaMu.Lock(); captchaHandledSession = sessionToken; captchaPending = false; captchaMode = ""; captchaRedirectURI = ""; captchaSessionToken = ""; captchaUpdated = time.Time{}; captchaMu.Unlock()
     return true
 }
