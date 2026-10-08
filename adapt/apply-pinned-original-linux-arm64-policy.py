@@ -182,6 +182,7 @@ if old_lifecycle_marker not in s:
 s = s.replace(old_lifecycle_marker, "\t\t// TUNCONF is sufficient; do not wait for first traffic.\n\t\thasConf, hasTraffic := false, true", 1)
 if "hasConf, hasTraffic := false, true" not in s:
     raise SystemExit("TUN lifecycle patch was not applied")
+LINUX.write_text(s)
 
 # Start the original Bridge TUN↔UDP packet bridge after Linux route setup.
 s = LINUX.read_text()
