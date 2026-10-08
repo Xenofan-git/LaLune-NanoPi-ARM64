@@ -26,12 +26,10 @@ jobs:
         shell: bash
         run: |
           set -e
-          find /tmp/artifact -type f -maxdepth 3 -print
-          cd /tmp/artifact
-          zip=$(find . -type f -name '*.zip' -print -quit)
-          test -n "$zip"
-          unzip -q "$zip"
-          bin=$(find . -type f -name 'lalune-backend-native' -print -quit)
+          tarball=$(find /tmp/artifact -type f -name '*.tar.gz' -print -quit)
+          test -n "$tarball"
+          tar -xzf "$tarball" -C /tmp/artifact
+          bin=$(find /tmp/artifact -type f -name 'lalune-backend-native' -print -quit)
           test -n "$bin"
           cp "$bin" /tmp/lalune-backend-native
           sha256sum /tmp/lalune-backend-native
