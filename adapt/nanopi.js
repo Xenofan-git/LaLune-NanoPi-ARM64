@@ -37,7 +37,7 @@
     const title = document.createElement('div'); title.textContent = '🔐 Требуется CAPTCHA VK'; title.style.cssText='font-size:17px;font-weight:700;margin-bottom:8px';
     const text = document.createElement('div'); text.textContent = 'CSQTT ожидает подтверждение. Открой CAPTCHA в браузере и пройди проверку.'; text.style.marginBottom='12px';
     const open = document.createElement('button'); open.textContent='Открыть CAPTCHA'; open.style.cssText='padding:9px 13px;border:0;border-radius:9px;cursor:pointer;font-weight:600;margin-right:8px';
-    open.onclick=()=>{ try { const u = new URL(state.redirectUri); u.hash='lalune_panel='+encodeURIComponent(location.origin); window.open(u.toString(),'_blank','noopener'); } catch (_) { window.open(state.redirectUri,'_blank'); } };
+    open.onclick=()=>{ try { const u = new URL(state.redirectUri); const extra = 'lalune_panel='+encodeURIComponent(location.origin)+'&lalune_session='+encodeURIComponent(state.sessionToken||''); u.hash = (u.hash ? u.hash + '&' : '') + extra; window.open(u.toString(),'_blank','noopener'); } catch (_) { window.open(state.redirectUri,'_blank'); } };
     const cancel = document.createElement('button'); cancel.textContent='Отмена'; cancel.style.cssText='padding:9px 13px;border:0;border-radius:9px;cursor:pointer';
     cancel.onclick=()=>{ fetch(base+'/captcha/cancel',{method:'POST'}).catch(()=>{}); removeCaptchaOverlay(); };
     box.append(title,text,open,cancel); document.body.appendChild(box); captchaOverlay=box;
