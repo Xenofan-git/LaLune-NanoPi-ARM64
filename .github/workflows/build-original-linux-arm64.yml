@@ -72,7 +72,7 @@ jobs:
           grep -Fq 'func (r *LinuxRunner) StartCore' upstream-lalune/Desktop/Linux/app_linux.go
           grep -Fq 'startMu sync.Mutex' upstream-lalune/Desktop/Linux/app_linux.go
           grep -Fq 'cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}' upstream-lalune/Desktop/Linux/app_linux.go
-          grep -Fq 'bridge.Core.AddLog("[CORE] Второй запуск заблокирован:' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -Fq 'Второй запуск заблокирован: уже работает PID' upstream-lalune/Desktop/Linux/app_linux.go
           grep -Fq 'bridge.Core.AddLog("[TUN] Таймаут ожидания — останавливаем core")' upstream-lalune/Desktop/Linux/app_linux.go
           test "$(grep -Fc 'syscall.Kill(-pid' upstream-lalune/Desktop/Linux/app_linux.go)" -ge 2
           test "$(grep -Fc 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go)" = "1"
