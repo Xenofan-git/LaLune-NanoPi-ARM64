@@ -1,0 +1,46 @@
+name: Stage LaLune artifact for NanoPi
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  stage:
+    if: contains(github.event.head_commit.message, '[stage-nanopi-artifact]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download verified artifact
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 37814234757
+          artifact-ids: 11566891298
+          path: /tmp/artifact
+
+      - name: Prepare binary
+        shell: bash
+        run: |
+          set -e
+          find /tmp/artifact -type f -maxdepth 3 -print
+          cd /tmp/artifact
+          zip=$(find . -type f -name '*.zip' -print -quit)
+          test -n "$zip"
+          unzip -q "$zip"
+          bin=$(find . -type f -name 'lalune-backend-native' -print -quit)
+          test -n "$bin"
+          cp "$bin" /tmp/lalune-backend-native
+          sha256sum /tmp/lalune-backend-native
+
+      - name: Publish temporary release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nanopi-transfer-20261008
+          name: LaLune NanoPi transfer 2026-10-08
+          prerelease: true
+          overwrite_files: true
+          files: /tmp/lalune-backend-native
