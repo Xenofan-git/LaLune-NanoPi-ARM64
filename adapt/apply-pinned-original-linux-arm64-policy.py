@@ -166,7 +166,7 @@ func (t *LinuxTun) Stop() {
 \tt.tunFile = nil
 \tt.mu.Unlock()
 \tif f != nil {
-\t\t_ = _ = unix.Close(fd)
+\t\t_ = f.Close()
 \t}
 }'''
 if old not in s:
