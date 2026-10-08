@@ -87,7 +87,7 @@ func refreshCaptchaState(app *App) {
 func captchaState(app *App) map[string]any {
     refreshCaptchaState(app)
     captchaMu.Lock(); defer captchaMu.Unlock()
-    return map[string]any{"pending": captchaPending, "mode": captchaMode, "redirectUri": captchaRedirectURI, "updated": captchaUpdated.UnixMilli()}
+    return map[string]any{"pending": captchaPending, "mode": captchaMode, "redirectUri": captchaRedirectURI, "sessionToken": captchaSessionToken, "updated": captchaUpdated.UnixMilli()}
 }
 
 func finishCaptcha(app *App, sessionToken, result string) bool {
