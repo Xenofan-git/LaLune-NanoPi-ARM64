@@ -423,7 +423,13 @@ func (t *LinuxTun) CleanupDirectRouting() {
 }
 
 '''
-linux_direct = "\n".join(("    " * (len(line) - len(line.lstrip("\\t"))) + line.lstrip("\\t")) for line in linux_direct.splitlines())
+def _fix_direct_indent(line):
+    n = 0
+    while line.startswith("\\t"):
+        n += 1
+        line = line[2:]
+    return ("    " * n) + line
+linux_direct = "\n".join(_fix_direct_indent(line) for line in linux_direct.splitlines())
 linux_direct = linux_direct.replace("r == '\\\\n'", "r == '\\n'")
 linux_direct = linux_direct.replace("r == '\\\\r'", "r == '\\r'")
 linux_direct = linux_direct.replace("r == '\\\\t'", "r == '\\t'")
