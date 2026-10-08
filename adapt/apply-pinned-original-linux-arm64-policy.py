@@ -41,7 +41,18 @@ if old not in s:
     raise SystemExit(f"marker not found in {DEPLOY_GO}: {old!r}")
 DEPLOY_GO.write_text(s.replace(old, new, 1))
 
+# Linux runner must feed the new Auto JS bootstrap to core stdin.
 s = LINUX.read_text()
+old = '\tcmd := exec.Command("sh", "-c", r.app.runSudoCommand(cmdLine))\n\tcmd.Stdin = os.Stdin\n\tcmd.Stdout = os.Stdout\n\tcmd.Stderr = os.Stderr\n'
+new = '\tcmd := exec.Command("sh", "-c", r.app.runSudoCommand(cmdLine))\n\tstdin, err := cmd.StdinPipe()\n\tif err != nil {\n\t\tbridge.Core.AddLog(fmt.Sprintf("[ERROR] Не удалось подготовить stdin ядра: %v", err))\n\t\tbridge.Core.SetConnected(false)\n\t\treturn\n\t}\n\tcmd.Stdout = os.Stdout\n\tcmd.Stderr = os.Stderr\n'
+if old not in s: raise SystemExit("stdin marker not found")
+s = s.replace(old, new, 1)
+old = '\tif err := cmd.Start(); err != nil {\n\t\tbridge.Core.AddLog(fmt.Sprintf("[ERROR] Не удалось запустить: %v", err))\n\t\tbridge.Core.SetConnected(false)\n\t\treturn\n\t}\n'
+new = '\tif err := cmd.Start(); err != nil {\n\t\t_ = stdin.Close()\n\t\tbridge.Core.AddLog(fmt.Sprintf("[ERROR] Не удалось запустить: %v", err))\n\t\tbridge.Core.SetConnected(false)\n\t\treturn\n\t}\n\tif bootstrap := bridge.AutoVkBootstrap(); bootstrap != "" {\n\t\tif _, err := io.WriteString(stdin, bootstrap); err != nil {\n\t\t\tbridge.Core.AddLog(fmt.Sprintf("[АВТО ВК] Ошибка передачи bootstrap: %v", err))\n\t\t} else {\n\t\t\tbridge.Core.AddLog("[АВТО ВК] VK_JS_BOOTSTRAP передан в core")\n\t\t}\n\t}\n\t_ = stdin.Close()\n'
+if old not in s: raise SystemExit("start marker not found")
+s = s.replace(old, new, 1)
+s = s.replace('\t"time"\n)', '\t"time"\n\t"io"\n)', 1)
+LINUX.write_text(s)
 
 # NanoPi dataplane adaptation: the pinned original leaves LinuxTun.Start empty.
 # Keep the original UDP core protocol, but bridge Linux TUN packets to that UDP
