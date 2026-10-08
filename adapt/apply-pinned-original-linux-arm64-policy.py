@@ -118,7 +118,7 @@ func (t *LinuxTun) Start(udpConn net.Conn, running *bool) {
 \t\treturn
 \t}
 \tifr.SetUint16(unix.IFF_TUN | unix.IFF_NO_PI)
-\tif err := unix.IoctlIfreq(int(f.Fd()), unix.TUNSETIFF, ifr); err != nil {
+\tif err := unix.IoctlIfreq(fd, unix.TUNSETIFF, ifr); err != nil {
 \t\tf.Close()
 \t\tt.mu.Unlock()
 \t\tt.app.core.AddLog(fmt.Sprintf("[TUN] TUNSETIFF csqtt0: %v", err))
