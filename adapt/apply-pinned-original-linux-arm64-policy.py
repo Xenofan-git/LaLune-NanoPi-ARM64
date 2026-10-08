@@ -103,7 +103,7 @@ func (t *LinuxTun) Start(udpConn net.Conn, running *bool) {
 \t\treturn
 \t}
 
-\tf, err := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
+\tfd, err := unix.Open("/dev/net/tun", unix.O_RDWR|unix.O_CLOEXEC, 0)
 \tif err != nil {
 \t\tt.mu.Unlock()
 \t\tt.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось открыть /dev/net/tun: %v", err))
@@ -112,7 +112,7 @@ func (t *LinuxTun) Start(udpConn net.Conn, running *bool) {
 
 \tifr, err := unix.NewIfreq("csqtt0")
 \tif err != nil {
-\t\tf.Close()
+\t\t_ = unix.Close(fd)
 \t\tt.mu.Unlock()
 \t\tt.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось создать ifreq: %v", err))
 \t\treturn
@@ -125,7 +125,7 @@ func (t *LinuxTun) Start(udpConn net.Conn, running *bool) {
 \t\treturn
 \t}
 
-\tt.tunFile = f
+\tif err := unix.SetNonblock(fd, true); err != nil {\n\t\t_ = unix.Close(fd)\n\t\tt.mu.Unlock()\n\t\tt.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось включить nonblock: %v", err))\n\t\treturn\n\t}\n\tf := os.NewFile(uintptr(fd), "/dev/net/tun")\n\tif f == nil {\n\t\t_ = unix.Close(fd)\n\t\tt.mu.Unlock()\n\t\tt.app.core.AddLog("[TUN] Не удалось создать os.File для TUN")\n\t\treturn\n\t}\n\tt.tunFile = f
 \tt.mu.Unlock()
 \tt.app.core.AddLog("[TUN] Linux TUN↔UDP bridge запущен")
 
