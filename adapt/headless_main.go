@@ -1,0 +1,383 @@
+//go:build linux
+
+package main
+
+import (
+    "sync"
+    "context"
+    "embed"
+    "io/fs"
+    "encoding/json"
+    "fmt"
+    "net/http"
+    "os"
+    "os/signal"
+    "strconv"
+    "strings"
+    "syscall"
+    "time"
+
+    "lalune-desktop/Libs"
+)
+
+const headlessListen = "127.0.0.1:1062"
+const panelListen = "192.168.4.26:1061"
+
+//go:embed frontend
+var panelAssets embed.FS
+
+type connectBody struct {
+    ID int64 `json:"id"`
+}
+
+type configBody struct {
+    Link     string `json:"link"`
+    Protocol string `json:"protocol"`
+}
+
+func writeRaw(w http.ResponseWriter, value string) {
+    w.Header().Set("Content-Type", "application/json; charset=utf-8")
+    w.WriteHeader(http.StatusOK)
+    _, _ = w.Write([]byte(value))
+}
+
+func mustJSON(value string) string { b, _ := json.Marshal(value); return string(b) }
+
+func writeJSON(w http.ResponseWriter, value any) {
+    w.Header().Set("Content-Type", "application/json; charset=utf-8")
+    _ = json.NewEncoder(w).Encode(value)
+}
+
+func method(w http.ResponseWriter, r *http.Request, want string) bool {
+    if r.Method != want {
+        w.Header().Set("Allow", want)
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return false
+    }
+    return true
+}
+
+var captchaMu sync.Mutex
+var captchaPending bool
+var captchaMode string
+var captchaRedirectURI string
+var captchaSessionToken string
+var captchaUpdated time.Time
+
+func registerCaptchaSolve(mode, redirectURI, sessionToken string) {
+    if strings.TrimSpace(redirectURI) == "" || strings.TrimSpace(sessionToken) == "" { return }
+    captchaMu.Lock()
+    captchaPending = true
+    captchaMode = strings.TrimSpace(mode)
+    captchaRedirectURI = strings.TrimSpace(redirectURI)
+    captchaSessionToken = strings.TrimSpace(sessionToken)
+    captchaUpdated = time.Now()
+    captchaMu.Unlock()
+}
+
+func captchaState() map[string]any {
+    captchaMu.Lock(); defer captchaMu.Unlock()
+    return map[string]any{"pending": captchaPending, "mode": captchaMode, "redirectUri": captchaRedirectURI, "updated": captchaUpdated.UnixMilli()}
+}
+
+func submitCaptchaResult(app *App, sessionToken, result string) bool {
+    captchaMu.Lock()
+    if !captchaPending || strings.TrimSpace(sessionToken) == "" || sessionToken != captchaSessionToken { captchaMu.Unlock(); return false }
+    captchaMu.Unlock()
+    result = strings.TrimSpace(result)
+    if result == "" || len(result) > 16384 || strings.ContainsAny(result, "\r\n") { return false }
+    if !app.SubmitCaptchaResult(result) { return false }
+    captchaMu.Lock(); captchaPending = false; captchaMode = ""; captchaRedirectURI = ""; captchaSessionToken = ""; captchaUpdated = time.Time{}; captchaMu.Unlock()
+    return true
+}
+var vkAutoMu sync.Mutex
+var vkAutoResult = "{\"pending\":false}"
+var vkAutoRunning bool
+
+func apiHandler(app *App) http.Handler {
+    mux := http.NewServeMux()
+
+    mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeJSON(w, map[string]any{"ok": true})
+    })
+
+    mux.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeJSON(w, map[string]any{
+            "api": 1,
+            "backend": "original-go",
+            "core": "unknown",
+            "ui": "0.6.0",
+        })
+    })
+
+    mux.HandleFunc("/configs", func(w http.ResponseWriter, r *http.Request) {
+        switch r.Method {
+        case http.MethodGet:
+            writeRaw(w, app.GetConfigsJson())
+        case http.MethodPost:
+            var body configBody
+            if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+                http.Error(w, "bad json", http.StatusBadRequest)
+                return
+            }
+            if body.Link == "" {
+                http.Error(w, "link is required", http.StatusBadRequest)
+                return
+            }
+            ok := app.SaveConfigWithProtocol(body.Link, body.Protocol)
+            writeJSON(w, map[string]bool{"ok": ok})
+        default:
+            w.Header().Set("Allow", "GET, POST")
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        }
+    })
+
+    mux.HandleFunc("/configs/selected", func(w http.ResponseWriter, r *http.Request) {
+        switch r.Method {
+        case http.MethodGet:
+            writeRaw(w, app.GetSelectedConfigJson())
+        case http.MethodPut, http.MethodPost:
+            var raw json.RawMessage
+            if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+                http.Error(w, "bad json", http.StatusBadRequest)
+                return
+            }
+            writeJSON(w, map[string]bool{"ok": app.SetSelectedConfigJson(string(raw))})
+        default:
+            w.Header().Set("Allow", "GET, PUT, POST")
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        }
+    })
+
+    mux.HandleFunc("/configs/", func(w http.ResponseWriter, r *http.Request) {
+        idText := strings.TrimPrefix(r.URL.Path, "/configs/")
+        id, err := strconv.ParseInt(idText, 10, 64)
+        if err != nil {
+            http.Error(w, "invalid config id", http.StatusBadRequest)
+            return
+        }
+        if !method(w, r, http.MethodDelete) { return }
+        writeJSON(w, map[string]bool{"ok": app.DeleteConfig(id)})
+    })
+
+    mux.HandleFunc("/settings", func(w http.ResponseWriter, r *http.Request) {
+        switch r.Method {
+        case http.MethodGet:
+            writeRaw(w, app.GetSettingsJson())
+        case http.MethodPut, http.MethodPost:
+            var raw json.RawMessage
+            if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+                http.Error(w, "bad json", http.StatusBadRequest)
+                return
+            }
+            writeJSON(w, map[string]bool{"ok": app.SaveSettings(string(raw))})
+        default:
+            w.Header().Set("Allow", "GET, PUT, POST")
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        }
+    })
+
+    mux.HandleFunc("/settings/reset", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        http.Error(w, "settings reset is not implemented by pinned LaLune", http.StatusNotImplemented)
+    })
+
+    mux.HandleFunc("/vpn/status", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeRaw(w, app.GetStatusJson())
+    })
+
+    mux.HandleFunc("/vpn/connect", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        var body connectBody
+        if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+            http.Error(w, "bad json", http.StatusBadRequest)
+            return
+        }
+        writeJSON(w, map[string]bool{"ok": app.Connect(body.ID)})
+    })
+
+    mux.HandleFunc("/vpn/disconnect", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        writeJSON(w, map[string]bool{"ok": app.Disconnect()})
+    })
+
+    mux.HandleFunc("/vpn/reconnect", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        var body connectBody
+        if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+            http.Error(w, "bad json", http.StatusBadRequest)
+            return
+        }
+        _ = app.Disconnect()
+        writeJSON(w, map[string]bool{"ok": app.Connect(body.ID)})
+    })
+
+    mux.HandleFunc("/logs", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeRaw(w, app.GetLogsJson())
+    })
+
+    mux.HandleFunc("/logs/tail", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeRaw(w, app.GetLogsJson())
+    })
+
+    mux.HandleFunc("/logs/clear", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        writeJSON(w, map[string]bool{"ok": app.ClearLogs()})
+    })
+
+    mux.HandleFunc("/deploy", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        var raw json.RawMessage
+        if err := json.NewDecoder(r.Body).Decode(&raw); err != nil { http.Error(w, "bad json", http.StatusBadRequest); return }
+        writeJSON(w, map[string]bool{"ok": libs.DeployProtocol(string(raw))})
+    })
+    mux.HandleFunc("/deploy/log", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeRaw(w, mustJSON(libs.DeployLog()))
+    })
+    mux.HandleFunc("/deploy/status", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeJSON(w, map[string]bool{"deploying": libs.DeployBusy()})
+    })
+
+    mux.HandleFunc("/updates/core", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        writeJSON(w, map[string]bool{"ok": app.UpdateCore()})
+    })
+    mux.HandleFunc("/updates/core/wait", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        writeJSON(w, map[string]bool{"ok": app.UpdateCoreAndWait()})
+    })
+    mux.HandleFunc("/updates/core/check", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeRaw(w, app.CheckUpdate())
+    })
+    mux.HandleFunc("/updates/core/status", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeJSON(w, map[string]bool{"downloading": app.IsCoreDownloading()})
+    })
+    mux.HandleFunc("/updates/lalune", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeJSON(w, app.CheckLaLuneUpdate())
+    })
+    mux.HandleFunc("/vk/state", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeJSON(w, app.GetVKTokenState())
+    })
+    mux.HandleFunc("/vk/login", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        writeJSON(w, map[string]bool{"ok": app.LoginVK()})
+    })
+    mux.HandleFunc("/vk/delete", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        writeJSON(w, map[string]bool{"ok": app.DeleteVKToken()})
+    })
+    mux.HandleFunc("/vk/validate", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeJSON(w, app.ValidateVKToken())
+    })
+    mux.HandleFunc("/vk/auto", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        vkAutoMu.Lock()
+        if vkAutoRunning { vkAutoMu.Unlock(); writeRaw(w, "{\"pending\":true}"); return }
+        vkAutoRunning = true; vkAutoResult = "{\"pending\":true}"; vkAutoMu.Unlock()
+        go func() { result := app.RunVkAutoApiCalls(); vkAutoMu.Lock(); vkAutoResult = result; vkAutoRunning = false; vkAutoMu.Unlock() }()
+        writeRaw(w, "{\"pending\":true}")
+    })
+    mux.HandleFunc("/vk/auto/poll", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        vkAutoMu.Lock(); result := vkAutoResult; vkAutoMu.Unlock(); writeRaw(w, result)
+    })
+    mux.HandleFunc("/vk/finish", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        var ids []string
+        if err := json.NewDecoder(r.Body).Decode(&ids); err != nil { http.Error(w, "bad json", http.StatusBadRequest); return }
+        writeJSON(w, map[string]bool{"ok": app.FinishVkCalls(ids)})
+    })
+
+    mux.HandleFunc("/captcha/state", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        writeJSON(w, captchaState())
+    })
+    mux.HandleFunc("/captcha/result", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        var body struct {
+            SessionToken string `json:"sessionToken"`
+            Result string `json:"result"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&body); err != nil { http.Error(w, "bad json", http.StatusBadRequest); return }
+        writeJSON(w, map[string]bool{"ok": submitCaptchaResult(app, body.SessionToken, body.Result)})
+    })
+    mux.HandleFunc("/captcha/cancel", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        captchaMu.Lock(); captchaPending = false; captchaMode = ""; captchaRedirectURI = ""; captchaSessionToken = ""; captchaUpdated = time.Time{}; captchaMu.Unlock()
+        _ = app.SubmitCaptchaResult("error:cancelled")
+        writeJSON(w, map[string]bool{"ok": true})
+    })
+    mux.HandleFunc("/shutdown", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        writeJSON(w, map[string]bool{"ok": true})
+        go func() {
+            time.Sleep(100 * time.Millisecond)
+            _ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+        }()
+    })
+
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Access-Control-Allow-Origin", "*")
+        w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        if r.Method == http.MethodOptions {
+            w.WriteHeader(http.StatusNoContent)
+            return
+        }
+        mux.ServeHTTP(w, r)
+    })
+}
+
+func main() {
+    app := NewApp()
+    app.startup(context.Background())
+
+    api := apiHandler(app)
+    srv := &http.Server{Addr: headlessListen, Handler: api, ReadHeaderTimeout: 5 * time.Second}
+    panelFS, _ := fs.Sub(panelAssets, "frontend")
+    panelHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
+            u := *r.URL
+            u.Path = strings.TrimPrefix(r.URL.Path, "/api")
+            if u.Path == "" { u.Path = "/" }
+            rr := r.Clone(r.Context()); rr.URL = &u
+            api.ServeHTTP(w, rr)
+            return
+        }
+        p := strings.TrimPrefix(r.URL.Path, "/")
+        if p == "" { p = "index.html" }
+        if _, err := fs.Stat(panelFS, p); err != nil { p = "index.html" }
+        http.ServeFileFS(w, r, panelFS, p)
+    })
+    panelSrv := &http.Server{Addr: panelListen, Handler: panelHandler, ReadHeaderTimeout: 5 * time.Second}
+
+    errCh := make(chan error, 2)
+    go func() { app.core.AddLog(fmt.Sprintf("[INFO] Headless API: http://%s", headlessListen)); errCh <- srv.ListenAndServe() }()
+    go func() { app.core.AddLog(fmt.Sprintf("[INFO] LaLune panel: http://%s", panelListen)); errCh <- panelSrv.ListenAndServe() }()
+
+    sigCh := make(chan os.Signal, 1)
+    signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+    select {
+    case sig := <-sigCh:
+        app.core.AddLog(fmt.Sprintf("[INFO] Shutdown signal: %s", sig))
+    case err := <-errCh:
+        app.core.AddLog(fmt.Sprintf("[ERROR] Headless API stopped: %v", err))
+    }
+
+    _ = app.Disconnect()
+    _ = srv.Shutdown(context.Background())
+    _ = panelSrv.Shutdown(context.Background())
+}
