@@ -52,6 +52,7 @@ jobs:
         run: |
           set -euxo pipefail
           python3 adapt/apply-pinned-original-linux-arm64-policy.py
+          python3 adapt/apply-lalune-socks5.py
       - name: Build original Flutter Web panel for NanoPi
         working-directory: upstream-lalune/Frontend/Core
         run: |
@@ -70,6 +71,9 @@ jobs:
           grep -Fq 'func (r *LinuxRunner) StartCore' upstream-lalune/Desktop/Linux/app_linux.go
           test "$(grep -Fc 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go)" = "1"
           test "$(grep -Fc 'func (r *LinuxRunner) StartCore' upstream-lalune/Desktop/Linux/app_linux.go)" = "1"
+          test -f upstream-lalune/Desktop/Linux/lalune_socks5_linux.go
+          grep -Fq '192.168.4.26:12500' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -Fq 'fwmark 0x4c4c/0xffff lookup 202' upstream-lalune/Desktop/Linux/app_linux.go
           sha256sum upstream-lalune/Desktop/Linux/app_linux.go | tee adaptation-source.sha256
           sha256sum upstream-lalune/Desktop/Libs/protocols.go | tee protocols-source.sha256
       - name: Patch bundled CSQTT deploy
