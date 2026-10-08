@@ -23,7 +23,9 @@
     try { const x = await json('/vk/state'); cache.vk = JSON.stringify(x); } catch (_) {}
   }
   setInterval(refresh, 1200);
+  setInterval(refreshCaptcha, 700);
   setTimeout(refresh, 50);
+  setTimeout(refreshCaptcha, 100);
   const syncReq = (path, method, body) => {
     try {
       const xhr = new XMLHttpRequest();
