@@ -172,6 +172,9 @@ func (t *LinuxTun) Stop() {
 if old not in s:
     raise SystemExit("LinuxTun Start/Stop marker not found")
 s=s.replace(old,new,1)
+# Persist the LinuxTun dataplane adaptation before re-reading the pinned source
+# for the lifecycle patch; otherwise the later write would discard Start/Stop.
+LINUX.write_text(s)
 
 # Remove the upstream Linux deadlock: TUNCONF must be enough to create the TUN.
 # The first traffic cannot appear until the TUN and routes already exist.
