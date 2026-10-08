@@ -28,8 +28,10 @@ jobs:
           set -e
           tarball=$(find /tmp/artifact -type f -name '*.tar.gz' -print -quit)
           test -n "$tarball"
-          tar -xzf "$tarball" -C /tmp/artifact
-          bin=$(find /tmp/artifact -type f -name 'lalune-backend-native' -print -quit)
+          rm -rf /tmp/extracted
+          mkdir -p /tmp/extracted
+          tar -xzf "$tarball" -C /tmp/extracted
+          bin=$(find /tmp/extracted -type f -name 'lalune-backend-native' -print -quit)
           test -n "$bin"
           cp "$bin" /tmp/lalune-backend-native
           sha256sum /tmp/lalune-backend-native
