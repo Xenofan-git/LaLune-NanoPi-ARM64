@@ -63,7 +63,22 @@
     },
     FinishVkCalls: callIdsJson => { try { post("/vk/finish", JSON.parse(callIdsJson)); return true; } catch (_) { return false; } },
     GetDeviceId: () => { try { return JSON.parse(cache.settings).deviceId || ''; } catch (_) { return ''; } },
-    RegenerateDeviceId: () => '',
+    RegenerateDeviceId: () => {
+      try {
+        const id = (crypto.randomUUID ? crypto.randomUUID() : (
+          'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+          })
+        )).replace(/-/g, '');
+        const s = JSON.parse(cache.settings || '{}');
+        s.deviceId = id;
+        cache.settings = JSON.stringify(s);
+        post('/settings', s);
+        return id;
+      } catch (_) { return ''; }
+    },
     SetSelectedConfigJson: j => post('/configs/selected', JSON.parse(j)),
     GetSelectedConfigJson: () => cache.selected,
     IsCoreDownloading: () => {
