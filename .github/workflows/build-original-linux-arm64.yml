@@ -70,6 +70,11 @@ jobs:
           grep -Fq 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go
           grep -Fq 'hasConf, hasTraffic := false, true' upstream-lalune/Desktop/Linux/app_linux.go
           grep -Fq 'func (r *LinuxRunner) StartCore' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -Fq 'startMu sync.Mutex' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -Fq 'cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -Fq 'bridge.Core.AddLog("[CORE] Второй запуск заблокирован:' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -Fq 'bridge.Core.AddLog("[TUN] Таймаут ожидания — останавливаем core")' upstream-lalune/Desktop/Linux/app_linux.go
+          test "$(grep -Fc 'syscall.Kill(-pid' upstream-lalune/Desktop/Linux/app_linux.go)" -ge 2
           test "$(grep -Fc 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go)" = "1"
           test "$(grep -Fc 'func (r *LinuxRunner) StartCore' upstream-lalune/Desktop/Linux/app_linux.go)" = "1"
           test -f upstream-lalune/Desktop/Linux/lalune_socks5_linux.go
