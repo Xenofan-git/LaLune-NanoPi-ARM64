@@ -5,11 +5,20 @@
   "description": "Returns VK Smart CAPTCHA success_token to the waiting LaLune NanoPi panel.",
   "content_scripts": [
     {
-      "matches": ["https://id.vk.com/*", "https://id.vk.ru/*"],
-      "js": ["captcha-bridge.js"],
+      "matches": [
+        "https://id.vk.com/*",
+        "https://id.vk.ru/*"
+      ],
+      "js": [
+        "captcha-bridge.js"
+      ],
       "run_at": "document_start",
-      "world": "MAIN"
+      "world": "MAIN",
+      "all_frames": true
     }
   ],
-  "host_permissions": ["http://*/*", "https://*/*"]
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ]
 }
