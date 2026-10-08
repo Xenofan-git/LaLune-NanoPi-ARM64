@@ -62,7 +62,8 @@ func (s *Socks5Server) dialTCP(addr string) (net.Conn, error) {
 	if _, err := net.InterfaceByName("csqtt0"); err != nil {
 		return nil, errors.New("LaLune TUN is not active")
 	}
-	return laluneDialer("tcp").Dial("tcp", addr)
+	d := laluneDialer("tcp")
+	return d.Dial("tcp", addr)
 }
 
 func (s *Socks5Server) dialUDP() (*net.UDPConn, error) {
