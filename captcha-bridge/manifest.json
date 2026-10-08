@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "LaLune CSQTT CAPTCHA Bridge",
+  "version": "0.1.0",
+  "description": "Returns VK Smart CAPTCHA success_token to the waiting LaLune NanoPi panel.",
+  "content_scripts": [
+    {
+      "matches": ["https://id.vk.com/*", "https://id.vk.ru/*"],
+      "js": ["captcha-bridge.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ],
+  "host_permissions": ["http://*/*", "https://*/*"]
+}
