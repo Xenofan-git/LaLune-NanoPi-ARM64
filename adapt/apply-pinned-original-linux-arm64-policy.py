@@ -119,7 +119,7 @@ func (t *LinuxTun) Start(udpConn net.Conn, running *bool) {
 \t}
 \tifr.SetUint16(unix.IFF_TUN | unix.IFF_NO_PI)
 \tif err := unix.IoctlIfreq(fd, unix.TUNSETIFF, ifr); err != nil {
-\t\tf.Close()
+\t\t_ = unix.Close(fd)
 \t\tt.mu.Unlock()
 \t\tt.app.core.AddLog(fmt.Sprintf("[TUN] TUNSETIFF csqtt0: %v", err))
 \t\treturn
@@ -166,7 +166,7 @@ func (t *LinuxTun) Stop() {
 \tt.tunFile = nil
 \tt.mu.Unlock()
 \tif f != nil {
-\t\t_ = f.Close()
+\t\t_ = _ = unix.Close(fd)
 \t}
 }'''
 if old not in s:
