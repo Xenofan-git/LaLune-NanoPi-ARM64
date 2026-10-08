@@ -24,11 +24,31 @@
   }
   setInterval(refresh, 1200);
   setTimeout(refresh, 50);
-  const post = (path, body) => { fetch(base + path, {method:'POST', headers:{'Content-Type':'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)}).catch(()=>{}); return true; };
+  const syncReq = (path, method, body) => {
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open(method || 'GET', base + path, false);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.send(body === undefined ? null : JSON.stringify(body));
+      return xhr.status >= 200 && xhr.status < 300 ? xhr.responseText : '';
+    } catch (_) { return ''; }
+  };
+  const syncJson = (path, method, body, fallback) => {
+    const raw = syncReq(path, method, body);
+    if (!raw) return fallback;
+    try { return JSON.parse(raw); } catch (_) { return fallback; }
+  };
+  const post = (path, body) => syncReq(path, 'POST', body) !== '';
   window.api = {
     GetConfigsJson: () => cache.configs,
-    SaveConfig: (link, protocol) => post('/configs', {link, protocol: protocol || 'CSQTT'}),
-    DeleteConfig: id => { fetch(base + '/configs/' + encodeURIComponent(id), {method:'DELETE'}).catch(()=>{}); return true; },
+    SaveConfig: (link, protocol) => {
+      const x = syncJson('/configs', 'POST', {link, protocol: protocol || 'CSQTT'}, {ok:false});
+      return !!x.ok;
+    },
+    DeleteConfig: id => {
+      const x = syncJson('/configs/' + encodeURIComponent(id), 'DELETE', undefined, {ok:false});
+      return !!x.ok;
+    },
     GetSettingsJson: () => cache.settings,
     SaveSettings: j => post('/settings', JSON.parse(j)),
     GetLogsJson: () => cache.logs,
@@ -36,24 +56,34 @@
     GetStatusJson: () => cache.status,
     Connect: id => post('/vpn/connect', {id}),
     Disconnect: () => post('/vpn/disconnect'),
-    CheckCoreUpdate: () => { fetch(base + "/updates/core/check").then(r=>r.text()).then(x=>cache.coreUpdate=x).catch(()=>{}); return cache.coreUpdate; },
-    UpdateCore: () => post("/updates/core"),
-    UpdateCoreAndWait: () => post("/updates/core/wait"),
+    CheckCoreUpdate: () => {
+      const x = syncReq("/updates/core/check", "GET");
+      if (x) cache.coreUpdate = x;
+      return cache.coreUpdate;
+    },
+    UpdateCore: () => !!syncJson("/updates/core", "POST", undefined, {ok:false}).ok,
+    UpdateCoreAndWait: () => !!syncJson("/updates/core/wait", "POST", undefined, {ok:false}).ok,
     CheckLaLuneUpdate: () => {
-      fetch(base + "/updates/lalune").then(r=>r.json()).then(x => {
+      const x = syncJson("/updates/lalune", "GET", undefined, null);
+      if (x) {
         cache.laluneUpdate = JSON.stringify({
           update: !!(x.hasUpdate || x.HasUpdate),
           version: x.remoteTag || x.RemoteTag || ''
         });
-      }).catch(()=>{});
+      }
       return cache.laluneUpdate;
     },
     OpenLaLuneReleases: () => { window.open('https://github.com/Endlad2/LaLune/releases/latest','_blank'); return true; },
-    GetVKTokenState: () => { fetch(base + "/vk/state").then(r=>r.text()).then(x=>cache.vk=x).catch(()=>{}); return cache.vk; },
-    VkLogin: () => post("/vk/login"),
-    DeleteVKToken: () => post("/vk/delete"),
+    GetVKTokenState: () => {
+      const x = syncReq("/vk/state", "GET");
+      if (x) cache.vk = x;
+      return cache.vk;
+    },
+    VkLogin: () => !!syncJson("/vk/login", "POST", undefined, {ok:false}).ok,
+    DeleteVKToken: () => !!syncJson("/vk/delete", "POST", undefined, {ok:false}).ok,
     ValidateVKToken: () => {
-      fetch(base + "/vk/validate").then(r=>r.text()).then(x=>cache.vk=x).catch(()=>{});
+      const x = syncReq("/vk/validate", "GET");
+      if (x) cache.vk = x;
       return cache.vk;
     },
     RunVkAutoApiCalls: () => { post("/vk/auto"); return "{\"pending\":true}"; },
@@ -61,7 +91,11 @@
       fetch(base + "/vk/auto/poll").then(r=>r.text()).then(x=>cache.vkAuto=x).catch(()=>{});
       return cache.vkAuto;
     },
-    FinishVkCalls: callIdsJson => { try { post("/vk/finish", JSON.parse(callIdsJson)); return true; } catch (_) { return false; } },
+    FinishVkCalls: callIdsJson => {
+      try {
+        return !!syncJson("/vk/finish", "POST", JSON.parse(callIdsJson), {ok:false}).ok;
+      } catch (_) { return false; }
+    },
     GetDeviceId: () => { try { return JSON.parse(cache.settings).deviceId || ''; } catch (_) { return ''; } },
     RegenerateDeviceId: () => {
       try {
@@ -80,14 +114,20 @@
       } catch (_) { return ''; }
     },
     SetSelectedConfigJson: j => post('/configs/selected', JSON.parse(j)),
-    GetSelectedConfigJson: () => cache.selected,
+    GetSelectedConfigJson: () => {
+      const x = syncReq("/configs/selected", "GET");
+      if (x) cache.selected = x;
+      return cache.selected;
+    },
     IsCoreDownloading: () => {
-      fetch(base + "/updates/core/status").then(r=>r.json()).then(x=>{
-        cache.coreDownloading = !!x.downloading;
-      }).catch(()=>{});
+      const x = syncJson("/updates/core/status", "GET", undefined, null);
+      if (x) cache.coreDownloading = !!x.downloading;
       return cache.coreDownloading;
     },
-    DeployProtocol: j => post('/deploy', JSON.parse(j)),
+    DeployProtocol: j => {
+      try { return !!syncJson('/deploy', 'POST', JSON.parse(j), {ok:false}).ok; }
+      catch (_) { return false; }
+    },
     DeployLog: () => cache.deployLog,
     IsDeploying: () => cache.deploying
   };
