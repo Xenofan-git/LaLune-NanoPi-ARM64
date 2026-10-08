@@ -264,3 +264,237 @@ replace_once(MAIN, """      case 3:\n        return const LogsPage();\n      // 
 replace_once(NAV, """    _NavItem(icon: 'assets/logs.png', label: 'Логи'),\n    // Вкладка \"Деплой\" временно убрана из UI (логика в deploy_page.dart сохранена).""", """    _NavItem(icon: 'assets/logs.png', label: 'Логи'),\n    _NavItem(icon: 'assets/info.png', label: 'Деплой'),""")
 replace_once(INDEX, "    {{flutter_bootstrap_js}}", "    <script src=\"api.js\"></script>\n    {{flutter_bootstrap_js}}")
 API_JS.write_text(NANOPI_JS.read_text())
+
+# ============================================================
+# Direct routing: destination domains/IPs bypass CSQTT.
+# Only traffic sourced from the LaLune client subnet is affected.
+# ============================================================
+
+COMMON = UPSTREAM / "Desktop/Libs/common.go"
+LINUX = UPSTREAM / "Desktop/Linux/app_linux.go"
+API_DART = UPSTREAM / "Frontend/Core/lib/api.dart"
+SETTINGS_PAGE = UPSTREAM / "Frontend/Core/lib/pages/settings_page.dart"
+
+replace_once(
+    COMMON,
+    '''\tValidateVkHashes        bool   `json:"validateVkHashes"`\n\n\t// Экспериментальные функции.''',
+    '''\tValidateVkHashes        bool   `json:"validateVkHashes"`\n\tDirectDomains           string `json:"directDomains"`\n\tDirectIPs               string `json:"directIPs"`\n\n\t// Экспериментальные функции.''',
+)
+
+linux_direct = r'''
+const directMark = "0x4c4c"
+const directRulePref = "22010"
+const directNftPath = "/run/lalune-direct.nft"
+const directDnsmasqPath = "/etc/dnsmasq.d/lalune-direct.conf"
+
+func splitDirectList(raw string) []string {
+\treturn strings.FieldsFunc(raw, func(r rune) bool {
+\t\treturn r == ',' || r == ';' || r == '\\n' || r == '\\r' || r == '\\t' || r == ' '
+\t})
+}
+
+func validDirectDomain(s string) bool {
+\tif s == "" || strings.ContainsAny(s, "/#:=<>\"'\\\\") {
+\t\treturn false
+\t}
+\tif strings.HasPrefix(s, "*.") {
+\t\ts = strings.TrimPrefix(s, "*.")
+\t}
+\treturn strings.Contains(s, ".") && regexp.MustCompile("^[A-Za-z0-9._*-]+$").MatchString(s)
+}
+
+func normalizeDirectIPs(raw string) ([]string, error) {
+\tvar out []string
+\tfor _, token := range splitDirectList(raw) {
+\t\tif token == "" {
+\t\t\tcontinue
+\t\t}
+\t\tif ip := net.ParseIP(token); ip != nil {
+\t\t\tif ip.To4() == nil {
+\t\t\t\treturn nil, fmt.Errorf("IPv6 пока не поддерживается: %s", token)
+\t\t\t}
+\t\t\tout = append(out, ip.To4().String())
+\t\t\tcontinue
+\t\t}
+\t\t_, n, err := net.ParseCIDR(token)
+\t\tif err != nil || n.IP.To4() == nil {
+\t\t\treturn nil, fmt.Errorf("некорректный IPv4/CIDR: %s", token)
+\t\t}
+\t\tout = append(out, n.String())
+\t}
+\treturn out, nil
+}
+
+func (t *LinuxTun) cleanupDirectRoutingLocked() {
+\tt.app.runSudo("ip rule del pref " + directRulePref + " 2>/dev/null || true")
+\tt.app.runSudo("nft delete table inet lalune_direct 2>/dev/null || true")
+\tif _, err := os.Stat(directDnsmasqPath); err == nil {
+\t\t_ = os.Remove(directDnsmasqPath)
+\t\t_ = t.app.runSudo("systemctl restart dnsmasq")
+\t}
+\t_ = os.Remove(directNftPath)
+}
+
+func (t *LinuxTun) applyDirectRoutingLocked() error {
+\tsettings := t.app.core.GetSettings()
+\tdomains := splitDirectList(settings.DirectDomains)
+\tips, err := normalizeDirectIPs(settings.DirectIPs)
+\tif err != nil {
+\t\treturn err
+\t}
+
+\tfor _, d := range domains {
+\t\tif !validDirectDomain(d) {
+\t\t\treturn fmt.Errorf("некорректный домен Direct: %s", d)
+\t\t}
+\t}
+
+\tt.app.runSudo("ip rule del pref " + directRulePref + " 2>/dev/null || true")
+\tt.app.runSudo("nft delete table inet lalune_direct 2>/dev/null || true")
+\thadDnsmasq := false
+\tif _, err := os.Stat(directDnsmasqPath); err == nil {
+\t\thadDnsmasq = true
+\t\t_ = os.Remove(directDnsmasqPath)
+\t}
+\t_ = os.Remove(directNftPath)
+
+\tif len(domains) == 0 && len(ips) == 0 {
+\t\tif hadDnsmasq {
+\t\t\t_ = t.app.runSudo("systemctl restart dnsmasq")
+\t\t}
+\t\treturn nil
+\t}
+
+\tvar nft strings.Builder
+\tnft.WriteString("table inet lalune_direct {\n")
+\tnft.WriteString("  set direct4 { type ipv4_addr; flags interval;")
+\tif len(ips) > 0 {
+\t\tnft.WriteString(" elements = { ")
+\t\tnft.WriteString(strings.Join(ips, ", "))
+\t\tnft.WriteString(" }")
+\t}
+\tnft.WriteString(" }\n")
+\tnft.WriteString("  chain prerouting { type filter hook prerouting priority -150; policy accept;\n")
+\tnft.WriteString("    ip saddr 192.168.5.0/24 ip daddr @direct4 meta mark set " + directMark + "\n")
+\tnft.WriteString("  }\n")
+\tnft.WriteString("}\n")
+
+\tif err := os.WriteFile(directNftPath, []byte(nft.String()), 0600); err != nil {
+\t\treturn fmt.Errorf("запись nft-конфига: %w", err)
+\t}
+\tif err := t.app.runSudo("nft -f " + directNftPath); err != nil {
+\t\treturn fmt.Errorf("nft direct policy: %w", err)
+\t}
+
+\tif len(domains) > 0 {
+\t\tline := "nftset=/"
+\t\tfor i, d := range domains {
+\t\t\tif i > 0 {
+\t\t\t\tline += "/"
+\t\t\t}
+\t\t\tline += d
+\t\t}
+\t\tline += "/4#inet#lalune_direct#direct4\n"
+\t\tif err := os.WriteFile(directDnsmasqPath, []byte(line), 0644); err != nil {
+\t\t\treturn fmt.Errorf("запись dnsmasq direct-конфига: %w", err)
+\t\t}
+\t\tif err := t.app.runSudo("systemctl restart dnsmasq"); err != nil {
+\t\t\treturn fmt.Errorf("перезапуск dnsmasq: %w", err)
+\t\t}
+\t}
+
+\tif err := t.app.runSudo("ip rule add pref " + directRulePref + " fwmark " + directMark + "/0xffff lookup main"); err != nil {
+\t\treturn fmt.Errorf("ip rule Direct: %w", err)
+\t}
+
+\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Активно: доменов=%d, IP/CIDR=%d; mark=%s; LTE=main", len(domains), len(ips), directMark))
+\treturn nil
+}
+
+func (t *LinuxTun) ApplyDirectRouting() error {
+\tt.mu.Lock()
+\tdefer t.mu.Unlock()
+\treturn t.applyDirectRoutingLocked()
+}
+
+func (t *LinuxTun) CleanupDirectRouting() {
+\tt.mu.Lock()
+\tdefer t.mu.Unlock()
+\tt.cleanupDirectRoutingLocked()
+}
+
+'''
+marker = 'func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) {'
+if (!old.includes(marker)) throw new Error("SetupRoutes marker missing");
+let s = old.replace(marker, linux_direct + marker, 1);
+
+const setupOld = '\tt.app.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")\n\n\tt.app.core.AddLog("[TUN] TUN настроен успешно (policy table 202)")';
+const setupNew = '\tt.app.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")\n\n\tif err := t.applyDirectRoutingLocked(); err != nil {\n\t\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Ошибка применения: %v", err))\n\t}\n\tt.app.core.AddLog("[TUN] TUN настроен успешно (policy table 202)")';
+if (!s.includes(setupOld)) throw new Error("Setup body marker missing");
+s = s.replace(setupOld, setupNew, 1);
+
+const cleanupOld = '\tt.app.core.AddLog("[TUN] Удаление TUN...")\n\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")';
+const cleanupNew = '\tt.app.core.AddLog("[TUN] Удаление TUN...")\n\tt.cleanupDirectRoutingLocked()\n\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")';
+if (!s.includes(cleanupOld)) throw new Error("Cleanup marker missing");
+s = s.replace(cleanupOld, cleanupNew, 1);
+
+const saveOld = 'func (a *App) SaveSettings(j string) bool { return a.core.SaveSettings(j) }';
+const saveNew = [
+  'func (a *App) SaveSettings(j string) bool {',
+  '\tok := a.core.SaveSettings(j)',
+  '\tif !ok {',
+  '\t\treturn false',
+  '\t}',
+  '\tif a.core.IsConnected() {',
+  '\t\tif err := a.tun.ApplyDirectRouting(); err != nil {',
+  '\t\t\ta.core.AddLog(fmt.Sprintf("[DIRECT] Ошибка применения настроек: %v", err))',
+  '\t\t\treturn false',
+  '\t\t}',
+  '\t}',
+  '\treturn true',
+  '}'
+].join("\n");
+if (!s.includes(saveOld)) throw new Error("SaveSettings marker missing");
+s = s.replace(saveOld, saveNew, 1);
+
+LINUX.write_text(s)
+
+s = API_DART.read_text()
+s = s.replace(
+'''  final bool validateVkHashes;\n\n  /// Экспериментальные функции.''',
+'''  final bool validateVkHashes;\n  final String directDomains;\n  final String directIPs;\n\n  /// Экспериментальные функции.''', 1)
+s = s.replace(
+'''    this.validateVkHashes = false,\n    this.enableSmartTunnel = false,''',
+'''    this.validateVkHashes = false,\n    this.directDomains = '',\n    this.directIPs = '',\n    this.enableSmartTunnel = false,''', 1)
+s = s.replace(
+'''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      enableSmartTunnel:''',
+'''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      directDomains: (j['directDomains'] ?? '') as String,\n      directIPs: (j['directIPs'] ?? '') as String,\n      enableSmartTunnel:''', 1)
+s = s.replace(
+'''    'validateVkHashes': validateVkHashes,\n    'enableSmartTunnel': enableSmartTunnel,''',
+'''    'validateVkHashes': validateVkHashes,\n    'directDomains': directDomains,\n    'directIPs': directIPs,\n    'enableSmartTunnel': enableSmartTunnel,''', 1)
+s = s.replace(
+'''    String? vkAuthMode, bool? allowHashRedistribution, bool? validateVkHashes,\n    bool? enableSmartTunnel,''',
+'''    String? vkAuthMode, bool? allowHashRedistribution, bool? validateVkHashes,\n    String? directDomains, String? directIPs,\n    bool? enableSmartTunnel,''', 1)
+s = s.replace(
+'''    validateVkHashes: validateVkHashes ?? this.validateVkHashes,\n    enableSmartTunnel:''',
+'''    validateVkHashes: validateVkHashes ?? this.validateVkHashes,\n    directDomains: directDomains ?? this.directDomains,\n    directIPs: directIPs ?? this.directIPs,\n    enableSmartTunnel:''', 1)
+API_DART.write_text(s)
+
+s = SETTINGS_PAGE.read_text()
+s = s.replace(
+'''  final _deviceIdCtl = TextEditingController();''',
+'''  final _deviceIdCtl = TextEditingController();\n  final _directDomainsCtl = TextEditingController();\n  final _directIPsCtl = TextEditingController();''', 1)
+s = s.replace(
+'''    _deviceIdCtl.dispose();''',
+'''    _deviceIdCtl.dispose();\n    _directDomainsCtl.dispose();\n    _directIPsCtl.dispose();''', 1)
+s = s.replace(
+'''    _deviceIdCtl.text = s.deviceId;\n    _authMode''',
+'''    _deviceIdCtl.text = s.deviceId;\n    _directDomainsCtl.text = s.directDomains;\n    _directIPsCtl.text = s.directIPs;\n    _authMode''', 1)
+s = s.replace(
+'''      authMode: _authMode,\n      enableSmartTunnel: _enableSmartTunnel,''',
+'''      authMode: _authMode,\n      directDomains: _directDomainsCtl.text.trim(),\n      directIPs: _directIPsCtl.text.trim(),\n      enableSmartTunnel: _enableSmartTunnel,''', 1)
+const uiMarker = '''              const SizedBox(height: 18),\n\n              _sectionTitle('Device ID'),''';
+const uiInsert = '''              const SizedBox(height: 18),\n\n              _sectionTitle('Direct — обход CSQTT'),\n              GlassCard(\n                child: Column(\n                  crossAxisAlignment: CrossAxisAlignment.start,\n                  children: [\n                    Text('Только указанные назначения идут напрямую через LTE. Всё остальное остаётся через CSQTT.',\n                      style: TextStyle(fontSize: 11.5, height: 1.45, color: Colors.white.withOpacity(0.55))),\n                    const SizedBox(height: 12),\n                    Text('Домены', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),\n                    const SizedBox(height: 5),\n                    TextField(\n                      controller: _directDomainsCtl,\n                      minLines: 3,\n                      maxLines: 8,\n                      style: const TextStyle(fontSize: 13),\n                      decoration: const InputDecoration(hintText: 'example.com\\ncdn.example.com'),\n                      onChanged: (_) => _markDirty(),\n                    ),\n                    const SizedBox(height: 12),\n                    Text('IP / CIDR', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),\n                    const SizedBox(height: 5),\n                    TextField(\n                      controller: _directIPsCtl,\n                      minLines: 3,\n                      maxLines: 8,\n                      style: const TextStyle(fontSize: 13),\n                      decoration: const InputDecoration(hintText: '1.2.3.4\\n1.2.3.0/24'),\n                      onChanged: (_) => _markDirty(),\n                    ),\n                    const SizedBox(height: 7),\n                    Text('По одному значению в строке; также принимаются запятые. Сейчас IPv4.',\n                      style: TextStyle(fontSize: 10.5, color: Colors.white.withOpacity(0.45))),\n                  ],\n                ),\n              ),\n              const SizedBox(height: 18),\n\n              _sectionTitle('Device ID'),''';
+if (!s.includes(uiMarker)) throw new Error("settings UI marker missing");
+s = s.replace(uiMarker, uiInsert, 1);
+SETTINGS_PAGE.write_text(s)
