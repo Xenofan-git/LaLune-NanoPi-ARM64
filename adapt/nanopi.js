@@ -22,6 +22,29 @@
     try { const x = await json('/updates/core/status'); cache.coreDownloading = !!x.downloading; } catch (_) {}
     try { const x = await json('/vk/state'); cache.vk = JSON.stringify(x); } catch (_) {}
   }
+  let captchaOverlay = null;
+  let captchaLastUpdated = 0;
+  function removeCaptchaOverlay() {
+    if (captchaOverlay) { captchaOverlay.remove(); captchaOverlay = null; }
+  }
+  function showCaptchaOverlay(state) {
+    if (!state || !state.pending || !state.redirectUri) { removeCaptchaOverlay(); return; }
+    if (captchaOverlay && captchaLastUpdated === state.updated) return;
+    captchaLastUpdated = state.updated || 0;
+    removeCaptchaOverlay();
+    const box = document.createElement('div');
+    box.style.cssText = 'position:fixed;z-index:2147483647;right:18px;bottom:18px;max-width:420px;background:#151515;color:#fff;padding:18px;border-radius:14px;box-shadow:0 8px 32px rgba(0,0,0,.45);font:14px/1.45 system-ui,sans-serif';
+    const title = document.createElement('div'); title.textContent = '🔐 Требуется CAPTCHA VK'; title.style.cssText='font-size:17px;font-weight:700;margin-bottom:8px';
+    const text = document.createElement('div'); text.textContent = 'CSQTT ожидает подтверждение. Открой CAPTCHA в браузере и пройди проверку.'; text.style.marginBottom='12px';
+    const open = document.createElement('button'); open.textContent='Открыть CAPTCHA'; open.style.cssText='padding:9px 13px;border:0;border-radius:9px;cursor:pointer;font-weight:600;margin-right:8px';
+    open.onclick=()=>{ try { const u = new URL(state.redirectUri); u.hash='lalune_panel='+encodeURIComponent(location.origin); window.open(u.toString(),'_blank','noopener'); } catch (_) { window.open(state.redirectUri,'_blank'); } };
+    const cancel = document.createElement('button'); cancel.textContent='Отмена'; cancel.style.cssText='padding:9px 13px;border:0;border-radius:9px;cursor:pointer';
+    cancel.onclick=()=>{ fetch(base+'/captcha/cancel',{method:'POST'}).catch(()=>{}); removeCaptchaOverlay(); };
+    box.append(title,text,open,cancel); document.body.appendChild(box); captchaOverlay=box;
+  }
+  async function refreshCaptcha() {
+    try { const state = await json('/captcha/state'); showCaptchaOverlay(state); } catch (_) {}
+  }
   setInterval(refresh, 1200);
   setInterval(refreshCaptcha, 700);
   setTimeout(refresh, 50);
