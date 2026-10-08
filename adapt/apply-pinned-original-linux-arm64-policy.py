@@ -48,18 +48,10 @@ new = '\tcmd := exec.Command("sh", "-c", r.app.runSudoCommand(cmdLine))\n\tstdin
 if old not in s: raise SystemExit("stdin marker not found")
 s = s.replace(old, new, 1)
 old = '\tif err := cmd.Start(); err != nil {\n\t\tbridge.Core.AddLog(fmt.Sprintf("[ERROR] Не удалось запустить: %v", err))\n\t\tbridge.Core.SetConnected(false)\n\t\treturn\n\t}\n'
-new = '\tif err := cmd.Start(); err != nil {\n\t\t\tbridge.Core.AddLog(fmt.Sprintf("[ERROR] Не удалось запустить: %v", err))\n\t\tbridge.Core.SetConnected(false)\n\t\treturn\n\t}\n\tif bootstrap := bridge.AutoVkBootstrap(); bootstrap != "" {\n\t\tif _, err := io.WriteString(stdin, bootstrap); err != nil {\n\t\t\tbridge.Core.AddLog(fmt.Sprintf("[АВТО ВК] Ошибка передачи bootstrap: %v", err))\n\t\t} else {\n\t\t\tbridge.Core.AddLog("[АВТО ВК] VK_JS_BOOTSTRAP передан в core")\n\t\t}\n\t}\n\t_ = stdin.Close()\n'
+new = '\tif err := cmd.Start(); err != nil {\n\t\t_ = stdin.Close()\n\t\tbridge.Core.AddLog(fmt.Sprintf("[ERROR] Не удалось запустить: %v", err))\n\t\tbridge.Core.SetConnected(false)\n\t\treturn\n\t}\n\tif bootstrap := bridge.AutoVkBootstrap(); bootstrap != "" {\n\t\tif _, err := io.WriteString(stdin, bootstrap); err != nil {\n\t\t\tbridge.Core.AddLog(fmt.Sprintf("[АВТО ВК] Ошибка передачи bootstrap: %v", err))\n\t\t} else {\n\t\t\tbridge.Core.AddLog("[АВТО ВК] VK_JS_BOOTSTRAP передан в core")\n\t\t}\n\t}\n\t_ = stdin.Close()\n'
 if old not in s: raise SystemExit("start marker not found")
 s = s.replace(old, new, 1)
 s = s.replace('\t"time"\n)', '\t"time"\n\t"io"\n)', 1)
-LINUX.write_text(s)
-
-# Keep the CSQTT stdin pipe open for asynchronous CAPTCHA_RESULT commands.
-s = LINUX.read_text()
-s = s.replace('type LinuxRunner struct {', 'var linuxRunnerInputs sync.Map\n\ntype LinuxRunner struct {', 1)
-s = s.replace('\tr.app.mu.Lock()', '\tlinuxRunnerInputs.Store(r, stdin)\n\tr.app.mu.Lock()', 1)
-s = s.replace('\tcmd.Wait()\n\tbridge.Core.AddLog("=== Процесс завершён ===")', '\tcmd.Wait()\n\tif input, ok := linuxRunnerInputs.LoadAndDelete(r); ok { _ = input.(io.WriteCloser).Close() }\n\tbridge.Core.AddLog("=== Процесс завершён ===")', 1)
-s = s.replace('func NewApp() *App {', 'func (r *LinuxRunner) SubmitCaptchaResult(result string) bool {\n\tvalue, ok := linuxRunnerInputs.Load(r)\n\tif !ok { return false }\n\tinput := value.(io.WriteCloser)\n\t_, err := io.WriteString(input, "CAPTCHA_RESULT|"+result+"\\n")\n\treturn err == nil\n}\n\nfunc NewApp() *App {', 1)
 LINUX.write_text(s)
 
 # NanoPi dataplane adaptation: the pinned original leaves LinuxTun.Start empty.
