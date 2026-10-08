@@ -239,6 +239,10 @@ new = '\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") {\n\t\ti
 if old not in s: raise SystemExit("manual ports marker missing")
 DEPLOY_GO.write_text(s.replace(old, new, 1))
 
+# NanoPi build version: keep the original InfoPage wording but report this adapted build.
+INFO = UPSTREAM / "Frontend/Core/lib/pages/info_page.dart"
+replace_once(INFO, "static const String _laluneVersion = '0.5.0';", "static const String _laluneVersion = '0.6.0';")
+
 # Restore the original Deploy tab and connect the Flutter Web UI to NanoPi HTTP API.
 MAIN = UPSTREAM / "Frontend/Core/lib/main.dart"
 NAV = UPSTREAM / "Frontend/Core/lib/widgets/navbar.dart"
