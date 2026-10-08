@@ -424,10 +424,10 @@ func (t *LinuxTun) CleanupDirectRouting() {
 }
 
 '''
+s = LINUX.read_text()
 marker = 'func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) {'
 if marker not in s:
     raise SystemExit("SetupRoutes marker missing")
-s = LINUX.read_text()
 s = s.replace(marker, linux_direct + marker, 1)
 
 setup_old = '\\tapp.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")\\n\\n\\tt.app.core.AddLog("[TUN] TUN настроен успешно (policy table 202)")'
