@@ -54,6 +54,7 @@ s = s.replace('\t"time"\n)', '\t"time"\n\t"io"\n)', 1)
 LINUX.write_text(s)
 
 # NanoPi core lifecycle hardening: one live core per App, process-group cleanup.
+# timeout cleanup is intentionally enforced in the generated LinuxRunner.
 s = LINUX.read_text()
 old = """func (r *LinuxRunner) StartCore(cmdArgs []string, listenPort int, bridge *libs.Bridge) {
 	r.startCoreWithSudo(cmdArgs, listenPort, bridge)
