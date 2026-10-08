@@ -430,14 +430,14 @@ if marker not in s:
     raise SystemExit("SetupRoutes marker missing")
 s = s.replace(marker, linux_direct + marker, 1)
 
-setup_old = '\\tapp.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")\\n\\n\\tt.app.core.AddLog("[TUN] TUN настроен успешно (policy table 202)")'
-setup_new = '\\tapp.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")\\n\\n\\tif err := t.applyDirectRoutingLocked(); err != nil {\\n\\t\\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Ошибка применения: %v", err))\\n\\t}\\n\\tt.app.core.AddLog("[TUN] TUN настроен успешно (policy table 202)")'
+setup_old = '\tapp.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")\n\n\tt.app.core.AddLog("[TUN] TUN настроен успешно (policy table 202)")'
+setup_new = '\tapp.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")\n\n\tif err := t.applyDirectRoutingLocked(); err != nil {\n\t\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Ошибка применения: %v", err))\n\t}\n\tt.app.core.AddLog("[TUN] TUN настроен успешно (policy table 202)")'
 if setup_old not in s:
     raise SystemExit("Setup body marker missing")
 s = s.replace(setup_old, setup_new, 1)
 
-cleanup_old = '\\tt.app.core.AddLog("[TUN] Удаление TUN...")\\n\\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")'
-cleanup_new = '\\tt.app.core.AddLog("[TUN] Удаление TUN...")\\n\\tt.cleanupDirectRoutingLocked()\\n\\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")'
+cleanup_old = '\tt.app.core.AddLog("[TUN] Удаление TUN...")\n\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")'
+cleanup_new = '\tt.app.core.AddLog("[TUN] Удаление TUN...")\n\tt.cleanupDirectRoutingLocked()\n\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")'
 if cleanup_old not in s:
     raise SystemExit("Cleanup marker missing")
 s = s.replace(cleanup_old, cleanup_new, 1)
