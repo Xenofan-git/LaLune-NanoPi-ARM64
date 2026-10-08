@@ -12,8 +12,8 @@ if old not in s:
 s = s.replace(old, new, 1)
 
 # Start SOCKS5 only after the LaLune TUN/policy table is ready.
-old = '\tapp.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")\n'
-new = old + '\tapp.runSudo("ip rule add pref 22015 fwmark 0x4c4c/0xffff lookup 202")\n\tif t.app.socks != nil {\n\t\tif err := t.app.socks.Start(); err != nil { t.app.core.AddLog(fmt.Sprintf("[SOCKS5] Ошибка запуска: %v", err)) } else { t.app.core.AddLog("[SOCKS5] LaLune SOCKS5: 192.168.4.26:12500") }\n\t}\n'
+old = '\tt.app.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")\n'
+new = old + '\tt.app.runSudo("ip rule add pref 22015 fwmark 0x4c4c/0xffff lookup 202")\n\tif t.app.socks != nil {\n\t\tif err := t.app.socks.Start(); err != nil { t.app.core.AddLog(fmt.Sprintf("[SOCKS5] Ошибка запуска: %v", err)) } else { t.app.core.AddLog("[SOCKS5] LaLune SOCKS5: 192.168.4.26:12500") }\n\t}\n'
 if old not in s:
     raise SystemExit("missing policy rule marker")
 s = s.replace(old, new, 1)
