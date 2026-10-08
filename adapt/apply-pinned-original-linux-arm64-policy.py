@@ -57,18 +57,20 @@ LINUX.write_text(s)
 # timeout cleanup is intentionally enforced in the generated LinuxRunner.
 s = LINUX.read_text()
 old = """func (r *LinuxRunner) StartCore(cmdArgs []string, listenPort int, bridge *libs.Bridge) {
-	r.startCoreWithSudo(cmdArgs, listenPort, bridge)
+\tr.startCoreWithSudo(cmdArgs, listenPort, bridge)
 }"""
 new = """func (r *LinuxRunner) StartCore(cmdArgs []string, listenPort int, bridge *libs.Bridge) {
-	r.app.mu.Lock()
-	if r.app.clientPID > 0 {
-		pid := r.app.clientPID
-		r.app.mu.Unlock()
-		bridge.Core.AddLog(fmt.Sprintf("[CORE] Второй запуск заблокирован: уже работает PID %d", pid))
-		return
-	}
-	r.app.mu.Unlock()
-	r.startCoreWithSudo(cmdArgs, listenPort, bridge)
+\tr.startMu.Lock()
+\tdefer r.startMu.Unlock()
+\tr.app.mu.Lock()
+\tif r.app.clientPID > 0 {
+\t\tpid := r.app.clientPID
+\t\tr.app.mu.Unlock()
+\t\tbridge.Core.AddLog(fmt.Sprintf("[CORE] Второй запуск заблокирован: уже работает PID %d", pid))
+\t\treturn
+\t}
+\tr.app.mu.Unlock()
+\tr.startCoreWithSudo(cmdArgs, listenPort, bridge)
 }"""
 if old not in s: raise SystemExit("StartCore guard marker not found")
 s = s.replace(old, new, 1)
