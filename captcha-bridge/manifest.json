@@ -16,9 +16,5 @@
       "world": "MAIN",
       "all_frames": true
     }
-  ],
-  "host_permissions": [
-    "http://*/*",
-    "https://*/*"
   ]
 }
