@@ -423,7 +423,8 @@ func (t *LinuxTun) CleanupDirectRouting() {
 }
 
 '''
-linux_direct = linux_direct.replace("\\t", "\t")
+linux_direct = linux_direct.replace("\\\\t", "    ").replace("\\t", "    ")
+linux_direct = linux_direct.replace("r == '\\\\n'", "r == '\\n'").replace("r == '\\\\r'", "r == '\\r'").replace("r == '\\\\t'", "r == '\\t'")
 s = LINUX.read_text()
 marker = 'func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) {'
 if marker not in s:
