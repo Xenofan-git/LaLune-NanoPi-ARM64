@@ -68,6 +68,7 @@ jobs:
           grep -Fq '"--ssh-port", itoa(req.SSHPort)' upstream-lalune/Desktop/Libs/deploy.go
           grep -Fq 'ip route replace default dev csqtt0 table 202' upstream-lalune/Desktop/Linux/app_linux.go
           grep -Fq 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -Fq 'hasConf, hasTraffic := false, true' upstream-lalune/Desktop/Linux/app_linux.go
           grep -Fq 'func (r *LinuxRunner) StartCore' upstream-lalune/Desktop/Linux/app_linux.go
           test "$(grep -Fc 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go)" = "1"
           test "$(grep -Fc 'func (r *LinuxRunner) StartCore' upstream-lalune/Desktop/Linux/app_linux.go)" = "1"
