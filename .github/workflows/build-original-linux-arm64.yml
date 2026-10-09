@@ -33,6 +33,13 @@ jobs:
           grep -q 'id="directIPs"' adapt/csqtt-panel-preview.html
           grep -q 'id="saveDirectRules"' adapt/csqtt-panel-preview.html
           ! grep -q 'Маршрутизация приложений' adapt/csqtt-panel-preview.html
+          test "$(grep -o 'class="tab' adapt/csqtt-panel-preview.html | wc -l)" -eq 5
+          grep -q 'function directRuleErrors()' adapt/csqtt-panel-preview.html
+          grep -q 'func (t \*LinuxTun) ApplyDirectRouting() error' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -q 't.applyDirectRoutingLocked()' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -q 't.cleanupDirectRoutingLocked()' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -q 'func TestDirectDomainValidation' adapt/headless_main_test.go
+          grep -q 'func TestNormalizeDirectIPs' adapt/headless_main_test.go
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
