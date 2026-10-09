@@ -615,6 +615,10 @@ func normalizeDirectIPs(raw string) ([]string, error) {
 \t\tif err != nil || n.IP.To4() == nil {
 \t\t\treturn nil, fmt.Errorf("некорректный IPv4/CIDR: %s", token)
 \t\t}
+\t\tones, _ := n.Mask.Size()
+\t\tif ones == 0 {
+\t\t\treturn nil, fmt.Errorf("CIDR по умолчанию запрещён для Direct: %s", token)
+\t\t}
 \t\tout = append(out, n.String())
 \t}
 \treturn out, nil
