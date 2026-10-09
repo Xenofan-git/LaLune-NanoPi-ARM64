@@ -279,10 +279,18 @@ func apiHandler(app *App) http.Handler {
     })
     mux.HandleFunc("/deploy/log", func(w http.ResponseWriter, r *http.Request) {
         if !method(w, r, http.MethodGet) { return }
+        if !privateClient(r) {
+            http.Error(w, "deployment status is available only from LAN or Tailscale", http.StatusForbidden)
+            return
+        }
         writeRaw(w, mustJSON(libs.DeployLog()))
     })
     mux.HandleFunc("/deploy/status", func(w http.ResponseWriter, r *http.Request) {
         if !method(w, r, http.MethodGet) { return }
+        if !privateClient(r) {
+            http.Error(w, "deployment status is available only from LAN or Tailscale", http.StatusForbidden)
+            return
+        }
         writeJSON(w, map[string]bool{"deploying": libs.DeployBusy()})
     })
 
