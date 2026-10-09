@@ -174,7 +174,7 @@ jobs:
             install -d -m 0700 "$BACKUP"
             cp -a "$UNIT" "$BACKUP/csqtt-47000.service"
             cp -a "$OLD_BIN" "$BACKUP/csqtt-2.1.9"
-            TMP_UNIT="$UNIT.new.$"
+            TMP_UNIT="$UNIT.new.$$"
             sed "s|$OLD_BIN|$NEW_BIN|g" "$UNIT" > "$TMP_UNIT"
             if ! grep -Fq "ExecStart=/usr/bin/ip netns exec csqtt47000 $NEW_BIN --listen 0.0.0.0:47000 --web-port 47002 --config-dir /etc/csqtt-47000" "$TMP_UNIT"; then
               rm -f "$TMP_UNIT"
