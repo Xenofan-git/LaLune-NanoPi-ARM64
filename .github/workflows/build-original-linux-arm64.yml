@@ -149,6 +149,9 @@ jobs:
           grep -Fq 'pub secrets_file: Option<String>' upstream-lalune/Core/DeployManager/src/main.rs
           grep -Fq 'pub uninstall: bool' upstream-lalune/Core/DeployManager/src/main.rs
           grep -Fq 'fn uninstall_official_csqtt' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'CSQTT_ISOLATION_REQUIRED' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'upstream cleanup is global and could remove Android/production CSQTT' upstream-lalune/Core/DeployManager/src/deploy.rs
+          ! grep -Fq 'bash /tmp/deploy.sh uninstall' upstream-lalune/Core/DeployManager/src/deploy.rs
           grep -Fq 'func validCSQTTSecret' upstream-lalune/Desktop/Libs/deploy.go
           grep -Fq 'VKTokenFetcherARM64Archive' upstream-lalune/Desktop/Libs/vktoken.go
           grep -Fq 'ResolveChromiumExecutable' upstream-lalune/Core/LaLuneTokenFetcher/Playwright/PlaywrightTokenFetcher.cs
