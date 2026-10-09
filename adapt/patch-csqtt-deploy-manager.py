@@ -207,7 +207,7 @@ replace_once(
 replace_once(
     protocol,
     "            Protocol::Csqtt => (47000, 47002, 1080),",
-    "            Protocol::Csqtt => (46000, 46002, 0),",
+    "            Protocol::Csqtt => (47000, 47002, 0),",
 )
 replace_once(
     deploy,
@@ -285,8 +285,8 @@ official = r'''fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Res
         }
 
         let remote_bundle = format!("{remote_stage}/{bundle_name}");
-        let peer_port = ports.core.unwrap_or(46000);
-        let web_port = ports.warp.unwrap_or(46002);
+        let peer_port = ports.core.unwrap_or(47000);
+        let web_port = ports.warp.unwrap_or(47002);
         let mode = if args.install_in_docker { "docker" } else { "systemd" };
         let script = format!(r#"set -Eeuo pipefail
 STAGE='{remote_stage}'
@@ -423,7 +423,7 @@ trap 'rm -rf -- "$STAGE"; rm -f -- /tmp/deploy.sh' EXIT
 install -m 0755 '{remote_bundle}/deploy.sh' /tmp/deploy.sh
 env CSQTT_PEER_PORT={peer_port} CSQTT_SSH_PORT={ssh_port} CSQTT_WEB_PORT={web_port} bash /tmp/deploy.sh uninstall
 echo CSQTT_UNINSTALL_OK
-"#, ssh_port=args.ssh_port, peer_port=ports.core.unwrap_or(46000), web_port=ports.warp.unwrap_or(46002));
+"#, ssh_port=args.ssh_port, peer_port=ports.core.unwrap_or(47000), web_port=ports.warp.unwrap_or(47002));
         let output = run_ssh(args, &remote, &script).context("run official CSQTT uninstall")?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
