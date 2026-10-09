@@ -197,12 +197,12 @@ replace_once(deploy, 'systemd service {bin}.service started', 'systemd service {
 replace_once(
     main,
     "    pub local_binary_dir: Option<String>,",
-    "    pub local_binary_dir: Option<String>,\\n\\n    /// One-shot local file containing tunnel/web credentials.\\n    #[arg(long)]\\n    pub secrets_file: Option<String>,",
+    "    pub local_binary_dir: Option<String>,\n\n    /// One-shot local file containing tunnel/web credentials.\n    #[arg(long)]\n    pub secrets_file: Option<String>,",
 )
 replace_once(
     main,
     "    pub listen_port: Option<u16>,",
-    "    pub listen_port: Option<u16>,\\n\\n    /// Install official CSQTT into Docker rather than systemd.\\n    #[arg(long, default_value_t = false)]\\n    pub install_in_docker: bool,",
+    "    pub listen_port: Option<u16>,\n\n    /// Install official CSQTT into Docker rather than systemd.\n    #[arg(long, default_value_t = false)]\n    pub install_in_docker: bool,",
 )
 replace_once(
     protocol,
@@ -212,12 +212,12 @@ replace_once(
 replace_once(
     deploy,
     "use std::process::Command;",
-    "use std::process::Command;\\nuse std::fs;\\nuse std::path::Path;\\nuse std::time::{SystemTime, UNIX_EPOCH};",
+    "use std::process::Command;\nuse std::fs;\nuse std::path::Path;\nuse std::time::{SystemTime, UNIX_EPOCH};",
 )
 replace_once(
     deploy,
-    "pub fn deploy(args: &DeployArgs, proto: Protocol, ports: &Ports) -> Result<()> {\\n    let remote =",
-    "pub fn deploy(args: &DeployArgs, proto: Protocol, ports: &Ports) -> Result<()> {\\n    if proto == Protocol::Csqtt {\\n        return deploy_official_csqtt(args, ports);\\n    }\\n    let remote =",
+    "pub fn deploy(args: &DeployArgs, proto: Protocol, ports: &Ports) -> Result<()> {\n    let remote =",
+    "pub fn deploy(args: &DeployArgs, proto: Protocol, ports: &Ports) -> Result<()> {\n    if proto == Protocol::Csqtt {\n        return deploy_official_csqtt(args, ports);\n    }\n    let remote =",
 )
 official = r'''fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {
     let secrets_path = args.secrets_file.as_deref()
@@ -332,67 +332,67 @@ replace_once(deploy, "fn write_askpass_helper() -> Result<std::path::PathBuf> {"
 deploy_go = ROOT / "Desktop/Libs/deploy.go"
 replace_once(
     deploy_go,
-    '\\tListenPort  int    `json:"listenPort"`',
-    '\\tListenPort  int    `json:"listenPort"`\\n\\tMainPassword string `json:"mainPassword"`\\n\\tWebUser string `json:"webUser"`\\n\\tWebPassword string `json:"webPassword"`\\n\\tDockerInstall bool `json:"dockerInstall"`\n\tUninstall bool `json:"uninstall"`',
+    '\tListenPort  int    `json:"listenPort"`',
+    '\tListenPort  int    `json:"listenPort"`\n\tMainPassword string `json:"mainPassword"`\n\tWebUser string `json:"webUser"`\n\tWebPassword string `json:"webPassword"`\n\tDockerInstall bool `json:"dockerInstall"`\n\tUninstall bool `json:"uninstall"`',
 )
 replace_once(
     deploy_go,
-    '\\tif strings.TrimSpace(req.Host) == "" {',
-    '\\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") && !req.Uninstall {\\n\\t\\tif !validCSQTTSecret(req.MainPassword) || !validCSQTTSecret(req.WebUser) || !validCSQTTSecret(req.WebPassword) {\\n\\t\\t\\tdeployAppend("[deploy] CSQTT: задайте пароль туннеля, логин и пароль WEB только латиницей и цифрами")\\n\\t\\t\\treturn false\\n\\t\\t}\\n\\t}\\n\\tif strings.TrimSpace(req.Host) == "" {',
+    '\tif strings.TrimSpace(req.Host) == "" {',
+    '\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") && !req.Uninstall {\n\t\tif !validCSQTTSecret(req.MainPassword) || !validCSQTTSecret(req.WebUser) || !validCSQTTSecret(req.WebPassword) {\n\t\t\tdeployAppend("[deploy] CSQTT: задайте пароль туннеля, логин и пароль WEB только латиницей и цифрами")\n\t\t\treturn false\n\t\t}\n\t}\n\tif strings.TrimSpace(req.Host) == "" {',
 )
 replace_once(
     deploy_go,
     'func DeployProtocol(reqJSON string) bool {',
-    'func validCSQTTSecret(value string) bool {\\n\\tif value == "" { return false }\\n\\tfor _, r := range value { if !((r >= \'a\' && r <= \'z\') || (r >= \'A\' && r <= \'Z\') || (r >= \'0\' && r <= \'9\')) { return false } }\\n\\treturn true\\n}\\n\\nfunc DeployProtocol(reqJSON string) bool {',
+    'func validCSQTTSecret(value string) bool {\n\tif value == "" { return false }\n\tfor _, r := range value { if !((r >= \'a\' && r <= \'z\') || (r >= \'A\' && r <= \'Z\') || (r >= \'0\' && r <= \'9\')) { return false } }\n\treturn true\n}\n\nfunc DeployProtocol(reqJSON string) bool {',
 )
 replace_once(
     deploy_go,
-    '\\tif req.SSHPort > 0 {',
-    '''\\tsecretsFile := ""
-\\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") && !req.Uninstall {
-\\t\\tf, err := os.CreateTemp("", "csqtt-deploy-secrets-*.txt")
-\\t\\tif err != nil { deployAppend("[deploy] не удалось создать временный файл авторизации"); return false }
-\\t\\t_ = f.Chmod(0600)
-\\t\\t_, writeErr := f.WriteString(req.MainPassword + "\\n" + req.WebUser + "\\n" + req.WebPassword + "\\n")
-\\t\\tcloseErr := f.Close()
-\\t\\tif writeErr != nil || closeErr != nil { _ = os.Remove(f.Name()); deployAppend("[deploy] не удалось сохранить временные данные авторизации"); return false }
-\\t\\tsecretsFile = f.Name()
-\\t\\targs = append(args, "--secrets-file", secretsFile)
-\\t\\tif req.DockerInstall { args = append(args, "--install-in-docker") }\n\t\t
-\\t}
-\\tif req.Uninstall { args = append(args, "--uninstall") }\n\tif req.SSHPort > 0 {''',
+    '\tif req.SSHPort > 0 {',
+    '''\tsecretsFile := ""
+\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") && !req.Uninstall {
+\t\tf, err := os.CreateTemp("", "csqtt-deploy-secrets-*.txt")
+\t\tif err != nil { deployAppend("[deploy] не удалось создать временный файл авторизации"); return false }
+\t\t_ = f.Chmod(0600)
+\t\t_, writeErr := f.WriteString(req.MainPassword + "\n" + req.WebUser + "\n" + req.WebPassword + "\n")
+\t\tcloseErr := f.Close()
+\t\tif writeErr != nil || closeErr != nil { _ = os.Remove(f.Name()); deployAppend("[deploy] не удалось сохранить временные данные авторизации"); return false }
+\t\tsecretsFile = f.Name()
+\t\targs = append(args, "--secrets-file", secretsFile)
+\t\tif req.DockerInstall { args = append(args, "--install-in-docker") }\n\t\t
+\t}
+\tif req.Uninstall { args = append(args, "--uninstall") }\n\tif req.SSHPort > 0 {''',
 )
 replace_once(
     deploy_go,
-    '\\tif err != nil {\\n\\t\\tdeployAppend("[deploy] ошибка запуска: " + err.Error())\\n\\t\\treturn false\\n\\t}\\n\\tstderr, err := cmd.StderrPipe()',
-    '\\tif err != nil {\\n\\t\\tif secretsFile != "" { _ = os.Remove(secretsFile) }\\n\\t\\tdeployAppend("[deploy] ошибка запуска: " + err.Error())\\n\\t\\treturn false\\n\\t}\\n\\tstderr, err := cmd.StderrPipe()',
+    '\tif err != nil {\n\t\tdeployAppend("[deploy] ошибка запуска: " + err.Error())\n\t\treturn false\n\t}\n\tstderr, err := cmd.StderrPipe()',
+    '\tif err != nil {\n\t\tif secretsFile != "" { _ = os.Remove(secretsFile) }\n\t\tdeployAppend("[deploy] ошибка запуска: " + err.Error())\n\t\treturn false\n\t}\n\tstderr, err := cmd.StderrPipe()',
 )
 replace_once(
     deploy_go,
-    '\\tif err != nil {\\n\\t\\tdeployAppend("[deploy] ошибка запуска: " + err.Error())\\n\\t\\treturn false\\n\\t}\\n\\n\\tif err := cmd.Start(); err != nil {',
-    '\\tif err != nil {\\n\\t\\tif secretsFile != "" { _ = os.Remove(secretsFile) }\\n\\t\\tdeployAppend("[deploy] ошибка запуска: " + err.Error())\\n\\t\\treturn false\\n\\t}\\n\\n\\tif err := cmd.Start(); err != nil {',
+    '\tif err != nil {\n\t\tdeployAppend("[deploy] ошибка запуска: " + err.Error())\n\t\treturn false\n\t}\n\n\tif err := cmd.Start(); err != nil {',
+    '\tif err != nil {\n\t\tif secretsFile != "" { _ = os.Remove(secretsFile) }\n\t\tdeployAppend("[deploy] ошибка запуска: " + err.Error())\n\t\treturn false\n\t}\n\n\tif err := cmd.Start(); err != nil {',
 )
 replace_once(
     deploy_go,
-    '\\tif err := cmd.Start(); err != nil {\\n\\t\\tdeployAppend("[deploy] не удалось запустить DeployManager: " + err.Error())',
-    '\\tif err := cmd.Start(); err != nil {\\n\\t\\tif secretsFile != "" { _ = os.Remove(secretsFile) }\\n\\t\\tdeployAppend("[deploy] не удалось запустить DeployManager: " + err.Error())',
+    '\tif err := cmd.Start(); err != nil {\n\t\tdeployAppend("[deploy] не удалось запустить DeployManager: " + err.Error())',
+    '\tif err := cmd.Start(); err != nil {\n\t\tif secretsFile != "" { _ = os.Remove(secretsFile) }\n\t\tdeployAppend("[deploy] не удалось запустить DeployManager: " + err.Error())',
 )
 replace_once(
     deploy_go,
-    '\\t\\terr := cmd.Wait()\\n\\t\\tif err != nil {',
-    '\\t\\terr := cmd.Wait()\\n\\t\\tif secretsFile != "" { _ = os.Remove(secretsFile) }\\n\\t\\tif err != nil {',
+    '\t\terr := cmd.Wait()\n\t\tif err != nil {',
+    '\t\terr := cmd.Wait()\n\t\tif secretsFile != "" { _ = os.Remove(secretsFile) }\n\t\tif err != nil {',
 )
 
 
 replace_once(
     main,
     "    pub install_in_docker: bool,",
-    "    pub install_in_docker: bool,\\n\\n    /// Uninstall the official CSQTT runtime while preserving its database.\\n    #[arg(long, default_value_t = false)]\\n    pub uninstall: bool,",
+    "    pub install_in_docker: bool,\n\n    /// Uninstall the official CSQTT runtime while preserving its database.\n    #[arg(long, default_value_t = false)]\n    pub uninstall: bool,",
 )
 replace_once(
     deploy,
     "fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {",
-    "fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {\\n    if args.uninstall { return uninstall_official_csqtt(args, ports); }",
+    "fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {\n    if args.uninstall { return uninstall_official_csqtt(args, ports); }",
 )
 uninstall = r'''fn uninstall_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {
     let source = args.local_binary_dir.as_deref()
