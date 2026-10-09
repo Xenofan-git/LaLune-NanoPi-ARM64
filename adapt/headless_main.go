@@ -203,7 +203,7 @@ func apiHandler(app *App) http.Handler {
         writeJSON(w, map[string]any{
             "api": 1,
             "backend": "original-go",
-            "core": "unknown",
+            "core": "csqtt-server/2.1.9",
             "ui": "0.6.0",
             "commit": buildCommit,
             "buildRun": buildRunID,
