@@ -52,6 +52,17 @@ jobs:
           Path("/tmp/csqtt-panel.js").write_text("\n".join(scripts))
           PY
           node --check /tmp/csqtt-panel.js
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          html = Path("adapt/csqtt-panel-preview.html").read_text()
+          ids = set(re.findall(r'\\bid="([^"]+)"', html))
+          js = Path("/tmp/csqtt-panel.js").read_text()
+          refs = set(re.findall(r"\\$\\('([^']+)'\\)", js))
+          missing = sorted(refs - ids)
+          if missing:
+              raise SystemExit("panel JS references missing DOM ids: " + ", ".join(missing))
+          PY
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
