@@ -379,7 +379,7 @@ func apiHandler(app *App) http.Handler {
             writeJSON(w, map[string]any{"ok": false, "error": "Некорректный запрос"})
             return
         }
-        if err := app.SaveVKTokenInput(req.Token); err != nil {
+        if err := app.core.SaveVKTokenInput(req.Token); err != nil {
             w.WriteHeader(http.StatusBadRequest)
             writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
             return
