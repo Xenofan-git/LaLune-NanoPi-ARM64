@@ -196,7 +196,8 @@ jobs:
         run: |
           set -euxo pipefail
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          go build -trimpath -ldflags="-s -w -X main.buildCommit=${GITHUB_SHA} -X main.buildRunID=${GITHUB_RUN_ID} -X main.buildDate=${BUILD_DATE}" -o lalune-original-linux-arm64 .
+          BUILD_BRANCH="${GITHUB_REF_NAME}"
+          go build -trimpath -ldflags="-s -w -X main.buildCommit=${GITHUB_SHA} -X main.buildRunID=${GITHUB_RUN_ID} -X main.buildDate=${BUILD_DATE} -X main.buildBranch=${BUILD_BRANCH}" -o lalune-original-linux-arm64 .
           file lalune-original-linux-arm64
           test -s lalune-original-linux-arm64
       - name: Set up .NET for ARM64 VK token fetcher
