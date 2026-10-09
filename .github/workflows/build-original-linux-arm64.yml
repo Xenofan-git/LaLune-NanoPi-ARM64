@@ -49,7 +49,7 @@ jobs:
           html = Path("adapt/csqtt-panel-preview.html").read_text()
           scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.S)
           assert scripts, "no inline panel script found"
-          Path("/tmp/csqtt-panel.js").write_text("\\n".join(scripts))
+          Path("/tmp/csqtt-panel.js").write_text("\n".join(scripts))
           PY
           node --check /tmp/csqtt-panel.js
       - name: Set up Go
