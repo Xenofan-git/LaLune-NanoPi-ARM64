@@ -102,7 +102,11 @@ jobs:
           cp adapt/headless_main_test.go upstream-lalune/Desktop/Linux/headless_main_test.go
           mkdir -p upstream-lalune/Desktop/Linux/frontend
           cp -a upstream-lalune/Frontend/Core/build/web/. upstream-lalune/Desktop/Linux/frontend/
+          # The binary's embedded fallback UI uses the CSQTT-style panel preview.
+          # The normal Nginx document root is not replaced by this build step.
+          cp adapt/csqtt-panel-preview.html upstream-lalune/Desktop/Linux/frontend/index.html
           test -s upstream-lalune/Desktop/Linux/frontend/index.html
+          grep -Fq 'CSQTT · NanoPi' upstream-lalune/Desktop/Linux/frontend/index.html
           test -s upstream-lalune/Desktop/Linux/frontend/api.js
           grep -Fq 'go:embed frontend' upstream-lalune/Desktop/Linux/headless_main.go
           grep -Fq 'const headlessListen = "127.0.0.1:1062"' upstream-lalune/Desktop/Linux/headless_main.go
@@ -163,6 +167,8 @@ jobs:
           cp upstream-lalune/Core/DeployManager/target/aarch64-unknown-linux-gnu/release/deploy-manager dist/
           cp -a server-assets dist/server-assets
           cp adapt/csqtt-panel-preview.html dist/csqtt-panel-preview.html
+          mkdir -p dist/web-dist
+          cp adapt/csqtt-panel-preview.html dist/web-dist/index.html
           cp adaptation-source.sha256 dist/
           cp protocols-source.sha256 dist/
           printf '%s\n' 'e4a6d08b63aef6025bf8ad8f77da660ea552e04b' > dist/UPSTREAM_COMMIT
