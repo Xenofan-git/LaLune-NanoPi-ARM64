@@ -8,6 +8,7 @@ on:
       - integration/deploymanager-fix
       - fix/captcha-stale-overlay
       - feature/csqtt-direct-route-tab
+      - feature/lalune-version-check
   workflow_dispatch:
 
 permissions:
