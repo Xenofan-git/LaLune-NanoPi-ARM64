@@ -219,6 +219,12 @@ jobs:
             'systemd service {bin}.service started',
             'systemd service {bin}-deployed.service started')
           r(u/"Core/DeployManager/src/deploy.rs",
+            'rm -f "$DEST"',
+            'if [ "{proto}" != "csqtt" ]; then\nrm -f "$DEST"')
+          r(u/"Core/DeployManager/src/deploy.rs",
+            'if command -v systemctl >/dev/null 2>&1; then',
+            'fi\nif command -v systemctl >/dev/null 2>&1; then')
+          r(u/"Core/DeployManager/src/deploy.rs",
             "if [ ! -s \"$DEST\" ]; then",
             """if [ ! -s "$DEST" ]; then
             echo "[install] error: installed file is empty" >&2
