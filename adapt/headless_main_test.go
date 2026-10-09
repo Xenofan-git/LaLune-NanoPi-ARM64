@@ -129,7 +129,7 @@ func TestNormalizeDirectIPs(t *testing.T) {
 
 func TestVersionEndpointReportsBuildProvenance(t *testing.T) {
 	old := []string{buildCommit, buildRunID, buildRunNumber, buildDate, buildBranch, buildUpstreamCommit}
-	buildCommit, buildRunID, buildRunNumber = "commit-test", "run-test", "42", "2026-10-09T00:00:00Z"
+	buildCommit, buildRunID, buildRunNumber, buildDate = "commit-test", "run-test", "42", "2026-10-09T00:00:00Z"
 	buildBranch, buildUpstreamCommit = "feature/csqtt-direct-route-tab", "e4a6d08b63aef6025bf8ad8f77da660ea552e04b"
 	defer func() {
 		buildCommit, buildRunID, buildRunNumber, buildDate = old[0], old[1], old[2], old[3]
