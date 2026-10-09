@@ -162,7 +162,7 @@ func TestDirectPlanTransitions(t *testing.T) {
 		{name: "domains and IPs", domains: "example.com, api.example.com", ips: "192.0.2.1,192.0.2.0/24", wantDomains: []string{"example.com", "api.example.com"}, wantIPs: []string{"192.0.2.1", "192.0.2.0/24"}, wantDNS: true, wantEnabled: true},
 		{name: "IP only after domains", ips: "192.0.2.1", wantIPs: []string{"192.0.2.1"}, wantEnabled: true},
 		{name: "domains only after IPs", domains: "example.com", wantDomains: []string{"example.com"}, wantDNS: true, wantEnabled: true},
-		{name: "empty after domains and IPs", wantDomains: []string{}, wantIPs: []string{}, wantEnabled: false},
+		{name: "empty after domains and IPs", wantEnabled: false},
 		{name: "reject bad domain without plan", domains: "https://example.com", wantErr: true},
 		{name: "reject bad IP without plan", ips: "192.0.2.999", wantErr: true},
 	}
