@@ -5,6 +5,8 @@ package main
 import (
 	"net/http/httptest"
 	"testing"
+
+	libs "lalune-desktop/Libs"
 )
 
 func TestPrivateClient(t *testing.T) {
@@ -33,5 +35,23 @@ func TestPrivateClient(t *testing.T) {
 				t.Fatalf("privateClient() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSelectedConfigJsonClearsEmptySelection(t *testing.T) {
+	core := &libs.AppCore{}
+	if !core.SetSelectedConfigJson(`{"id":7,"name":"test"}`) {
+		t.Fatal("could not set selected config")
+	}
+	if core.GetSelectedConfig() == nil {
+		t.Fatal("selected config unexpectedly nil")
+	}
+	for _, raw := range []string{"null", "{}", ""} {
+		if !core.SetSelectedConfigJson(raw) {
+			t.Fatalf("could not clear selection with %q", raw)
+		}
+		if core.GetSelectedConfig() != nil {
+			t.Fatalf("selection was not cleared for %q", raw)
+		}
 	}
 }

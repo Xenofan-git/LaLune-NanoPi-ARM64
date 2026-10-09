@@ -131,7 +131,7 @@ jobs:
         working-directory: upstream-lalune/Desktop/Linux
         run: |
           set -euxo pipefail
-          go test -run '^TestPrivateClient$' -count=1 .
+          go test -run '^Test(PrivateClient|SelectedConfigJsonClearsEmptySelection)$' -count=1 .
 
       - name: Build ARM64
         working-directory: upstream-lalune/Desktop/Linux

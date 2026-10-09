@@ -489,4 +489,35 @@ ui_insert = '''              const SizedBox(height: 18),\n\n              _secti
 if s.count(ui_marker) != 1:
     raise SystemExit('Settings UI insertion marker missing or ambiguous')
 SETTINGS_PAGE.write_text(s.replace(ui_marker, ui_insert, 1))
-print('Direct domain/IP bypass adaptation applied')
+
+# Make the no-selection state explicit. Without this, deleting the active last
+# profile leaves a stale pointer in AppCore and the UI keeps trying to connect it.
+COMMON = UPSTREAM / "Desktop/Libs/common.go"
+replace_once(
+    COMMON,
+    '''func (a *AppCore) SetSelectedConfigJson(jsonStr string) bool {
+	var c Config
+	if err := json.Unmarshal([]byte(jsonStr), &c); err != nil {
+		return false
+	}
+	a.SetSelectedConfig(&c)
+	return true
+}''',
+    '''func (a *AppCore) SetSelectedConfigJson(jsonStr string) bool {
+	trimmed := strings.TrimSpace(jsonStr)
+	if trimmed == "null" || trimmed == "{}" || trimmed == "" {
+		a.SetSelectedConfig(nil)
+		return true
+	}
+	var c Config
+	if err := json.Unmarshal([]byte(jsonStr), &c); err != nil {
+		return false
+	}
+	if c.ID <= 0 {
+		return false
+	}
+	a.SetSelectedConfig(&c)
+	return true
+}'''
+)
+print('Direct domain/IP bypass and explicit selection clearing adaptations applied')
