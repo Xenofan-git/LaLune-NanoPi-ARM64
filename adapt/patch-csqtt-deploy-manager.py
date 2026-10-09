@@ -353,7 +353,7 @@ replace_once(
 \t\tf, err := os.CreateTemp("", "csqtt-deploy-secrets-*.txt")
 \t\tif err != nil { deployAppend("[deploy] не удалось создать временный файл авторизации"); return false }
 \t\t_ = f.Chmod(0600)
-\t\t_, writeErr := f.WriteString(req.MainPassword + "\n" + req.WebUser + "\n" + req.WebPassword + "\n")
+\t\t_, writeErr := f.WriteString(req.MainPassword + "\\n" + req.WebUser + "\\n" + req.WebPassword + "\\n")
 \t\tcloseErr := f.Close()
 \t\tif writeErr != nil || closeErr != nil { _ = os.Remove(f.Name()); deployAppend("[deploy] не удалось сохранить временные данные авторизации"); return false }
 \t\tsecretsFile = f.Name()
