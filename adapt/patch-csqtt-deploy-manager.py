@@ -246,6 +246,9 @@ official = r'''fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Res
     let bundle_name = format!("csqtt-bundle-{}-{nonce:x}", std::process::id());
     let bundle = std::env::temp_dir().join(&bundle_name);
     fs::create_dir(&bundle).context("create temporary CSQTT bundle")?;
+    #[cfg(unix)]
+    fs::set_permissions(&bundle, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+        .context("restrict temporary CSQTT bundle permissions")?;
     let result = (|| -> Result<()> {
         for name in ["deploy.sh", "csqtt-linux-arm64", "csqtt-linux-amd64", "csqtt-linux-armv7"] {
             fs::copy(source.join(name), bundle.join(name))
@@ -253,16 +256,21 @@ official = r'''fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Res
         }
         fs::write(
             bundle.join("csqtt.env"),
-            format!("CSQTT_WEB_USER={web_user}
-CSQTT_WEB_PASS={web_password}
-"),
+            format!("CSQTT_WEB_USER={web_user}\nCSQTT_WEB_PASS={web_password}\n"),
         ).context("write temporary CSQTT web credentials")?;
         let device_id = format!("{:016x}{:016x}", nonce, std::process::id() as u128);
         fs::write(
             bundle.join("csqtt-deploy.json"),
-            format!("{{"main_password":"{main_password}","device_id":"{device_id}"}}
-"),
+            format!("{{\"main_password\":\"{main_password}\",\"device_id\":\"{device_id}\"}}\n"),
         ).context("write temporary CSQTT deployment overrides")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(bundle.join("csqtt.env"), fs::Permissions::from_mode(0o600))
+                .context("restrict temporary CSQTT web credentials")?;
+            fs::set_permissions(bundle.join("csqtt-deploy.json"), fs::Permissions::from_mode(0o600))
+                .context("restrict temporary CSQTT deployment overrides")?;
+        }
 
         let remote = format!("{}@{}", args.user, args.host);
         let remote_stage = format!("/tmp/lalune-csqtt-deploy-{}", std::process::id());
