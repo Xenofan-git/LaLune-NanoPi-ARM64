@@ -526,8 +526,8 @@ replace_once(
 VTOKEN = UPSTREAM / "Desktop/Libs/vktoken.go"
 replace_once(
     VTOKEN,
-    '    VKTokenFetcherArchive = "LaLuneTokenFetcher_%s.zip"',
-    '    VKTokenFetcherArchive = "LaLuneTokenFetcher_%s.zip"\n    VKTokenFetcherARM64Archive = "LaLuneTokenFetcher_Linux_ARM64.zip"',
+    'VKTokenFetcherArchive = "LaLuneTokenFetcher_%s.zip"',
+    'VKTokenFetcherArchive = "LaLuneTokenFetcher_%s.zip"\n\tVKTokenFetcherARM64Archive = "LaLuneTokenFetcher_Linux_ARM64.zip"',
 )
 replace_once(
     VTOKEN,
@@ -550,19 +550,8 @@ replace_once(
 )
 replace_once(
     VTOKEN,
-    '''    archiveName := fmt.Sprintf(VKTokenFetcherArchive, osName)
-    url := fmt.Sprintf(VKTokenFetcherURLTmpl, archiveName)
-    zipPath := filepath.Join(a.appDir, "vk-token-fetcher.zip")
-
-    a.AddLog(fmt.Sprintf("[VK] Скачиваю token fetcher: %s", archiveName))
-
-    if !DownloadFile(url, zipPath) {
-        return false, fmt.Errorf("не удалось скачать %s", archiveName)
-    }''',
-    '''    archiveName := fmt.Sprintf(VKTokenFetcherArchive, osName)
-    zipPath := filepath.Join(a.appDir, "vk-token-fetcher.zip")
-
-    if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
+    'if !DownloadFile(url, zipPath) {',
+    '''if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
         bundled := a.bundledVKTokenFetcherArchive()
         if bundled == "" {
             return false, fmt.Errorf("для NanoPi ARM64 не найден bundled LaLuneTokenFetcher_Linux_ARM64.zip")
@@ -576,14 +565,9 @@ replace_once(
         }
         archiveName = VKTokenFetcherARM64Archive
         a.AddLog(fmt.Sprintf("[VK] Использую локальный ARM64 token fetcher: %s", bundled))
-    } else {
-        url := fmt.Sprintf(VKTokenFetcherURLTmpl, archiveName)
-        a.AddLog(fmt.Sprintf("[VK] Скачиваю token fetcher: %s", archiveName))
-        if !DownloadFile(url, zipPath) {
-            return false, fmt.Errorf("не удалось скачать %s", archiveName)
-        }
-    }'''
+    } else if !DownloadFile(url, zipPath) {'''
 )
+
 FETCHER = UPSTREAM / "Core/LaLuneTokenFetcher/Playwright/PlaywrightTokenFetcher.cs"
 replace_once(
     FETCHER,
