@@ -56,9 +56,9 @@ jobs:
           from pathlib import Path
           import re
           html = Path("adapt/csqtt-panel-preview.html").read_text()
-          ids = set(re.findall(r'\\bid="([^"]+)"', html))
+          ids = set(re.findall(r'\bid="([^"]+)"', html))
           js = Path("/tmp/csqtt-panel.js").read_text()
-          refs = set(re.findall(r"\\$\\('([^']+)'\\)", js))
+          refs = set(re.findall(r"\$\('([^']+)'\)", js))
           missing = sorted(refs - ids)
           if missing:
               raise SystemExit("panel JS references missing DOM ids: " + ", ".join(missing))
