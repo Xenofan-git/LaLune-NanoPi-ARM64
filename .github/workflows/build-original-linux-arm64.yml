@@ -39,6 +39,8 @@ jobs:
           grep -q 't.cleanupDirectRoutingLocked()' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -q 'func TestDirectDomainValidation' adapt/headless_main_test.go
           grep -q 'func TestNormalizeDirectIPs' adapt/headless_main_test.go
+          grep -Fq 'func TestDirectPlanTransitions' adapt/headless_main_test.go
+          grep -Fq 'func prepareDirectPlan(domainsRaw, ipsRaw string)' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -Fq 'func writeDirectFileAtomic(path string, data []byte, mode os.FileMode) error' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -Fq 'writeDirectFileAtomic(directDnsmasqMain' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -Fq 'strings.Split(string(data),' adapt/apply-pinned-original-linux-arm64-policy.py
