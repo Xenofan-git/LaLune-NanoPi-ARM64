@@ -516,4 +516,106 @@ replace_once(
 	return true
 }'''
 )
+
+# The upstream token-fetcher release is Linux x64 only. Bundle a native
+# linux-arm64 build and let Playwright use Debian's system Chromium on NanoPi.
+VTOKEN = UPSTREAM / "Desktop/Libs/vktoken.go"
+replace_once(
+    VTOKEN,
+    '    VKTokenFetcherArchive = "LaLuneTokenFetcher_%s.zip"',
+    '    VKTokenFetcherArchive = "LaLuneTokenFetcher_%s.zip"\n    VKTokenFetcherARM64Archive = "LaLuneTokenFetcher_Linux_ARM64.zip"',
+)
+replace_once(
+    VTOKEN,
+    '// EnsureVKTokenFetcher — скачивает и устанавливает LaLuneTokenFetcher.',
+    '''func (a *AppCore) bundledVKTokenFetcherArchive() string {
+    candidates := []string{}
+    if exe, err := os.Executable(); err == nil {
+        candidates = append(candidates, filepath.Join(filepath.Dir(exe), "server-assets", VKTokenFetcherARM64Archive))
+    }
+    candidates = append(candidates, filepath.Join("/usr/local/lib/lalune/server-assets", VKTokenFetcherARM64Archive))
+    for _, candidate := range candidates {
+        if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() && info.Size() > 0 {
+            return candidate
+        }
+    }
+    return ""
+}
+
+// EnsureVKTokenFetcher — скачивает и устанавливает LaLuneTokenFetcher.'''
+)
+replace_once(
+    VTOKEN,
+    '''    archiveName := fmt.Sprintf(VKTokenFetcherArchive, osName)
+    url := fmt.Sprintf(VKTokenFetcherURLTmpl, archiveName)
+    zipPath := filepath.Join(a.appDir, "vk-token-fetcher.zip")
+
+    a.AddLog(fmt.Sprintf("[VK] Скачиваю token fetcher: %s", archiveName))
+
+    if !DownloadFile(url, zipPath) {
+        return false, fmt.Errorf("не удалось скачать %s", archiveName)
+    }''',
+    '''    archiveName := fmt.Sprintf(VKTokenFetcherArchive, osName)
+    zipPath := filepath.Join(a.appDir, "vk-token-fetcher.zip")
+
+    if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
+        bundled := a.bundledVKTokenFetcherArchive()
+        if bundled == "" {
+            return false, fmt.Errorf("для NanoPi ARM64 не найден bundled LaLuneTokenFetcher_Linux_ARM64.zip")
+        }
+        data, err := os.ReadFile(bundled)
+        if err != nil {
+            return false, fmt.Errorf("не удалось прочитать ARM64 token fetcher: %w", err)
+        }
+        if err := os.WriteFile(zipPath, data, 0600); err != nil {
+            return false, fmt.Errorf("не удалось подготовить ARM64 token fetcher: %w", err)
+        }
+        archiveName = VKTokenFetcherARM64Archive
+        a.AddLog(fmt.Sprintf("[VK] Использую локальный ARM64 token fetcher: %s", bundled))
+    } else {
+        url := fmt.Sprintf(VKTokenFetcherURLTmpl, archiveName)
+        a.AddLog(fmt.Sprintf("[VK] Скачиваю token fetcher: %s", archiveName))
+        if !DownloadFile(url, zipPath) {
+            return false, fmt.Errorf("не удалось скачать %s", archiveName)
+        }
+    }'''
+)
+FETCHER = UPSTREAM / "Core/LaLuneTokenFetcher/Playwright/PlaywrightTokenFetcher.cs"
+replace_once(
+    FETCHER,
+    '                    Headless = false,',
+    '                    Headless = OperatingSystem.IsLinux(),\n                    ExecutablePath = ResolveChromiumExecutable(),'
+)
+replace_once(
+    FETCHER,
+    '    private static bool IsBrowserMissing(PlaywrightException ex)',
+    '''    private static string? ResolveChromiumExecutable()
+    {
+        if (!OperatingSystem.IsLinux() ||
+            System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture != System.Runtime.InteropServices.Architecture.Arm64)
+        {
+            return null;
+        }
+
+        var configured = Environment.GetEnvironmentVariable("PLAYWRIGHT_CHROMIUM_EXECUTABLE");
+        if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
+        {
+            return configured;
+        }
+
+        foreach (var candidate in new[] { "/usr/bin/chromium", "/usr/bin/chromium-browser" })
+        {
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new ChromiumMissingException(
+            "Для VK-авторизации на NanoPi ARM64 нужен системный Chromium. Установите пакет chromium.");
+    }
+
+    private static bool IsBrowserMissing(PlaywrightException ex)'''
+)
+
 print('Direct domain/IP bypass and explicit selection clearing adaptations applied')
