@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -121,5 +122,31 @@ func TestNormalizeDirectIPs(t *testing.T) {
 	}
 	if _, err := normalizeDirectIPs("0.0.0.0/0"); err == nil {
 		t.Fatal("expected default route CIDR to be rejected for Direct")
+	}
+}
+
+
+func TestVersionEndpointReportsBuildProvenance(t *testing.T) {
+	old := []string{buildCommit, buildRunID, buildRunNumber, buildDate, buildBranch, buildUpstreamCommit}
+	buildCommit, buildRunID, buildRunNumber = "commit-test", "run-test", "42", "2026-10-09T00:00:00Z"
+	buildBranch, buildUpstreamCommit = "feature/csqtt-direct-route-tab", "e4a6d08b63aef6025bf8ad8f77da660ea552e04b"
+	defer func() {
+		buildCommit, buildRunID, buildRunNumber, buildDate = old[0], old[1], old[2], old[3]
+		buildBranch, buildUpstreamCommit = old[4], old[5]
+	}()
+	r := httptest.NewRequest("GET", "/version", nil)
+	w := httptest.NewRecorder()
+	apiHandler(nil).ServeHTTP(w, r)
+	if w.Code != 200 { t.Fatalf("/version status = %d, want 200", w.Code) }
+	var got map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil { t.Fatalf("invalid /version JSON: %v", err) }
+	want := map[string]string{
+		"backend": "original-go", "core": "csqtt-server/2.1.9", "ui": "0.6.0",
+		"commit": "commit-test", "buildRun": "run-test", "buildNumber": "42",
+		"buildDate": "2026-10-09T00:00:00Z", "buildBranch": "feature/csqtt-direct-route-tab",
+		"upstreamCommit": "e4a6d08b63aef6025bf8ad8f77da660ea552e04b",
+	}
+	for key, wantValue := range want {
+		if got[key] != wantValue { t.Errorf("/version[%q] = %#v, want %q", key, got[key], wantValue) }
 	}
 }
