@@ -375,4 +375,63 @@ replace_once(
     '\\t\\terr := cmd.Wait()\\n\\t\\tif secretsFile != "" { _ = os.Remove(secretsFile) }\\n\\t\\tif err != nil {',
 )
 
+
+replace_once(
+    main,
+    "    pub install_in_docker: bool,",
+    "    pub install_in_docker: bool,\\n\\n    /// Uninstall the official CSQTT runtime while preserving its database.\\n    #[arg(long, default_value_t = false)]\\n    pub uninstall: bool,",
+)
+replace_once(
+    deploy,
+    "fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {",
+    "fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {\\n    if args.uninstall { return uninstall_official_csqtt(args, ports); }",
+)
+uninstall = r'''fn uninstall_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {
+    let source = args.local_binary_dir.as_deref()
+        .ok_or_else(|| anyhow::anyhow!("official CSQTT assets are not bundled"))?;
+    let source = Path::new(source).join("deploy.sh");
+    if !source.is_file() { anyhow::bail!("official CSQTT 2.1.9 deploy.sh is missing"); }
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let bundle_name = format!("csqtt-uninstall-{}-{nonce:x}", std::process::id());
+    let bundle = std::env::temp_dir().join(&bundle_name);
+    fs::create_dir(&bundle).context("create temporary CSQTT uninstall bundle")?;
+    let result = (|| -> Result<()> {
+        fs::copy(source, bundle.join("deploy.sh")).context("stage official CSQTT uninstall script")?;
+        let remote = format!("{}@{}", args.user, args.host);
+        let remote_stage = format!("/tmp/lalune-csqtt-uninstall-{}", std::process::id());
+        let prepare = format!("set -e; mkdir -p -- '{remote_stage}'; chmod 700 -- '{remote_stage}'");
+        let prepared = run_ssh(args, &remote, &prepare).context("prepare remote uninstall staging directory")?;
+        if !prepared.status.success() {
+            anyhow::bail!("could not prepare remote CSQTT uninstall staging directory: {}", String::from_utf8_lossy(&prepared.stderr));
+        }
+        if let Err(error) = run_scp(args, &remote, bundle.to_str().unwrap_or(""), &remote_stage) {
+            let _ = run_ssh(args, &remote, &format!("rm -rf -- '{remote_stage}'"));
+            return Err(error).context("upload official CSQTT uninstall script");
+        }
+        let remote_bundle = format!("{remote_stage}/{bundle_name}");
+        let script = format!(r#"set -Eeuo pipefail
+STAGE='{remote_stage}'
+trap 'rm -rf -- "$STAGE"; rm -f -- /tmp/deploy.sh' EXIT
+install -m 0755 '{remote_bundle}/deploy.sh' /tmp/deploy.sh
+env CSQTT_PEER_PORT={peer_port} CSQTT_SSH_PORT={ssh_port} CSQTT_WEB_PORT={web_port} bash /tmp/deploy.sh uninstall
+echo CSQTT_UNINSTALL_OK
+"#, ssh_port=args.ssh_port, peer_port=ports.core.unwrap_or(46000), web_port=ports.warp.unwrap_or(46002));
+        let output = run_ssh(args, &remote, &script).context("run official CSQTT uninstall")?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        for line in stdout.lines() { println!("[remote] {line}"); }
+        for line in stderr.lines() { eprintln!("[remote:err] {line}"); }
+        if !output.status.success() || !stdout.lines().any(|line| line.trim() == "CSQTT_UNINSTALL_OK") {
+            anyhow::bail!("official CSQTT uninstall failed (exit {})", output.status);
+        }
+        println!("[deploy] official CSQTT uninstall completed");
+        Ok(())
+    })();
+    let _ = fs::remove_dir_all(&bundle);
+    result
+}
+
+'''
+replace_once(deploy, "fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {", uninstall + "fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {")
+
 print("CSQTT DeployManager adaptation applied")
