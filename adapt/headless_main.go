@@ -9,6 +9,7 @@ import (
     "io/fs"
     "encoding/json"
     "fmt"
+    "net"
     "net/http"
     "os"
     "os/signal"
@@ -55,6 +56,32 @@ func method(w http.ResponseWriter, r *http.Request, want string) bool {
         return false
     }
     return true
+}
+
+// privateClient permits sensitive operations only from a private LAN or the
+// Tailscale address range. Nginx overwrites X-Real-IP and the backend binds to
+// loopback, so a remote caller cannot choose this header directly.
+func privateClient(r *http.Request) bool {
+    raw := strings.TrimSpace(r.Header.Get("X-Real-IP"))
+    if raw == "" {
+        raw = r.RemoteAddr
+        if host, _, err := net.SplitHostPort(raw); err == nil {
+            raw = host
+        }
+    }
+    ip := net.ParseIP(strings.Trim(raw, "[]"))
+    if ip == nil {
+        return false
+    }
+    if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+        return true
+    }
+    _, tailscaleIPv4, _ := net.ParseCIDR("100.64.0.0/10")
+    if tailscaleIPv4.Contains(ip) {
+        return true
+    }
+    _, tailscaleIPv6, _ := net.ParseCIDR("fd7a:115c:a1e0::/48")
+    return tailscaleIPv6.Contains(ip)
 }
 
 var captchaMu sync.Mutex
@@ -242,6 +269,10 @@ func apiHandler(app *App) http.Handler {
 
     mux.HandleFunc("/deploy", func(w http.ResponseWriter, r *http.Request) {
         if !method(w, r, http.MethodPost) { return }
+        if !privateClient(r) {
+            http.Error(w, "deployment is available only from LAN or Tailscale", http.StatusForbidden)
+            return
+        }
         var raw json.RawMessage
         if err := json.NewDecoder(r.Body).Decode(&raw); err != nil { http.Error(w, "bad json", http.StatusBadRequest); return }
         writeJSON(w, map[string]bool{"ok": libs.DeployProtocol(string(raw))})

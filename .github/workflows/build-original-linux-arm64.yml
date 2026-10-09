@@ -99,6 +99,7 @@ jobs:
           cp upstream-lalune/Core/SmartTunnel.lua upstream-lalune/Desktop/Libs/SmartTunnel.lua
           mv upstream-lalune/Desktop/Linux/app.go upstream-lalune/Desktop/Linux/app_gui.go.disabled
           cp adapt/headless_main.go upstream-lalune/Desktop/Linux/headless_main.go
+          cp adapt/headless_main_test.go upstream-lalune/Desktop/Linux/headless_main_test.go
           mkdir -p upstream-lalune/Desktop/Linux/frontend
           cp -a upstream-lalune/Frontend/Core/build/web/. upstream-lalune/Desktop/Linux/frontend/
           test -s upstream-lalune/Desktop/Linux/frontend/index.html
@@ -130,6 +131,7 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           set -euxo pipefail
+          go test -run '^TestPrivateClient$' -count=1 .
           go build -trimpath -ldflags="-s -w" -o lalune-original-linux-arm64 .
           file lalune-original-linux-arm64
           test -s lalune-original-linux-arm64
@@ -155,6 +157,7 @@ jobs:
           cp upstream-lalune/Desktop/Linux/lalune-original-linux-arm64 dist/
           cp upstream-lalune/Core/DeployManager/target/aarch64-unknown-linux-gnu/release/deploy-manager dist/
           cp -a server-assets dist/server-assets
+          cp adapt/csqtt-panel-preview.html dist/csqtt-panel-preview.html
           cp adaptation-source.sha256 dist/
           cp protocols-source.sha256 dist/
           printf '%s\n' 'e4a6d08b63aef6025bf8ad8f77da660ea552e04b' > dist/UPSTREAM_COMMIT
