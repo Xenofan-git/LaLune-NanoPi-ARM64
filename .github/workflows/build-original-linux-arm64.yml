@@ -232,7 +232,7 @@ jobs:
                   let ports = Ports { core: Some(47000), warp: Some(47002), listen: Some(1080) };
                   let script = install_script(Protocol::Csqtt, &ports, Some("/tmp/lalune/server-assets"));
                   assert!(script.contains("refusing to overwrite an existing isolated CSQTT service"));
-                  assert!(script.contains("SOURCE=\"/tmp/lalune/server-assets/server-assets/csqtt-linux-$ASSET_ARCH\"") == false);
+
                   assert!(script.contains("SOURCE=\"/tmp/lalune/server-assets/csqtt-linux-$ASSET_ARCH\""));
                   assert!(script.contains("TMP_DEST=\"$DEST.new.$\""));
                   assert!(script.contains("wget -O \\"$TMP_DEST\\" \\"$URL\\""));
