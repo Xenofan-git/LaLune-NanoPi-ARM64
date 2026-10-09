@@ -151,7 +151,7 @@ jobs:
             if command -v curl >/dev/null 2>&1; then
               curl -fSL --retry 3 \"$URL\" -o \"$TMP_DEST\"
             elif command -v wget >/dev/null 2>&1; then
-              wget -O \"$TMP_DEST\" \"$TMP_DEST\"
+              wget -O \"$TMP_DEST\" \"$URL\"
             else
               echo \"[install] error: neither curl nor wget available\" >&2; exit 1
             fi
