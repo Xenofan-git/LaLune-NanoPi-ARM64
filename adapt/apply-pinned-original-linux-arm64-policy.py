@@ -424,6 +424,18 @@ func (t *LinuxTun) CleanupDirectRouting() {
 }
 
 '''
+# This Go fragment originated in a JavaScript patch and contains escaped tabs and
+# doubled Go escapes. Normalize it before inserting it into the Go source file.
+linux_direct = linux_direct.replace("\\\\", "\\")
+_normalized_lines = []
+for _line in linux_direct.splitlines():
+    _indent = ""
+    while _line.startswith("\\t"):
+        _indent += "\t"
+        _line = _line[2:]
+    _normalized_lines.append(_indent + _line)
+linux_direct = "\n".join(_normalized_lines) + "\n"
+
 # Integrate direct-domain/IP bypass into the Linux adapter and settings UI.
 s = LINUX.read_text()
 marker = 'func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) {'
