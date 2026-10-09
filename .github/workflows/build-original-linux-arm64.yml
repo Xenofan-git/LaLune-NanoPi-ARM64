@@ -106,6 +106,8 @@ jobs:
             """    let remote_tmp = format!("/tmp/lalune-deploy-{}", std::process::id());
           if let Some(dir)=&args.local_binary_dir {
               if proto==Protocol::Csqtt {
+                  let prep=run_ssh(args,&remote,&format!("mkdir -p {}",remote_tmp))?;
+                  if !prep.status.success() { anyhow::bail!("failed to prepare remote asset directory"); }
                   run_scp(args,&remote,dir,&remote_tmp)?;
               }
           }
