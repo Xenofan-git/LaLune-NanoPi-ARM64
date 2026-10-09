@@ -29,6 +29,7 @@ const panelListen = "0.0.0.0:1061"
 var buildCommit = "unknown"
 var buildRunID = "unknown"
 var buildDate = "unknown"
+var buildBranch = "unknown"
 
 //go:embed frontend
 var panelAssets embed.FS
@@ -375,7 +376,9 @@ func apiHandler(app *App) http.Handler {
         if !method(w, r, http.MethodGet) { return }
         ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
         defer cancel()
-        endpoint := "https://api.github.com/repos/Xenofan-git/LaLune-NanoPi-ARM64/actions/workflows/build-original-linux-arm64.yml/runs?status=success&branch=feature%2Fcsqtt-direct-route-tab&per_page=1"
+        branch := buildBranch
+        if branch == "" || branch == "unknown" { branch = "feature/csqtt-direct-route-tab" }
+        endpoint := "https://api.github.com/repos/Xenofan-git/LaLune-NanoPi-ARM64/actions/workflows/build-original-linux-arm64.yml/runs?status=success&branch=" + url.QueryEscape(branch) + "&per_page=1"
         req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
         if err != nil { writeJSON(w, map[string]any{"installedCommit":buildCommit,"error":"Не удалось подготовить запрос к GitHub"}); return }
         req.Header.Set("Accept", "application/vnd.github+json")
@@ -396,7 +399,7 @@ func apiHandler(app *App) http.Handler {
         if len(result.WorkflowRuns) == 0 { writeJSON(w, map[string]any{"installedCommit":buildCommit,"error":"Нет успешных сборок для выбранной ветки"}); return }
         latest := result.WorkflowRuns[0]
         writeJSON(w, map[string]any{
-            "installedCommit": buildCommit, "installedRun": buildRunID, "buildDate": buildDate,
+            "installedCommit": buildCommit, "installedRun": buildRunID, "buildDate": buildDate, "buildBranch": buildBranch,
             "latestCommit": latest.HeadSHA, "runID": latest.ID, "runNumber": latest.RunNumber,
             "runUrl": latest.HTMLURL, "hasUpdate": buildCommit == "unknown" || buildCommit != latest.HeadSHA,
         })
