@@ -25,6 +25,11 @@ import (
 const headlessListen = "127.0.0.1:1062"
 const panelListen = "0.0.0.0:1061"
 
+// Set by GitHub Actions at build time. "unknown" means a local/non-CI build.
+var buildCommit = "unknown"
+var buildRunID = "unknown"
+var buildDate = "unknown"
+
 //go:embed frontend
 var panelAssets embed.FS
 
@@ -194,7 +199,10 @@ func apiHandler(app *App) http.Handler {
             "api": 1,
             "backend": "original-go",
             "core": "unknown",
-            "ui": "0.6.0",
+            "ui": "0.7.0",
+            "commit": buildCommit,
+            "buildRun": buildRunID,
+            "buildDate": buildDate,
         })
     })
 
@@ -362,6 +370,36 @@ func apiHandler(app *App) http.Handler {
     mux.HandleFunc("/updates/lalune", func(w http.ResponseWriter, r *http.Request) {
         if !method(w, r, http.MethodGet) { return }
         writeJSON(w, app.CheckLaLuneUpdate())
+    })
+    mux.HandleFunc("/updates/our-build", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+        defer cancel()
+        endpoint := "https://api.github.com/repos/Xenofan-git/LaLune-NanoPi-ARM64/actions/workflows/build-original-linux-arm64.yml/runs?status=success&branch=feature%2Fcsqtt-direct-route-tab&per_page=1"
+        req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+        if err != nil { writeJSON(w, map[string]any{"installedCommit":buildCommit,"error":"Не удалось подготовить запрос к GitHub"}); return }
+        req.Header.Set("Accept", "application/vnd.github+json")
+        req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+        resp, err := (&http.Client{Timeout: 8*time.Second}).Do(req)
+        if err != nil { writeJSON(w, map[string]any{"installedCommit":buildCommit,"error":"GitHub Actions недоступен"}); return }
+        defer resp.Body.Close()
+        if resp.StatusCode != http.StatusOK { writeJSON(w, map[string]any{"installedCommit":buildCommit,"error":fmt.Sprintf("GitHub API HTTP %d", resp.StatusCode)}); return }
+        var result struct {
+            WorkflowRuns []struct {
+                ID int64 `json:"id"`
+                RunNumber int `json:"run_number"`
+                HeadSHA string `json:"head_sha"`
+                HTMLURL string `json:"html_url"`
+            } `json:"workflow_runs"`
+        }
+        if err := json.NewDecoder(resp.Body).Decode(&result); err != nil { writeJSON(w, map[string]any{"installedCommit":buildCommit,"error":"Некорректный ответ GitHub API"}); return }
+        if len(result.WorkflowRuns) == 0 { writeJSON(w, map[string]any{"installedCommit":buildCommit,"error":"Нет успешных сборок для выбранной ветки"}); return }
+        latest := result.WorkflowRuns[0]
+        writeJSON(w, map[string]any{
+            "installedCommit": buildCommit, "installedRun": buildRunID, "buildDate": buildDate,
+            "latestCommit": latest.HeadSHA, "runID": latest.ID, "runNumber": latest.RunNumber,
+            "runUrl": latest.HTMLURL, "hasUpdate": buildCommit == "unknown" || buildCommit != latest.HeadSHA,
+        })
     })
     mux.HandleFunc("/vk/state", func(w http.ResponseWriter, r *http.Request) {
         if !method(w, r, http.MethodGet) { return }
