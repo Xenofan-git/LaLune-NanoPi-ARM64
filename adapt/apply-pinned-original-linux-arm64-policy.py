@@ -606,6 +606,9 @@ replace_once(
     if err := os.WriteFile(a.vkTokenFile(), data, 0600); err != nil {
         return fmt.Errorf("не удалось сохранить VK токен: %w", err)
     }
+    if err := os.Chmod(a.vkTokenFile(), 0600); err != nil {
+        return fmt.Errorf("не удалось ограничить права VK токена: %w", err)
+    }
     return nil
 }
 
