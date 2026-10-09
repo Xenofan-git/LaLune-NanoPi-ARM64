@@ -108,6 +108,9 @@ jobs:
           grep -Fq 'SSH_ASKPASS_REQUIRE' upstream-lalune/Core/DeployManager/src/deploy.rs
           ! grep -Fq 'rm -f "$DEST"' upstream-lalune/Core/DeployManager/src/deploy.rs
           grep -Fq 'systemctl restart {bin}-deployed.service' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'deploy_official_csqtt(args, ports)' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'CSQTT_DEPLOY_MODE={mode}' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'pub secrets_file: Option<String>' upstream-lalune/Core/DeployManager/src/main.rs
 
       - name: Prepare original Go module layout
         run: |
@@ -172,12 +175,16 @@ jobs:
           curl -fL --retry 3 https://github.com/amurcanov/csqtt/releases/download/v2.1.9/CSQTT-arm64-v8a.apk -o /tmp/csqtt-v2.1.9-arm64.apk
           unzip -p /tmp/csqtt-v2.1.9-arm64.apk assets/csqtt-linux-arm64 > server-assets/csqtt-linux-arm64
           unzip -p /tmp/csqtt-v2.1.9-arm64.apk assets/csqtt-linux-amd64 > server-assets/csqtt-linux-amd64
+          unzip -p /tmp/csqtt-v2.1.9-arm64.apk assets/csqtt-linux-armv7 > server-assets/csqtt-linux-armv7
           unzip -p /tmp/csqtt-v2.1.9-arm64.apk assets/csqtt.server-provenance.json > server-assets/csqtt.server-provenance.json
-          chmod 0755 server-assets/csqtt-linux-arm64 server-assets/csqtt-linux-amd64
+          curl -fL --retry 3 https://raw.githubusercontent.com/amurcanov/csqtt/v2.1.9/app/src/main/assets/deploy.sh -o server-assets/deploy.sh
+          chmod 0755 server-assets/csqtt-linux-arm64 server-assets/csqtt-linux-amd64 server-assets/csqtt-linux-armv7 server-assets/deploy.sh
           sha256sum server-assets/* | tee server-assets/SHA256SUMS
           grep -Fq '"version":  "2.1.9"' server-assets/csqtt.server-provenance.json
           grep -Fq '"assetName":  "csqtt-linux-arm64"' server-assets/csqtt.server-provenance.json
           grep -Fq '"assetName":  "csqtt-linux-amd64"' server-assets/csqtt.server-provenance.json
+          grep -Fq '"assetName":  "csqtt-linux-armv7"' server-assets/csqtt.server-provenance.json
+          grep -Fq 'readonly SCRIPT_VERSION="2.1.9"' server-assets/deploy.sh
 
       - name: Verify and package
         run: |
