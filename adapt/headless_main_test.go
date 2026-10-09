@@ -89,9 +89,11 @@ func TestDirectDomainValidation(t *testing.T) {
 	}{
 		{name: "base domain", domain: "example.com", want: true},
 		{name: "subdomain", domain: "api.example.com", want: true},
-		{name: "wildcard domain", domain: "*.example.com", want: true},
+		{name: "reject wildcard syntax", domain: "*.example.com", want: false},
 		{name: "reject URL", domain: "https://example.com", want: false},
 		{name: "reject path", domain: "example.com/path", want: false},
+		{name: "reject empty label", domain: "example..com", want: false},
+		{name: "reject leading hyphen", domain: "-bad.example", want: false},
 		{name: "reject blank", domain: "", want: false},
 	}
 	for _, tt := range tests {
