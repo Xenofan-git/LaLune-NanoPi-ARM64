@@ -6,6 +6,7 @@ on:
     branches:
       - original-lalune-linux-arm64-policy
       - integration/deploymanager-fix
+      - fix/captcha-stale-overlay
   workflow_dispatch:
 
 permissions:
