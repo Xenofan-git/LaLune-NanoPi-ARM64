@@ -289,14 +289,24 @@ const directDnsmasqPath = "/etc/dnsmasq.d/lalune-direct.conf"
 const directDnsmasqMain = "/etc/dnsmasq.conf"
 const directDnsmasqInclude = "conf-file=/etc/dnsmasq.d/lalune-direct.conf"
 
+func writeDirectFileAtomic(path string, data []byte, mode os.FileMode) error {
+	tmp := path + ".lalune-tmp"
+	if err := os.WriteFile(tmp, data, mode); err != nil { return err }
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
 func ensureDirectDnsmasqInclude() error {
 	data, err := os.ReadFile(directDnsmasqMain)
 	if err != nil { return fmt.Errorf("чтение %s: %w", directDnsmasqMain, err) }
-	for _, line := range strings.Split(string(data), "\\n") {
+	for _, line := range strings.Split(string(data), "\n") {
 		if strings.TrimSpace(line) == directDnsmasqInclude { return nil }
 	}
-	content := strings.TrimRight(string(data), "\\n") + "\\n" + directDnsmasqInclude + "\\n"
-	if err := os.WriteFile(directDnsmasqMain, []byte(content), 0644); err != nil {
+	content := strings.TrimRight(string(data), "\n") + "\n" + directDnsmasqInclude + "\n"
+	if err := writeDirectFileAtomic(directDnsmasqMain, []byte(content), 0644); err != nil {
 		return fmt.Errorf("обновление %s: %w", directDnsmasqMain, err)
 	}
 	return nil
@@ -305,7 +315,7 @@ func ensureDirectDnsmasqInclude() error {
 func removeDirectDnsmasqInclude() (bool, error) {
 	data, err := os.ReadFile(directDnsmasqMain)
 	if err != nil { return false, fmt.Errorf("чтение %s: %w", directDnsmasqMain, err) }
-	lines := strings.Split(string(data), "\\n")
+	lines := strings.Split(string(data), "\n")
 	out := make([]string, 0, len(lines))
 	changed := false
 	for _, line := range lines {
@@ -313,8 +323,8 @@ func removeDirectDnsmasqInclude() (bool, error) {
 		out = append(out, line)
 	}
 	if !changed { return false, nil }
-	content := strings.TrimRight(strings.Join(out, "\\n"), "\\n") + "\\n"
-	if err := os.WriteFile(directDnsmasqMain, []byte(content), 0644); err != nil {
+	content := strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
+	if err := writeDirectFileAtomic(directDnsmasqMain, []byte(content), 0644); err != nil {
 		return false, fmt.Errorf("обновление %s: %w", directDnsmasqMain, err)
 	}
 	return true, nil
