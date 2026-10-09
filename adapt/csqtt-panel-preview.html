@@ -61,7 +61,8 @@
 'use strict';
 const API='/api';
 const $=id=>document.getElementById(id);
-const state={configs:[],selected:null,settings:null,connected:false,vk:{},captcha:{},deploying:false,deployLog:'',logs:[],version:{},coreUpdate:{},laluneUpdate:{},settingsLoaded:false,deployStarted:false};\nconst deploySecrets={mainPassword:'',webLogin:'admin',webPassword:''};
+const state={configs:[],selected:null,settings:null,connected:false,vk:{},captcha:{},deploying:false,deployLog:'',logs:[],version:{},coreUpdate:{},laluneUpdate:{},settingsLoaded:false,deployStarted:false};
+const deploySecrets={mainPassword:'',webLogin:'admin',webPassword:''};
 let toastTimer=null,refreshBusy=false,captchaLastSession='',captchaArmed=false;
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function toast(msg,error=false){const el=$('toast');el.textContent=msg;el.classList.remove('hidden');el.style.background=error?'#a92132':'#111824';clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.add('hidden'),3500);}
