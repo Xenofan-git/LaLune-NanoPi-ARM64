@@ -571,8 +571,8 @@ replace_once(
 
 replace_once(
     VTOKEN,
-    '"net/http"',
-    '"net/http"\n\t"net/url"'
+    '"strings"',
+    '"strings"\n\t"net/url"'
 )
 replace_once(
     VTOKEN,
