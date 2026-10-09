@@ -5,6 +5,7 @@ package main
 import (
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	libs "lalune-desktop/Libs"
 )
@@ -53,5 +54,29 @@ func TestSelectedConfigJsonClearsEmptySelection(t *testing.T) {
 		if core.GetSelectedConfig() != nil {
 			t.Fatalf("selection was not cleared for %q", raw)
 		}
+	}
+}
+
+
+func TestCaptchaRequestIsActive(t *testing.T) {
+	now := time.Unix(1791549509, 0)
+	tests := []struct {
+		name string
+		mode string
+		url  string
+		want bool
+	}{
+		{name: "active manual challenge", mode: "manual", url: "https://id.vk.ru/not_robot_captcha?expired_at=1791549600", want: true},
+		{name: "automatic event never opens dialog", mode: "auto", url: "https://id.vk.ru/not_robot_captcha?expired_at=1791549600", want: false},
+		{name: "expired manual challenge", mode: "manual", url: "https://id.vk.ru/not_robot_captcha?expired_at=1791549400", want: false},
+		{name: "missing expiry", mode: "manual", url: "https://id.vk.ru/not_robot_captcha", want: false},
+		{name: "invalid expiry", mode: "manual", url: "https://id.vk.ru/not_robot_captcha?expired_at=nope", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := captchaRequestIsActive(tt.mode, tt.url, now); got != tt.want {
+				t.Fatalf("captchaRequestIsActive() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
