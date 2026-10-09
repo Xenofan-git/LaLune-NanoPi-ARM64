@@ -43,6 +43,15 @@ jobs:
           grep -Fq 'regexp.MustCompile("(?i)^([a-z0-9]' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -Fq 'if err := t.applyDirectRoutingLocked(); err != nil' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -Fq 't.cleanupDirectRoutingLocked()' adapt/apply-pinned-original-linux-arm64-policy.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          html = Path("adapt/csqtt-panel-preview.html").read_text()
+          scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.S)
+          assert scripts, "no inline panel script found"
+          Path("/tmp/csqtt-panel.js").write_text("\\n".join(scripts))
+          PY
+          node --check /tmp/csqtt-panel.js
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
