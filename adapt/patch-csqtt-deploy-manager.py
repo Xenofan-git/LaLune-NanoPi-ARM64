@@ -318,4 +318,61 @@ env CSQTT_PEER_PORT={peer_port} CSQTT_SSH_PORT={ssh_port} CSQTT_WEB_PORT={web_po
 '''
 replace_once(deploy, "fn write_askpass_helper() -> Result<std::path::PathBuf> {", official + "fn write_askpass_helper() -> Result<std::path::PathBuf> {")
 
+
+# Preserve the CSQTT 2.1.9 authorization dialog contract in the native API:
+# credentials are sent to DeployManager through a short-lived 0600 file.
+deploy_go = ROOT / "Desktop/Libs/deploy.go"
+replace_once(
+    deploy_go,
+    '\\tListenPort  int    `json:"listenPort"`',
+    '\\tListenPort  int    `json:"listenPort"`\\n\\tMainPassword string `json:"mainPassword"`\\n\\tWebUser string `json:"webUser"`\\n\\tWebPassword string `json:"webPassword"`\\n\\tDockerInstall bool `json:"dockerInstall"`',
+)
+replace_once(
+    deploy_go,
+    '\\tif strings.TrimSpace(req.Host) == "" {',
+    '\\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") {\\n\\t\\tif !validCSQTTSecret(req.MainPassword) || !validCSQTTSecret(req.WebUser) || !validCSQTTSecret(req.WebPassword) {\\n\\t\\t\\tdeployAppend("[deploy] CSQTT: задайте пароль туннеля, логин и пароль WEB только латиницей и цифрами")\\n\\t\\t\\treturn false\\n\\t\\t}\\n\\t}\\n\\tif strings.TrimSpace(req.Host) == "" {',
+)
+replace_once(
+    deploy_go,
+    'func DeployProtocol(reqJSON string) bool {',
+    'func validCSQTTSecret(value string) bool {\\n\\tif value == "" { return false }\\n\\tfor _, r := range value { if !((r >= \'a\' && r <= \'z\') || (r >= \'A\' && r <= \'Z\') || (r >= \'0\' && r <= \'9\')) { return false } }\\n\\treturn true\\n}\\n\\nfunc DeployProtocol(reqJSON string) bool {',
+)
+replace_once(
+    deploy_go,
+    '\\tif req.SSHPort > 0 {',
+    '''\\tsecretsFile := ""
+\\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") {
+\\t\\tf, err := os.CreateTemp("", "csqtt-deploy-secrets-*.txt")
+\\t\\tif err != nil { deployAppend("[deploy] не удалось создать временный файл авторизации"); return false }
+\\t\\t_ = f.Chmod(0600)
+\\t\\t_, writeErr := f.WriteString(req.MainPassword + "\\n" + req.WebUser + "\\n" + req.WebPassword + "\\n")
+\\t\\tcloseErr := f.Close()
+\\t\\tif writeErr != nil || closeErr != nil { _ = os.Remove(f.Name()); deployAppend("[deploy] не удалось сохранить временные данные авторизации"); return false }
+\\t\\tsecretsFile = f.Name()
+\\t\\targs = append(args, "--secrets-file", secretsFile)
+\\t\\tif req.DockerInstall { args = append(args, "--install-in-docker") }
+\\t}
+\\tif req.SSHPort > 0 {''',
+)
+replace_once(
+    deploy_go,
+    '\\tif err != nil {\\n\\t\\tdeployAppend("[deploy] ошибка запуска: " + err.Error())\\n\\t\\treturn false\\n\\t}\\n\\tstderr, err := cmd.StderrPipe()',
+    '\\tif err != nil {\\n\\t\\tif secretsFile != "" { _ = os.Remove(secretsFile) }\\n\\t\\tdeployAppend("[deploy] ошибка запуска: " + err.Error())\\n\\t\\treturn false\\n\\t}\\n\\tstderr, err := cmd.StderrPipe()',
+)
+replace_once(
+    deploy_go,
+    '\\tif err != nil {\\n\\t\\tdeployAppend("[deploy] ошибка запуска: " + err.Error())\\n\\t\\treturn false\\n\\t}\\n\\n\\tif err := cmd.Start(); err != nil {',
+    '\\tif err != nil {\\n\\t\\tif secretsFile != "" { _ = os.Remove(secretsFile) }\\n\\t\\tdeployAppend("[deploy] ошибка запуска: " + err.Error())\\n\\t\\treturn false\\n\\t}\\n\\n\\tif err := cmd.Start(); err != nil {',
+)
+replace_once(
+    deploy_go,
+    '\\tif err := cmd.Start(); err != nil {\\n\\t\\tdeployAppend("[deploy] не удалось запустить DeployManager: " + err.Error())',
+    '\\tif err := cmd.Start(); err != nil {\\n\\t\\tif secretsFile != "" { _ = os.Remove(secretsFile) }\\n\\t\\tdeployAppend("[deploy] не удалось запустить DeployManager: " + err.Error())',
+)
+replace_once(
+    deploy_go,
+    '\\t\\terr := cmd.Wait()\\n\\t\\tif err != nil {',
+    '\\t\\terr := cmd.Wait()\\n\\t\\tif secretsFile != "" { _ = os.Remove(secretsFile) }\\n\\t\\tif err != nil {',
+)
+
 print("CSQTT DeployManager adaptation applied")
