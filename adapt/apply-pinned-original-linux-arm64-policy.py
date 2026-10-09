@@ -286,6 +286,39 @@ const directMark = "0x4c4c"
 const directRulePref = "22010"
 const directNftPath = "/run/lalune-direct.nft"
 const directDnsmasqPath = "/etc/dnsmasq.d/lalune-direct.conf"
+const directDnsmasqMain = "/etc/dnsmasq.conf"
+const directDnsmasqInclude = "conf-file=/etc/dnsmasq.d/lalune-direct.conf"
+
+func ensureDirectDnsmasqInclude() error {
+	data, err := os.ReadFile(directDnsmasqMain)
+	if err != nil { return fmt.Errorf("чтение %s: %w", directDnsmasqMain, err) }
+	for _, line := range strings.Split(string(data), "\\n") {
+		if strings.TrimSpace(line) == directDnsmasqInclude { return nil }
+	}
+	content := strings.TrimRight(string(data), "\\n") + "\\n" + directDnsmasqInclude + "\\n"
+	if err := os.WriteFile(directDnsmasqMain, []byte(content), 0644); err != nil {
+		return fmt.Errorf("обновление %s: %w", directDnsmasqMain, err)
+	}
+	return nil
+}
+
+func removeDirectDnsmasqInclude() (bool, error) {
+	data, err := os.ReadFile(directDnsmasqMain)
+	if err != nil { return false, fmt.Errorf("чтение %s: %w", directDnsmasqMain, err) }
+	lines := strings.Split(string(data), "\\n")
+	out := make([]string, 0, len(lines))
+	changed := false
+	for _, line := range lines {
+		if strings.TrimSpace(line) == directDnsmasqInclude { changed = true; continue }
+		out = append(out, line)
+	}
+	if !changed { return false, nil }
+	content := strings.TrimRight(strings.Join(out, "\\n"), "\\n") + "\\n"
+	if err := os.WriteFile(directDnsmasqMain, []byte(content), 0644); err != nil {
+		return false, fmt.Errorf("обновление %s: %w", directDnsmasqMain, err)
+	}
+	return true, nil
+}
 
 func splitDirectList(raw string) []string {
 \treturn strings.FieldsFunc(raw, func(r rune) bool {
@@ -328,8 +361,11 @@ func normalizeDirectIPs(raw string) ([]string, error) {
 func (t *LinuxTun) cleanupDirectRoutingLocked() {
 \tt.app.runSudo("ip rule del pref " + directRulePref + " 2>/dev/null || true")
 \tt.app.runSudo("nft delete table inet lalune_direct 2>/dev/null || true")
-\tif _, err := os.Stat(directDnsmasqPath); err == nil {
-\t\t_ = os.Remove(directDnsmasqPath)
+\t_, includeErr := removeDirectDnsmasqInclude()
+\tif _, err := os.Stat(directDnsmasqPath); err == nil { _ = os.Remove(directDnsmasqPath) }
+\tif includeErr != nil {
+\t\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Не удалось убрать dnsmasq include: %v", includeErr))
+\t} else {
 \t\t_ = t.app.runSudo("systemctl restart dnsmasq")
 \t}
 \t_ = os.Remove(directNftPath)
@@ -360,7 +396,7 @@ func (t *LinuxTun) applyDirectRoutingLocked() error {
 
 \tif len(domains) == 0 && len(ips) == 0 {
 \t\tif hadDnsmasq {
-\t\t\t_ = t.app.runSudo("systemctl restart dnsmasq")
+\t\t\tif err := t.app.runSudo("systemctl restart dnsmasq"); err != nil { return fmt.Errorf("перезапуск dnsmasq после очистки Direct: %w", err) }
 \t\t}
 \t\treturn nil
 \t}
@@ -397,6 +433,10 @@ func (t *LinuxTun) applyDirectRoutingLocked() error {
 \t\tline += "/4#inet#lalune_direct#direct4\n"
 \t\tif err := os.WriteFile(directDnsmasqPath, []byte(line), 0644); err != nil {
 \t\t\treturn fmt.Errorf("запись dnsmasq direct-конфига: %w", err)
+\t\t}
+\t\tif err := ensureDirectDnsmasqInclude(); err != nil {
+\t\t\t_ = os.Remove(directDnsmasqPath)
+\t\t\treturn err
 \t\t}
 \t\tif err := t.app.runSudo("systemctl restart dnsmasq"); err != nil {
 \t\t\treturn fmt.Errorf("перезапуск dnsmasq: %w", err)
