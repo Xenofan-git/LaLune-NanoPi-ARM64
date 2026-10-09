@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -171,8 +172,8 @@ func TestDirectPlanTransitions(t *testing.T) {
 			domains, ips, needsDNS, err := prepareDirectPlan(tt.domains, tt.ips)
 			if (err != nil) != tt.wantErr { t.Fatalf("prepareDirectPlan error = %v, wantErr %v", err, tt.wantErr) }
 			if tt.wantErr { return }
-			if !reflect.DeepEqual(domains, tt.wantDomains) { t.Errorf("domains = %#v, want %#v", domains, tt.wantDomains) }
-			if !reflect.DeepEqual(ips, tt.wantIPs) { t.Errorf("ips = %#v, want %#v", ips, tt.wantIPs) }
+			if !slices.Equal(domains, tt.wantDomains) { t.Errorf("domains = %#v, want %#v", domains, tt.wantDomains) }
+			if !slices.Equal(ips, tt.wantIPs) { t.Errorf("ips = %#v, want %#v", ips, tt.wantIPs) }
 			if needsDNS != tt.wantDNS { t.Errorf("needsDNS = %v, want %v", needsDNS, tt.wantDNS) }
 			if (len(domains)+len(ips) > 0) != tt.wantEnabled { t.Errorf("enabled = %v, want %v", len(domains)+len(ips)>0, tt.wantEnabled) }
 		})
