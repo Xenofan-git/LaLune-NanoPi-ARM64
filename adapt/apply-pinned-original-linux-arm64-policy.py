@@ -369,7 +369,6 @@ func normalizeDirectIPs(raw string) ([]string, error) {
 }
 
 func (t *LinuxTun) cleanupDirectRoutingLocked() {
-\tmutating = true
 \tt.app.runSudo("ip rule del pref " + directRulePref + " 2>/dev/null || true")
 \tt.app.runSudo("nft delete table inet lalune_direct 2>/dev/null || true")
 \tincludeRemoved, includeErr := removeDirectDnsmasqInclude()
@@ -411,6 +410,7 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \t\t}
 \t}
 
+\tmutating = true
 \tt.app.runSudo("ip rule del pref " + directRulePref + " 2>/dev/null || true")
 \tt.app.runSudo("nft delete table inet lalune_direct 2>/dev/null || true")
 \tincludeRemoved, includeErr := removeDirectDnsmasqInclude()
