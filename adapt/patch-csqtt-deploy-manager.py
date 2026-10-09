@@ -338,7 +338,7 @@ replace_once(
 replace_once(
     deploy_go,
     '\\tif strings.TrimSpace(req.Host) == "" {',
-    '\\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") {\\n\\t\\tif !validCSQTTSecret(req.MainPassword) || !validCSQTTSecret(req.WebUser) || !validCSQTTSecret(req.WebPassword) {\\n\\t\\t\\tdeployAppend("[deploy] CSQTT: задайте пароль туннеля, логин и пароль WEB только латиницей и цифрами")\\n\\t\\t\\treturn false\\n\\t\\t}\\n\\t}\\n\\tif strings.TrimSpace(req.Host) == "" {',
+    '\\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") && !req.Uninstall {\\n\\t\\tif !validCSQTTSecret(req.MainPassword) || !validCSQTTSecret(req.WebUser) || !validCSQTTSecret(req.WebPassword) {\\n\\t\\t\\tdeployAppend("[deploy] CSQTT: задайте пароль туннеля, логин и пароль WEB только латиницей и цифрами")\\n\\t\\t\\treturn false\\n\\t\\t}\\n\\t}\\n\\tif strings.TrimSpace(req.Host) == "" {',
 )
 replace_once(
     deploy_go,
