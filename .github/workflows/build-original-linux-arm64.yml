@@ -219,7 +219,36 @@ jobs:
           }
 
           func deployManagerName() string {""")
+          # Add executable regression tests for the generated remote installer.
+          p=u/"Core/DeployManager/src/deploy.rs"
+          with p.open("a") as f:
+              f.write(r"""
+
+          #[cfg(test)]
+          mod csqtt_deploy_script_tests {
+              use super::*;
+              #[test]
+              fn csqtt_installer_script_is_syntax_valid_and_safe() {
+                  let ports = Ports { core: Some(47000), warp: Some(47002), listen: Some(1080) };
+                  let script = install_script(Protocol::Csqtt, &ports, Some("/tmp/lalune/server-assets"));
+                  assert!(script.contains("refusing to overwrite an existing isolated CSQTT service"));
+                  assert!(script.contains("SOURCE=\"/tmp/lalune/server-assets/server-assets/csqtt-linux-$ASSET_ARCH\"") == false);
+                  assert!(script.contains("SOURCE=\"/tmp/lalune/server-assets/csqtt-linux-$ASSET_ARCH\""));
+                  assert!(script.contains("TMP_DEST=\"$DEST.new.$\""));
+                  assert!(script.contains("wget -O \\"$TMP_DEST\\" \\"$URL\\""));
+                  assert!(script.contains("mv -f \\"$TMP_DEST\\" \\"$DEST\\""));
+                  let status = Command::new("bash").arg("-n").arg("-c").arg(&script).status().expect("bash -n");
+                  assert!(status.success(), "generated installer shell syntax invalid");
+              }
+          }
+          """)
           PY
+
+      - name: Test generated CSQTT installer
+        working-directory: upstream-lalune/Core/DeployManager
+        run: |
+          set -euxo pipefail
+          cargo test
 
       - name: Prepare original Go module layout
         run: |
