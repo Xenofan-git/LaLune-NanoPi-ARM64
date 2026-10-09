@@ -50,6 +50,8 @@ jobs:
           grep -Fq 'writeDirectFileAtomic(directNftPath' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -Fq 'writeDirectFileAtomic(directDnsmasqPath' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -Fq 'nft -c -f ' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq '"core": "csqtt-server/2.1.9"' adapt/headless_main.go
+          grep -Fq 'func TestVersionEndpointReportsBuildProvenance' adapt/headless_main_test.go
           grep -Fq '"commit": buildCommit' adapt/headless_main.go
           grep -Fq '"buildRun": buildRunID' adapt/headless_main.go
           grep -Fq '"buildDate": buildDate' adapt/headless_main.go
