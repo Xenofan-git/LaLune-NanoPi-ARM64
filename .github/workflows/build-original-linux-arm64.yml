@@ -264,7 +264,11 @@ jobs:
               fn csqtt_installer_script_is_syntax_valid_and_safe() {
                   let ports = Ports { core: Some(47000), warp: Some(47002), listen: Some(1080) };
                   let script = install_script(Protocol::Csqtt, &ports, Some("/tmp/lalune/server-assets"));
-                  assert!(script.contains("refusing to overwrite an existing isolated CSQTT service"));
+                  assert!(script.contains("existing CSQTT unit differs from expected isolated service; refusing update"));
+                  assert!(script.contains("BACKUP=\"/var/backups/lalune-csqtt-47000-$(date +%Y%m%d%H%M%S)\""));
+                  assert!(script.contains("rolling back unit"));
+                  assert!(script.contains("csqtt47000"));
+                  assert!(script.contains("/etc/csqtt-47000"));
 
                   assert!(script.contains("SOURCE=\"/tmp/lalune/server-assets/csqtt-linux-$ASSET_ARCH\""));
                   assert!(script.contains("TMP_DEST=\"$DEST.new.$$\""));
