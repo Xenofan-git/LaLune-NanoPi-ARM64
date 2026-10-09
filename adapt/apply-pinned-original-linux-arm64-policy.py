@@ -361,12 +361,18 @@ func normalizeDirectIPs(raw string) ([]string, error) {
 func (t *LinuxTun) cleanupDirectRoutingLocked() {
 \tt.app.runSudo("ip rule del pref " + directRulePref + " 2>/dev/null || true")
 \tt.app.runSudo("nft delete table inet lalune_direct 2>/dev/null || true")
-\t_, includeErr := removeDirectDnsmasqInclude()
-\tif _, err := os.Stat(directDnsmasqPath); err == nil { _ = os.Remove(directDnsmasqPath) }
+\tincludeRemoved, includeErr := removeDirectDnsmasqInclude()
+\tconfigRemoved := false
+\tif _, err := os.Stat(directDnsmasqPath); err == nil {
+\t\t_ = os.Remove(directDnsmasqPath)
+\t\tconfigRemoved = true
+\t}
 \tif includeErr != nil {
 \t\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Не удалось убрать dnsmasq include: %v", includeErr))
-\t} else {
-\t\t_ = t.app.runSudo("systemctl restart dnsmasq")
+\t} else if includeRemoved || configRemoved {
+\t\tif err := t.app.runSudo("systemctl restart dnsmasq"); err != nil {
+\t\t\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Не удалось перезапустить dnsmasq после очистки: %v", err))
+\t\t}
 \t}
 \t_ = os.Remove(directNftPath)
 }
@@ -387,6 +393,8 @@ func (t *LinuxTun) applyDirectRoutingLocked() error {
 
 \tt.app.runSudo("ip rule del pref " + directRulePref + " 2>/dev/null || true")
 \tt.app.runSudo("nft delete table inet lalune_direct 2>/dev/null || true")
+\tincludeRemoved, includeErr := removeDirectDnsmasqInclude()
+\tif includeErr != nil { return includeErr }
 \thadDnsmasq := false
 \tif _, err := os.Stat(directDnsmasqPath); err == nil {
 \t\thadDnsmasq = true
@@ -395,7 +403,7 @@ func (t *LinuxTun) applyDirectRoutingLocked() error {
 \t_ = os.Remove(directNftPath)
 
 \tif len(domains) == 0 && len(ips) == 0 {
-\t\tif hadDnsmasq {
+\t\tif hadDnsmasq || includeRemoved {
 \t\t\tif err := t.app.runSudo("systemctl restart dnsmasq"); err != nil { return fmt.Errorf("перезапуск dnsmasq после очистки Direct: %w", err) }
 \t\t}
 \t\treturn nil
