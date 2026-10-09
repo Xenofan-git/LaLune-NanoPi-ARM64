@@ -33,7 +33,7 @@ jobs:
           grep -q 'id="directIPs"' adapt/csqtt-panel-preview.html
           grep -q 'id="saveDirectRules"' adapt/csqtt-panel-preview.html
           ! grep -q 'Маршрутизация приложений' adapt/csqtt-panel-preview.html
-          test "$(grep -o 'data-page="' adapt/csqtt-panel-preview.html | wc -l)" -eq 5
+          test "$(grep -o 'data-page="' adapt/csqtt-panel-preview.html | wc -l)" -eq 6
           grep -q 'function directRuleErrors()' adapt/csqtt-panel-preview.html
           grep -q 'func (t \*LinuxTun) ApplyDirectRouting() error' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -q 't.applyDirectRoutingLocked()' adapt/apply-pinned-original-linux-arm64-policy.py
