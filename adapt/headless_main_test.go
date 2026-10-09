@@ -80,3 +80,41 @@ func TestCaptchaRequestIsActive(t *testing.T) {
 		})
 	}
 }
+
+func TestDirectDomainValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		domain string
+		want bool
+	}{
+		{name: "base domain", domain: "example.com", want: true},
+		{name: "subdomain", domain: "api.example.com", want: true},
+		{name: "wildcard domain", domain: "*.example.com", want: true},
+		{name: "reject URL", domain: "https://example.com", want: false},
+		{name: "reject path", domain: "example.com/path", want: false},
+		{name: "reject blank", domain: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := validDirectDomain(tt.domain); got != tt.want {
+				t.Fatalf("validDirectDomain(%q) = %v, want %v", tt.domain, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeDirectIPs(t *testing.T) {
+	got, err := normalizeDirectIPs("192.0.2.1\n192.0.2.0/24")
+	if err != nil {
+		t.Fatalf("normalizeDirectIPs(valid values): %v", err)
+	}
+	if len(got) != 2 || got[0] != "192.0.2.1" || got[1] != "192.0.2.0/24" {
+		t.Fatalf("unexpected normalized IPs: %#v", got)
+	}
+	if _, err := normalizeDirectIPs("2001:db8::1"); err == nil {
+		t.Fatal("expected IPv6 to be rejected while Direct supports IPv4 only")
+	}
+	if _, err := normalizeDirectIPs("192.0.2.999"); err == nil {
+		t.Fatal("expected malformed IPv4 to be rejected")
+	}
+}
