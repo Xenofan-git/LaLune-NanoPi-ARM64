@@ -194,7 +194,8 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           set -euxo pipefail
-          go build -trimpath -ldflags="-s -w" -o lalune-original-linux-arm64 .
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          go build -trimpath -ldflags="-s -w -X main.buildCommit=${GITHUB_SHA} -X main.buildRunID=${GITHUB_RUN_ID} -X main.buildDate=${BUILD_DATE}" -o lalune-original-linux-arm64 .
           file lalune-original-linux-arm64
           test -s lalune-original-linux-arm64
       - name: Set up .NET for ARM64 VK token fetcher
