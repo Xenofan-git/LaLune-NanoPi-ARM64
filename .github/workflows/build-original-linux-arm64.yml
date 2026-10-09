@@ -239,6 +239,11 @@ jobs:
           grep -Fq '"assetName":  "csqtt-linux-amd64"' server-assets/csqtt.server-provenance.json
           grep -Fq '"assetName":  "csqtt-linux-armv7"' server-assets/csqtt.server-provenance.json
           grep -Fq 'readonly SCRIPT_VERSION="2.1.9"' server-assets/deploy.sh
+      - name: Audit upstream CSQTT isolation hazards
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 --branch v2.1.9 https://github.com/amurcanov/csqtt.git server-source
+          python3 adapt/audit-csqtt-isolation.py
       - name: Build VK token fetcher for Linux ARM64
         run: |
           set -euxo pipefail
