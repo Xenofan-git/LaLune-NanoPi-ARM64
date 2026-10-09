@@ -369,6 +369,7 @@ func normalizeDirectIPs(raw string) ([]string, error) {
 }
 
 func (t *LinuxTun) cleanupDirectRoutingLocked() {
+\tmutating = true
 \tt.app.runSudo("ip rule del pref " + directRulePref + " 2>/dev/null || true")
 \tt.app.runSudo("nft delete table inet lalune_direct 2>/dev/null || true")
 \tincludeRemoved, includeErr := removeDirectDnsmasqInclude()
@@ -387,7 +388,16 @@ func (t *LinuxTun) cleanupDirectRoutingLocked() {
 \t_ = os.Remove(directNftPath)
 }
 
-func (t *LinuxTun) applyDirectRoutingLocked() error {
+func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
+\t// Once live state starts changing, any subsequent error must leave Direct
+\t// fully disabled rather than partially applied. TUN/CSQTT itself is untouched.
+\tmutating := false
+\tdefer func() {
+\t\tif retErr != nil && mutating {
+\t\t\tt.cleanupDirectRoutingLocked()
+\t\t\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Частичное применение отменено; Direct очищен: %v", retErr))
+\t\t}
+\t}()
 \tsettings := t.app.core.GetSettings()
 \tdomains := splitDirectList(settings.DirectDomains)
 \tips, err := normalizeDirectIPs(settings.DirectIPs)
