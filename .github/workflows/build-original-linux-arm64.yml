@@ -123,6 +123,8 @@ jobs:
           grep -Fq 'pub uninstall: bool' upstream-lalune/Core/DeployManager/src/main.rs
           grep -Fq 'fn uninstall_official_csqtt' upstream-lalune/Core/DeployManager/src/deploy.rs
           grep -Fq 'func validCSQTTSecret' upstream-lalune/Desktop/Libs/deploy.go
+          grep -Fq 'VKTokenFetcherARM64Archive' upstream-lalune/Desktop/Libs/vktoken.go
+          grep -Fq 'ResolveChromiumExecutable' upstream-lalune/Core/LaLuneTokenFetcher/Playwright/PlaywrightTokenFetcher.cs
           grep -Fq 'csqtt-deploy-secrets-*.txt' upstream-lalune/Desktop/Libs/deploy.go
 
       - name: Prepare original Go module layout
@@ -214,6 +216,19 @@ jobs:
           (cd /tmp/vk-token-fetcher-package && zip -qr "$GITHUB_WORKSPACE/server-assets/LaLuneTokenFetcher_Linux_ARM64.zip" vk-token-fetcher)
           sha256sum server-assets/LaLuneTokenFetcher_Linux_ARM64.zip | tee -a server-assets/SHA256SUMS
           test -s server-assets/LaLuneTokenFetcher_Linux_ARM64.zip
+          cat > server-assets/install-vk-chromium.sh <<'SH'
+          #!/bin/sh
+          set -eu
+          if [ "$(id -u)" -ne 0 ]; then
+            echo "Run as root: sudo sh install-vk-chromium.sh" >&2
+            exit 1
+          fi
+          apt-get update
+          apt-get install -y chromium
+          command -v chromium
+          SH
+          chmod 0755 server-assets/install-vk-chromium.sh
+          sha256sum server-assets/install-vk-chromium.sh | tee -a server-assets/SHA256SUMS
 
       - name: Verify and package
         run: |
@@ -223,6 +238,8 @@ jobs:
           cp upstream-lalune/Desktop/Linux/lalune-original-linux-arm64 dist/
           cp upstream-lalune/Core/DeployManager/target/aarch64-unknown-linux-gnu/release/deploy-manager dist/
           cp -a server-assets dist/server-assets
+          test -s dist/server-assets/LaLuneTokenFetcher_Linux_ARM64.zip
+          test -s dist/server-assets/install-vk-chromium.sh
           cp adapt/csqtt-panel-preview.html dist/csqtt-panel-preview.html
           mkdir -p dist/web-dist
           cp adapt/csqtt-panel-preview.html dist/web-dist/index.html
