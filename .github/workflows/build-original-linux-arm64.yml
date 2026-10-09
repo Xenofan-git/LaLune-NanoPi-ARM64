@@ -123,6 +123,12 @@ jobs:
         run: |
           set -euxo pipefail
           go mod download
+      - name: Test deploy access policy (native runner)
+        working-directory: upstream-lalune/Desktop/Linux
+        run: |
+          set -euxo pipefail
+          go test -run '^TestPrivateClient$' -count=1 .
+
       - name: Build ARM64
         working-directory: upstream-lalune/Desktop/Linux
         env:
@@ -131,7 +137,6 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           set -euxo pipefail
-          go test -run '^TestPrivateClient$' -count=1 .
           go build -trimpath -ldflags="-s -w" -o lalune-original-linux-arm64 .
           file lalune-original-linux-arm64
           test -s lalune-original-linux-arm64
