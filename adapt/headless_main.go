@@ -11,6 +11,7 @@ import (
     "fmt"
     "net"
     "net/http"
+    "net/url"
     "os"
     "os/signal"
     "strconv"
@@ -92,23 +93,71 @@ var captchaSessionToken string
 var captchaHandledSession string
 var captchaUpdated time.Time
 
+func captchaRequestIsActive(mode, redirectURI string, now time.Time) bool {
+    // Automatic CAPTCHA events are internal retries and must never trigger UI.
+    if !strings.EqualFold(strings.TrimSpace(mode), "manual") {
+        return false
+    }
+    // VK challenge links include an explicit expiry. Do not resurrect an old
+    // challenge from the persistent application log after it has expired.
+    u, err := url.Parse(redirectURI)
+    if err != nil {
+        return false
+    }
+    expires := strings.TrimSpace(u.Query().Get("expired_at"))
+    if expires == "" {
+        return false
+    }
+    unix, err := strconv.ParseInt(expires, 10, 64)
+    if err != nil || unix <= now.Unix() {
+        return false
+    }
+    return true
+}
+
 func refreshCaptchaState(app *App) {
     raw := app.GetLogsJson()
     var logs []string
     if json.Unmarshal([]byte(raw), &logs) != nil { return }
     captchaMu.Lock()
     defer captchaMu.Unlock()
+    // The newest CAPTCHA_SOLVE event is authoritative for this moment. This
+    // allows a later manual fallback event to supersede an earlier auto event.
     for i := len(logs)-1; i >= 0; i-- {
         parts := strings.SplitN(strings.TrimSpace(logs[i]), "|", 4)
         if len(parts) != 4 || parts[0] != "CAPTCHA_SOLVE" { continue }
-        if parts[3] == "" || parts[3] == captchaHandledSession { break }
+        session := strings.TrimSpace(parts[3])
+        if session == "" || session == captchaHandledSession {
+            captchaPending = false
+            captchaMode = ""
+            captchaRedirectURI = ""
+            captchaSessionToken = ""
+            captchaUpdated = time.Time{}
+            return
+        }
+        if !captchaRequestIsActive(parts[1], parts[2], time.Now()) {
+            captchaPending = false
+            captchaMode = ""
+            captchaRedirectURI = ""
+            captchaSessionToken = ""
+            captchaUpdated = time.Time{}
+            return
+        }
+        if captchaSessionToken != session || !captchaPending {
+            captchaUpdated = time.Now()
+        }
         captchaPending = true
-        captchaMode = parts[1]
+        captchaMode = strings.TrimSpace(parts[1])
         captchaRedirectURI = parts[2]
-        captchaSessionToken = parts[3]
-        captchaUpdated = time.Now()
-        break
+        captchaSessionToken = session
+        return
     }
+    // No CAPTCHA event in the current log: clear any in-memory stale state.
+    captchaPending = false
+    captchaMode = ""
+    captchaRedirectURI = ""
+    captchaSessionToken = ""
+    captchaUpdated = time.Time{}
 }
 
 func captchaState(app *App) map[string]any {
