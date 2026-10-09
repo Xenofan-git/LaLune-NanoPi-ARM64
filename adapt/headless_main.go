@@ -371,6 +371,21 @@ func apiHandler(app *App) http.Handler {
         if !method(w, r, http.MethodPost) { return }
         writeJSON(w, map[string]bool{"ok": app.LoginVK()})
     })
+    mux.HandleFunc("/vk/import", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        var req struct { Token string `json:"token"` }
+        if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&req); err != nil {
+            w.WriteHeader(http.StatusBadRequest)
+            writeJSON(w, map[string]any{"ok": false, "error": "Некорректный запрос"})
+            return
+        }
+        if err := app.SaveVKTokenInput(req.Token); err != nil {
+            w.WriteHeader(http.StatusBadRequest)
+            writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+            return
+        }
+        writeJSON(w, map[string]bool{"ok": true})
+    })
     mux.HandleFunc("/vk/delete", func(w http.ResponseWriter, r *http.Request) {
         if !method(w, r, http.MethodPost) { return }
         writeJSON(w, map[string]bool{"ok": app.DeleteVKToken()})
