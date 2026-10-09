@@ -136,6 +136,9 @@ jobs:
           grep -Fq 'func validCSQTTSecret' upstream-lalune/Desktop/Libs/deploy.go
           grep -Fq 'VKTokenFetcherARM64Archive' upstream-lalune/Desktop/Libs/vktoken.go
           grep -Fq 'ResolveChromiumExecutable' upstream-lalune/Core/LaLuneTokenFetcher/Playwright/PlaywrightTokenFetcher.cs
+          grep -Fq 'SaveVKTokenInput' upstream-lalune/Desktop/Libs/vktoken.go
+          grep -Fq 'mux.HandleFunc("/vk/import"' adapt/headless_main.go
+          grep -Fq 'id="vkImportPanel"' adapt/csqtt-panel-preview.html
           grep -Fq 'csqtt-deploy-secrets-*.txt' upstream-lalune/Desktop/Libs/deploy.go
 
       - name: Prepare original Go module layout
