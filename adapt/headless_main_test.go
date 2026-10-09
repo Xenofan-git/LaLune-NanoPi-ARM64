@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -148,5 +149,32 @@ func TestVersionEndpointReportsBuildProvenance(t *testing.T) {
 	}
 	for key, wantValue := range want {
 		if got[key] != wantValue { t.Errorf("/version[%q] = %#v, want %q", key, got[key], wantValue) }
+	}
+}
+
+func TestDirectPlanTransitions(t *testing.T) {
+	tests := []struct {
+		name, domains, ips string
+		wantDomains, wantIPs []string
+		wantDNS, wantEnabled bool
+		wantErr bool
+	}{
+		{name: "domains and IPs", domains: "example.com, api.example.com", ips: "192.0.2.1,192.0.2.0/24", wantDomains: []string{"example.com", "api.example.com"}, wantIPs: []string{"192.0.2.1", "192.0.2.0/24"}, wantDNS: true, wantEnabled: true},
+		{name: "IP only after domains", ips: "192.0.2.1", wantIPs: []string{"192.0.2.1"}, wantEnabled: true},
+		{name: "domains only after IPs", domains: "example.com", wantDomains: []string{"example.com"}, wantDNS: true, wantEnabled: true},
+		{name: "empty after domains and IPs", wantDomains: []string{}, wantIPs: []string{}, wantEnabled: false},
+		{name: "reject bad domain without plan", domains: "https://example.com", wantErr: true},
+		{name: "reject bad IP without plan", ips: "192.0.2.999", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			domains, ips, needsDNS, err := prepareDirectPlan(tt.domains, tt.ips)
+			if (err != nil) != tt.wantErr { t.Fatalf("prepareDirectPlan error = %v, wantErr %v", err, tt.wantErr) }
+			if tt.wantErr { return }
+			if !reflect.DeepEqual(domains, tt.wantDomains) { t.Errorf("domains = %#v, want %#v", domains, tt.wantDomains) }
+			if !reflect.DeepEqual(ips, tt.wantIPs) { t.Errorf("ips = %#v, want %#v", ips, tt.wantIPs) }
+			if needsDNS != tt.wantDNS { t.Errorf("needsDNS = %v, want %v", needsDNS, tt.wantDNS) }
+			if (len(domains)+len(ips) > 0) != tt.wantEnabled { t.Errorf("enabled = %v, want %v", len(domains)+len(ips)>0, tt.wantEnabled) }
+		})
 	}
 }
