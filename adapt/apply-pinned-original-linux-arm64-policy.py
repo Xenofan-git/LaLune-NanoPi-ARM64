@@ -368,6 +368,18 @@ func normalizeDirectIPs(raw string) ([]string, error) {
 \treturn out, nil
 }
 
+func prepareDirectPlan(domainsRaw, ipsRaw string) ([]string, []string, bool, error) {
+\tdomains := splitDirectList(domainsRaw)
+\tips, err := normalizeDirectIPs(ipsRaw)
+\tif err != nil { return nil, nil, false, err }
+\tfor _, domain := range domains {
+\t\tif !validDirectDomain(domain) {
+\t\t\treturn nil, nil, false, fmt.Errorf("некорректный домен Direct: %s", domain)
+\t\t}
+\t}
+\treturn domains, ips, len(domains) > 0, nil
+}
+
 func (t *LinuxTun) cleanupDirectRoutingLocked() {
 \tt.app.runSudo("ip rule del pref " + directRulePref + " 2>/dev/null || true")
 \tt.app.runSudo("nft delete table inet lalune_direct 2>/dev/null || true")
@@ -398,17 +410,8 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \t\t}
 \t}()
 \tsettings := t.app.core.GetSettings()
-\tdomains := splitDirectList(settings.DirectDomains)
-\tips, err := normalizeDirectIPs(settings.DirectIPs)
-\tif err != nil {
-\t\treturn err
-\t}
-
-\tfor _, d := range domains {
-\t\tif !validDirectDomain(d) {
-\t\t\treturn fmt.Errorf("некорректный домен Direct: %s", d)
-\t\t}
-\t}
+\tdomains, ips, needsDnsmasq, err := prepareDirectPlan(settings.DirectDomains, settings.DirectIPs)
+\tif err != nil { return err }
 
 \tmutating = true
 \tt.app.runSudo("ip rule del pref " + directRulePref + " 2>/dev/null || true")
@@ -456,7 +459,7 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \t\treturn fmt.Errorf("nft direct policy: %w", err)
 \t}
 
-\tif len(domains) > 0 {
+\tif needsDnsmasq {
 \t\tline := "nftset=/"
 \t\tfor i, d := range domains {
 \t\t\tif i > 0 {
