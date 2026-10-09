@@ -296,14 +296,12 @@ cleanup() {{
   rm -f -- /tmp/deploy.sh /tmp/.csqtt-upload-server /tmp/.csqtt-upload-web.env /tmp/.csqtt-upload-overrides.json
 }}
 trap cleanup EXIT
-# The upstream installer is not namespaced: stop before it writes global files.
-if systemctl cat csqtt.service >/dev/null 2>&1 ||
-   systemctl cat csqtt-47000.service >/dev/null 2>&1 ||
-   [ -e /etc/csqtt ] || [ -e /usr/local/bin/csqtt ] ||
-   ip link show csqtt1 >/dev/null 2>&1; then
-  echo "CSQTT_ISOLATION_REQUIRED: upstream installer has shared global resources; no install attempted" >&2
-  exit 73
-fi
+# Fail closed unconditionally: this upstream installer is not namespaced.
+# Even an apparently clean preflight cannot prove absence of shared firewall,
+# sysctl, helper, Docker, TUN, or future cleanup conflicts. Never run it until
+# the dedicated LaLune installer has been fully isolated and audited.
+echo "CSQTT_ISOLATION_REQUIRED: upstream CSQTT 2.1.9 installer uses global resources; LaLune deployment is disabled pending a namespaced installer" >&2
+exit 73
 case "$(uname -m)" in
   x86_64|amd64) ARCH=amd64 ;;
   aarch64|arm64) ARCH=arm64 ;;
