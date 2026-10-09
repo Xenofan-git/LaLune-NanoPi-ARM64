@@ -109,7 +109,7 @@ jobs:
                   run_scp(args,&remote,dir,&remote_tmp)?;
               }
           }
-          let script=install_script(proto,ports,args.local_binary_dir.as_deref().map(|_|remote_tmp.as_str()));""")
+          let remote_assets = args.local_binary_dir.as_ref().map(|_| format!("{}/server-assets",remote_tmp));\n          let script=install_script(proto,ports,remote_assets.as_deref());""")
           r(u/"Core/DeployManager/src/deploy.rs",
             "fn run_ssh(args: &DeployArgs, remote: &str, script: &str) -> Result<std::process::Output> {",
             """fn run_scp(args:&DeployArgs,remote:&str,local:&str,tmp:&str)->Result<()> {
