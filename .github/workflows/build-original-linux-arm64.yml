@@ -139,13 +139,28 @@ jobs:
           fi""")
           r(u/"Core/DeployManager/src/deploy.rs",
             'echo "[install] downloading $URL"',
-            """if [ -n "{local_dir}" ] && [ "{proto}" = "csqtt" ]; then
-            SOURCE="{local_dir}/csqtt-linux-"$ASSET_ARCH
-            if [ ! -s "$SOURCE" ]; then echo "[install] bundled CSQTT asset missing: $SOURCE" >&2; exit 1; fi
-            install -m 0755 "$SOURCE" "$DEST"
-            rm -rf "{local_dir}"
+            """if [ -n \"{local_dir}\" ] && [ \"{proto}\" = \"csqtt\" ]; then
+            SOURCE=\"{local_dir}/csqtt-linux-$ASSET_ARCH\"
+            if [ ! -s \"$SOURCE\" ]; then echo \"[install] bundled CSQTT asset missing: $SOURCE\" >&2; exit 1; fi
+            TMP_DEST=\"${DEST}.new.$\" 
+            install -m 0755 \"$SOURCE\" \"$TMP_DEST\"
+            mv -f \"$TMP_DEST\" \"$DEST\"
           else
-            echo "[install] downloading $URL" """)
+            echo \"[install] downloading $URL\"
+            TMP_DEST=\"${DEST}.new.$\" 
+            if command -v curl >/dev/null 2>&1; then
+              curl -fSL --retry 3 \"$URL\" -o \"$TMP_DEST\"
+            elif command -v wget >/dev/null 2>&1; then
+              wget -O \"$TMP_DEST\" \"$TMP_DEST\"
+            else
+              echo \"[install] error: neither curl nor wget available\" >&2; exit 1
+            fi
+            if [ ! -s \"$TMP_DEST\" ]; then echo \"[install] error: download empty\" >&2; rm -f \"$TMP_DEST\"; exit 1; fi
+            chmod 0755 \"$TMP_DEST\"
+            mv -f \"$TMP_DEST\" \"$DEST\"
+          fi
+          if [ ! -s \"$DEST\" ]; then echo \"[install] error: installed file is empty\" >&2; exit 1; fi
+          chmod +x \"$DEST\"""")
           r(u/"Core/DeployManager/src/deploy.rs",
             "if [ ! -s \"$DEST\" ]; then",
             """if [ ! -s "$DEST" ]; then
