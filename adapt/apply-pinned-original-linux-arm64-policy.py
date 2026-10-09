@@ -568,6 +568,50 @@ replace_once(
     } else if !DownloadFile(url, zipPath) {'''
 )
 
+
+replace_once(
+    VTOKEN,
+    '"net/http"',
+    '"net/http"\n\t"net/url"'
+)
+replace_once(
+    VTOKEN,
+    'func (a *AppCore) HasVKToken() bool {',
+    '''func (a *AppCore) SaveVKTokenInput(value string) error {
+    value = strings.TrimSpace(value)
+    token := value
+    if strings.Contains(value, "://") {
+        parsed, err := url.Parse(value)
+        if err != nil { return fmt.Errorf("некорректная ссылка OAuth: %w", err) }
+        token = parsed.Query().Get("access_token")
+        if token == "" && parsed.Fragment != "" {
+            fragment, err := url.ParseQuery(parsed.Fragment)
+            if err != nil { return fmt.Errorf("не удалось разобрать фрагмент OAuth: %w", err) }
+            token = fragment.Get("access_token")
+        }
+    } else if strings.Contains(value, "access_token=") {
+        fragment := strings.TrimPrefix(value, "#")
+        parsed, err := url.ParseQuery(fragment)
+        if err == nil { token = parsed.Get("access_token") }
+    }
+    token = strings.TrimSpace(token)
+    if len(token) < 20 || strings.ContainsAny(token, " \\t\\r\\n") {
+        return fmt.Errorf("не найден корректный access_token; вставьте URL после успешного входа VK или сам токен")
+    }
+    if err := os.MkdirAll(a.appDir, 0700); err != nil {
+        return fmt.Errorf("не удалось создать каталог токена: %w", err)
+    }
+    data, err := json.MarshalIndent(VKTokenJSON{Token: token, SavedAt: time.Now()}, "", "  ")
+    if err != nil { return fmt.Errorf("не удалось сериализовать VK токен: %w", err) }
+    if err := os.WriteFile(a.vkTokenFile(), data, 0600); err != nil {
+        return fmt.Errorf("не удалось сохранить VK токен: %w", err)
+    }
+    return nil
+}
+
+func (a *AppCore) HasVKToken() bool {'''
+)
+
 FETCHER = UPSTREAM / "Core/LaLuneTokenFetcher/Playwright/PlaywrightTokenFetcher.cs"
 replace_once(
     FETCHER,
