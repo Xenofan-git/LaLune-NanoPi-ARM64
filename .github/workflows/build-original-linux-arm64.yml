@@ -7,6 +7,7 @@ on:
       - original-lalune-linux-arm64-policy
       - integration/deploymanager-fix
       - fix/captcha-stale-overlay
+      - feature/csqtt-direct-route-tab
   workflow_dispatch:
 
 permissions:
@@ -23,6 +24,15 @@ jobs:
         run: |
           set -euxo pipefail
           test -f adapt/apply-pinned-original-linux-arm64-policy.py
+      - name: Validate CSQTT panel route UI
+        run: |
+          set -euxo pipefail
+          test -f adapt/csqtt-panel-preview.html
+          grep -q 'id="page-route"' adapt/csqtt-panel-preview.html
+          grep -q 'id="directDomains"' adapt/csqtt-panel-preview.html
+          grep -q 'id="directIPs"' adapt/csqtt-panel-preview.html
+          grep -q 'id="saveDirectRules"' adapt/csqtt-panel-preview.html
+          ! grep -q 'Маршрутизация приложений' adapt/csqtt-panel-preview.html
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
