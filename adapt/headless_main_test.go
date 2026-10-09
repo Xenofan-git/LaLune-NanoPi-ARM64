@@ -119,4 +119,7 @@ func TestNormalizeDirectIPs(t *testing.T) {
 	if _, err := normalizeDirectIPs("192.0.2.999"); err == nil {
 		t.Fatal("expected malformed IPv4 to be rejected")
 	}
+	if _, err := normalizeDirectIPs("0.0.0.0/0"); err == nil {
+		t.Fatal("expected default route CIDR to be rejected for Direct")
+	}
 }
