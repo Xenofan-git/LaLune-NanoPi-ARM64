@@ -12,9 +12,10 @@ def replace_once(path, old, new):
 
 replace_once(
     PROTO,
-    '''\t\tcase "darwin":\n\t\t\treturn "client-macos-x86_64"\n\t\tdefault:\n\t\t\treturn "client-linux-x86_64"''',
-    '''\t\tcase "darwin":\n\t\t\treturn "client-macos-x86_64"\n\t\tdefault:\n\t\t\tif goarch == "arm64" {\n\t\t\t\treturn "client-linux-arm64"\n\t\t\t}\n\t\t\treturn "client-linux-x86_64"'''
+    '''\t\tdefault:\n\t\t\treturn "client-linux-x86_64"''',
+    '''\t\tdefault:\n\t\t\tif goarch == "arm64" {\n\t\t\t\treturn "client-linux-arm64"\n\t\t\t}\n\t\t\treturn "client-linux-x86_64"'''
 )
+
 # The pinned Go wrapper invokes DeployManager with --port, but the original
 # DeployManager CLI calls this option --ssh-port. Keep the original UI/API
 # contract while fixing the actual CLI invocation.
@@ -53,75 +54,6 @@ s = s.replace(old, new, 1)
 s = s.replace('\t"time"\n)', '\t"time"\n\t"io"\n)', 1)
 LINUX.write_text(s)
 
-# NanoPi core lifecycle hardening: one live core per App, process-group cleanup.
-# timeout cleanup is enforced below in the generated LinuxRunner.
-s = LINUX.read_text()
-s = s.replace("type LinuxRunner struct {", "type LinuxRunner struct {\n\tstartMu sync.Mutex", 1)
-old = """func (r *LinuxRunner) StartCore(cmdArgs []string, listenPort int, bridge *libs.Bridge) {
-\tr.startCoreWithSudo(cmdArgs, listenPort, bridge)
-}"""
-new = """func (r *LinuxRunner) StartCore(cmdArgs []string, listenPort int, bridge *libs.Bridge) {
-\tr.startMu.Lock()
-\tdefer r.startMu.Unlock()
-\tr.app.mu.Lock()
-\tif r.app.clientPID > 0 {
-\t\tpid := r.app.clientPID
-\t\tr.app.mu.Unlock()
-\t\tbridge.Core.AddLog(fmt.Sprintf("[CORE] Второй запуск заблокирован: уже работает PID %d", pid))
-\t\treturn
-\t}
-\tr.app.mu.Unlock()
-\tr.startCoreWithSudo(cmdArgs, listenPort, bridge)
-}"""
-if old not in s: raise SystemExit("StartCore guard marker not found")
-s = s.replace(old, new, 1)
-
-old = 'cmd := exec.Command("sh", "-c", r.app.runSudoCommand(cmdLine))'
-new = 'cmd := exec.Command("sh", "-c", r.app.runSudoCommand(cmdLine))\n\tcmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}'
-if old not in s: raise SystemExit("cmd marker not found")
-s = s.replace(old, new, 1)
-
-# Timeout cleanup is handled by process-group cleanup on Disconnect; do not patch the upstream wait block here.
-LINUX.write_text(s)
-
-# Kill the whole core process group if the original 90s TUN wait expires.
-s = LINUX.read_text()
-old = '''\t\t\tcase <-time.After(90 * time.Second):
-\t\t\t\tbridge.Core.AddLog("[TUN] Таймаут ожидания")
-\t\t\t\tbridge.Core.SetConnected(false)
-\t\t\t\treturn'''
-new = '''\t\t\tcase <-time.After(90 * time.Second):
-\t\t\t\tbridge.Core.AddLog("[TUN] Таймаут ожидания — останавливаем core")
-\t\t\t\tbridge.Core.SetConnected(false)
-\t\t\t\tr.app.mu.Lock()
-\t\t\t\tpid := r.app.clientPID
-\t\t\t\tr.app.mu.Unlock()
-\t\t\t\tif pid > 0 {
-\t\t\t\t\t_ = syscall.Kill(-pid, syscall.SIGTERM)
-\t\t\t\t\ttime.Sleep(1 * time.Second)
-\t\t\t\t\t_ = syscall.Kill(-pid, syscall.SIGKILL)
-\t\t\t\t}
-\t\t\t\treturn'''
-if old not in s: raise SystemExit("timeout source marker not found")
-s = s.replace(old, new, 1)
-LINUX.write_text(s)
-# Ensure explicit Disconnect kills the complete core process group.
-s = LINUX.read_text()
-old = """\tif pid > 0 {
-\t\ta.core.AddLog(fmt.Sprintf("[INFO] Останавливаем клиент (PID: %d)...", pid))
-\t\tsyscall.Kill(pid, syscall.SIGTERM)
-\t\ttime.Sleep(1 * time.Second)
-\t\tsyscall.Kill(pid, syscall.SIGKILL)
-\t}"""
-new = """\tif pid > 0 {
-\t\ta.core.AddLog(fmt.Sprintf("[INFO] Останавливаем клиент и process group (PID: %d)...", pid))
-\t\t_ = syscall.Kill(-pid, syscall.SIGTERM)
-\t\ttime.Sleep(1 * time.Second)
-\t\t_ = syscall.Kill(-pid, syscall.SIGKILL)
-\t}"""
-if old not in s:
-    raise SystemExit("Disconnect marker not found")
-s = s.replace(old, new, 1)
 # Keep the core stdin pipe alive for asynchronous CAPTCHA_RESULT responses.
 s = LINUX.read_text()
 s = s.replace("type LinuxRunner struct {", "var linuxRunnerInputs sync.Map\n\ntype LinuxRunner struct {", 1)
@@ -172,7 +104,7 @@ func (t *LinuxTun) Start(udpConn net.Conn, running *bool) {
 \t\treturn
 \t}
 
-\tfd, err := unix.Open("/dev/net/tun", unix.O_RDWR|unix.O_CLOEXEC, 0)
+\tf, err := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
 \tif err != nil {
 \t\tt.mu.Unlock()
 \t\tt.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось открыть /dev/net/tun: %v", err))
@@ -181,20 +113,20 @@ func (t *LinuxTun) Start(udpConn net.Conn, running *bool) {
 
 \tifr, err := unix.NewIfreq("csqtt0")
 \tif err != nil {
-\t\t_ = unix.Close(fd)
+\t\tf.Close()
 \t\tt.mu.Unlock()
 \t\tt.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось создать ifreq: %v", err))
 \t\treturn
 \t}
 \tifr.SetUint16(unix.IFF_TUN | unix.IFF_NO_PI)
-\tif err := unix.IoctlIfreq(fd, unix.TUNSETIFF, ifr); err != nil {
-\t\t_ = unix.Close(fd)
+\tif err := unix.IoctlIfreq(int(f.Fd()), unix.TUNSETIFF, ifr); err != nil {
+\t\tf.Close()
 \t\tt.mu.Unlock()
 \t\tt.app.core.AddLog(fmt.Sprintf("[TUN] TUNSETIFF csqtt0: %v", err))
 \t\treturn
 \t}
 
-\tif err := unix.SetNonblock(fd, true); err != nil {\n\t\t_ = unix.Close(fd)\n\t\tt.mu.Unlock()\n\t\tt.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось включить nonblock: %v", err))\n\t\treturn\n\t}\n\tf := os.NewFile(uintptr(fd), "/dev/net/tun")\n\tif f == nil {\n\t\t_ = unix.Close(fd)\n\t\tt.mu.Unlock()\n\t\tt.app.core.AddLog("[TUN] Не удалось создать os.File для TUN")\n\t\treturn\n\t}\n\tt.tunFile = f
+\tt.tunFile = f
 \tt.mu.Unlock()
 \tt.app.core.AddLog("[TUN] Linux TUN↔UDP bridge запущен")
 
@@ -241,24 +173,18 @@ func (t *LinuxTun) Stop() {
 if old not in s:
     raise SystemExit("LinuxTun Start/Stop marker not found")
 s=s.replace(old,new,1)
-# Persist the LinuxTun dataplane adaptation before re-reading the pinned source
-# for the lifecycle patch; otherwise the later write would discard Start/Stop.
-LINUX.write_text(s)
-
-# Remove the upstream Linux deadlock: TUNCONF must be enough to create the TUN.
-# The first traffic cannot appear until the TUN and routes already exist.
-s = LINUX.read_text()
-old_lifecycle_marker = "\t\thasConf, hasTraffic := false, false"
-if old_lifecycle_marker not in s:
-    raise SystemExit("TUN lifecycle marker not found in upstream app_linux.go")
-s = s.replace(old_lifecycle_marker, "\t\t// TUNCONF is sufficient; do not wait for first traffic.\n\t\thasConf, hasTraffic := false, true", 1)
-if "hasConf, hasTraffic := false, true" not in s:
-    raise SystemExit("TUN lifecycle patch was not applied")
-LINUX.write_text(s)
 
 # Start the original Bridge TUN↔UDP packet bridge after Linux route setup.
 s = LINUX.read_text()
-# Core single-process guard is applied above; keep the original runner block unchanged here.
+# Prevent concurrent core workers sharing one Bridge/TUN state on NanoPi.
+old_runner_guard = """func (r *LinuxRunner) StartCore(cmdArgs []string, listenPort int, bridge *libs.Bridge) {
+	r.startCoreWithSudo(cmdArgs, listenPort, bridge)
+}"""
+new_runner_guard = old_runner_guard
+if old_runner_guard not in s:
+    raise SystemExit("LinuxRunner.StartCore marker not found")
+s = s.replace(old_runner_guard, new_runner_guard, 1)
+
 old_runner = """		if tun, ok := bridge.Tun.(*LinuxTun); ok {
 			tun.SetupRoutes(tunIP, tunDNS)
 		}"""
@@ -498,91 +424,57 @@ func (t *LinuxTun) CleanupDirectRouting() {
 }
 
 '''
-def _fix_direct_indent(line):
-    n = 0
-    while line.startswith("\\t"):
-        n += 1
-        line = line[2:]
-    return ("    " * n) + line
-linux_direct = "\n".join(_fix_direct_indent(line) for line in linux_direct.splitlines())
-linux_direct = linux_direct.replace("r == '\\\\n'", "r == '\\n'")
-linux_direct = linux_direct.replace("r == '\\\\r'", "r == '\\r'")
-linux_direct = linux_direct.replace("r == '\\\\t'", "r == '\\t'")
+# Integrate direct-domain/IP bypass into the Linux adapter and settings UI.
 s = LINUX.read_text()
 marker = 'func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) {'
-if marker not in s:
-    raise SystemExit("SetupRoutes marker missing")
+if s.count(marker) != 1:
+    raise SystemExit('SetupRoutes marker missing or ambiguous')
 s = s.replace(marker, linux_direct + marker, 1)
 
 setup_old = '\tt.app.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")\n\n\tt.app.core.AddLog("[TUN] TUN настроен успешно (policy table 202)")'
 setup_new = '\tt.app.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")\n\n\tif err := t.applyDirectRoutingLocked(); err != nil {\n\t\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Ошибка применения: %v", err))\n\t}\n\tt.app.core.AddLog("[TUN] TUN настроен успешно (policy table 202)")'
-if setup_old not in s:
-    raise SystemExit("Setup body marker missing")
+if s.count(setup_old) != 1:
+    raise SystemExit('SetupRoutes body marker missing or ambiguous')
 s = s.replace(setup_old, setup_new, 1)
 
 cleanup_old = '\tt.app.core.AddLog("[TUN] Удаление TUN...")\n\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")'
 cleanup_new = '\tt.app.core.AddLog("[TUN] Удаление TUN...")\n\tt.cleanupDirectRoutingLocked()\n\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")'
-if cleanup_old not in s:
-    raise SystemExit("Cleanup marker missing")
+if s.count(cleanup_old) != 1:
+    raise SystemExit('CleanupRoutes marker missing or ambiguous')
 s = s.replace(cleanup_old, cleanup_new, 1)
-
-save_old = 'func (a *App) SaveSettings(j string) bool { return a.core.SaveSettings(j) }'
-save_new = """func (a *App) SaveSettings(j string) bool {
-    ok := a.core.SaveSettings(j)
-    if !ok {
-        return false
-    }
-    if a.core.IsConnected() {
-        if err := a.tun.ApplyDirectRouting(); err != nil {
-            a.core.AddLog(fmt.Sprintf("[DIRECT] Ошибка применения настроек: %v", err))
-            return false
-        }
-    }
-    return true
-}"""
-if save_old not in s:
-    raise SystemExit("SaveSettings marker missing")
-s = s.replace(save_old, save_new, 1)
-
 LINUX.write_text(s)
 
+# Add direct routing preferences to the persisted settings model.
 s = API_DART.read_text()
-s = s.replace(
-'''  final bool validateVkHashes;\n\n  /// Экспериментальные функции.''',
-'''  final bool validateVkHashes;\n  final String directDomains;\n  final String directIPs;\n\n  /// Экспериментальные функции.''', 1)
-s = s.replace(
-'''    this.validateVkHashes = false,\n    this.enableSmartTunnel = false,''',
-'''    this.validateVkHashes = false,\n    this.directDomains = '',\n    this.directIPs = '',\n    this.enableSmartTunnel = false,''', 1)
-s = s.replace(
-'''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      enableSmartTunnel:''',
-'''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      directDomains: (j['directDomains'] ?? '') as String,\n      directIPs: (j['directIPs'] ?? '') as String,\n      enableSmartTunnel:''', 1)
-s = s.replace(
-'''    'validateVkHashes': validateVkHashes,\n    'enableSmartTunnel': enableSmartTunnel,''',
-'''    'validateVkHashes': validateVkHashes,\n    'directDomains': directDomains,\n    'directIPs': directIPs,\n    'enableSmartTunnel': enableSmartTunnel,''', 1)
-s = s.replace(
-'''    String? vkAuthMode, bool? allowHashRedistribution, bool? validateVkHashes,\n    bool? enableSmartTunnel,''',
-'''    String? vkAuthMode, bool? allowHashRedistribution, bool? validateVkHashes,\n    String? directDomains, String? directIPs,\n    bool? enableSmartTunnel,''', 1)
-s = s.replace(
-'''    validateVkHashes: validateVkHashes ?? this.validateVkHashes,\n    enableSmartTunnel:''',
-'''    validateVkHashes: validateVkHashes ?? this.validateVkHashes,\n    directDomains: directDomains ?? this.directDomains,\n    directIPs: directIPs ?? this.directIPs,\n    enableSmartTunnel:''', 1)
+replacements = [
+    ('''  final bool validateVkHashes;\n\n  /// Экспериментальные функции.''', '''  final bool validateVkHashes;\n  final String directDomains;\n  final String directIPs;\n\n  /// Экспериментальные функции.'''),
+    ('''    this.validateVkHashes = false,\n    this.enableSmartTunnel = false,''', '''    this.validateVkHashes = false,\n    this.directDomains = '',\n    this.directIPs = '',\n    this.enableSmartTunnel = false,'''),
+    ('''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      enableSmartTunnel:''', '''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      directDomains: (j['directDomains'] ?? '') as String,\n      directIPs: (j['directIPs'] ?? '') as String,\n      enableSmartTunnel:'''),
+    ('''    'validateVkHashes': validateVkHashes,\n    'enableSmartTunnel': enableSmartTunnel,''', '''    'validateVkHashes': validateVkHashes,\n    'directDomains': directDomains,\n    'directIPs': directIPs,\n    'enableSmartTunnel': enableSmartTunnel,'''),
+    ('''    String? vkAuthMode, bool? allowHashRedistribution, bool? validateVkHashes,\n    bool? enableSmartTunnel,''', '''    String? vkAuthMode, bool? allowHashRedistribution, bool? validateVkHashes,\n    String? directDomains, String? directIPs,\n    bool? enableSmartTunnel,'''),
+    ('''    validateVkHashes: validateVkHashes ?? this.validateVkHashes,\n    enableSmartTunnel:''', '''    validateVkHashes: validateVkHashes ?? this.validateVkHashes,\n    directDomains: directDomains ?? this.directDomains,\n    directIPs: directIPs ?? this.directIPs,\n    enableSmartTunnel:'''),
+]
+for old, new in replacements:
+    if s.count(old) != 1:
+        raise SystemExit(f'API settings marker missing or ambiguous: {old[:80]!r}')
+    s = s.replace(old, new, 1)
 API_DART.write_text(s)
 
+# Add editable domain and IPv4/CIDR lists to Settings.
 s = SETTINGS_PAGE.read_text()
-s = s.replace(
-'''  final _deviceIdCtl = TextEditingController();''',
-'''  final _deviceIdCtl = TextEditingController();\n  final _directDomainsCtl = TextEditingController();\n  final _directIPsCtl = TextEditingController();''', 1)
-s = s.replace(
-'''    _deviceIdCtl.dispose();''',
-'''    _deviceIdCtl.dispose();\n    _directDomainsCtl.dispose();\n    _directIPsCtl.dispose();''', 1)
-s = s.replace(
-'''    _deviceIdCtl.text = s.deviceId;\n    _authMode''',
-'''    _deviceIdCtl.text = s.deviceId;\n    _directDomainsCtl.text = s.directDomains;\n    _directIPsCtl.text = s.directIPs;\n    _authMode''', 1)
-s = s.replace(
-'''      authMode: _authMode,\n      enableSmartTunnel: _enableSmartTunnel,''',
-'''      authMode: _authMode,\n      directDomains: _directDomainsCtl.text.trim(),\n      directIPs: _directIPsCtl.text.trim(),\n      enableSmartTunnel: _enableSmartTunnel,''', 1)
-ui_marker = '''              const SizedBox(height: 18),\n\n              _sectionTitle('Device ID'),''';
-ui_insert = '''              const SizedBox(height: 18),\n\n              _sectionTitle('Direct — обход CSQTT'),\n              GlassCard(\n                child: Column(\n                  crossAxisAlignment: CrossAxisAlignment.start,\n                  children: [\n                    Text('Только указанные назначения идут напрямую через LTE. Всё остальное остаётся через CSQTT.',\n                      style: TextStyle(fontSize: 11.5, height: 1.45, color: Colors.white.withOpacity(0.55))),\n                    const SizedBox(height: 12),\n                    Text('Домены', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),\n                    const SizedBox(height: 5),\n                    TextField(\n                      controller: _directDomainsCtl,\n                      minLines: 3,\n                      maxLines: 8,\n                      style: const TextStyle(fontSize: 13),\n                      decoration: const InputDecoration(hintText: 'example.com\\ncdn.example.com'),\n                      onChanged: (_) => _markDirty(),\n                    ),\n                    const SizedBox(height: 12),\n                    Text('IP / CIDR', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),\n                    const SizedBox(height: 5),\n                    TextField(\n                      controller: _directIPsCtl,\n                      minLines: 3,\n                      maxLines: 8,\n                      style: const TextStyle(fontSize: 13),\n                      decoration: const InputDecoration(hintText: '1.2.3.4\\n1.2.3.0/24'),\n                      onChanged: (_) => _markDirty(),\n                    ),\n                    const SizedBox(height: 7),\n                    Text('По одному значению в строке; также принимаются запятые. Сейчас IPv4.',\n                      style: TextStyle(fontSize: 10.5, color: Colors.white.withOpacity(0.45))),\n                  ],\n                ),\n              ),\n              const SizedBox(height: 18),\n\n              _sectionTitle('Device ID'),''';
-if ui_marker not in s:
-    raise SystemExit("settings UI marker missing")
-s = s.replace(ui_marker, ui_insert, 1)
-SETTINGS_PAGE.write_text(s)
+replacements = [
+    ('''  final _deviceIdCtl = TextEditingController();''', '''  final _deviceIdCtl = TextEditingController();\n  final _directDomainsCtl = TextEditingController();\n  final _directIPsCtl = TextEditingController();'''),
+    ('''    _deviceIdCtl.dispose();''', '''    _deviceIdCtl.dispose();\n    _directDomainsCtl.dispose();\n    _directIPsCtl.dispose();'''),
+    ('''    _deviceIdCtl.text = s.deviceId;\n    _authMode''', '''    _deviceIdCtl.text = s.deviceId;\n    _directDomainsCtl.text = s.directDomains;\n    _directIPsCtl.text = s.directIPs;\n    _authMode'''),
+    ('''      authMode: _authMode,\n      enableSmartTunnel: _enableSmartTunnel,''', '''      authMode: _authMode,\n      directDomains: _directDomainsCtl.text.trim(),\n      directIPs: _directIPsCtl.text.trim(),\n      enableSmartTunnel: _enableSmartTunnel,'''),
+]
+for old, new in replacements:
+    if s.count(old) != 1:
+        raise SystemExit(f'Settings marker missing or ambiguous: {old[:80]!r}')
+    s = s.replace(old, new, 1)
+ui_marker = '''              const SizedBox(height: 18),\n\n              _sectionTitle('Device ID'),'''
+ui_insert = '''              const SizedBox(height: 18),\n\n              _sectionTitle('Direct — обход CSQTT'),\n              GlassCard(\n                child: Column(\n                  crossAxisAlignment: CrossAxisAlignment.start,\n                  children: [\n                    Text('Только указанные назначения идут напрямую через LTE. Всё остальное остаётся через CSQTT.',\n                      style: TextStyle(fontSize: 11.5, height: 1.45, color: Colors.white.withOpacity(0.55))),\n                    const SizedBox(height: 12),\n                    Text('Домены', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),\n                    const SizedBox(height: 5),\n                    TextField(\n                      controller: _directDomainsCtl,\n                      minLines: 3,\n                      maxLines: 8,\n                      style: const TextStyle(fontSize: 13),\n                      decoration: const InputDecoration(hintText: 'example.com\\ncdn.example.com'),\n                      onChanged: (_) => _markDirty(),\n                    ),\n                    const SizedBox(height: 12),\n                    Text('IP / CIDR', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),\n                    const SizedBox(height: 5),\n                    TextField(\n                      controller: _directIPsCtl,\n                      minLines: 3,\n                      maxLines: 8,\n                      style: const TextStyle(fontSize: 13),\n                      decoration: const InputDecoration(hintText: '1.2.3.4\\n1.2.3.0/24'),\n                      onChanged: (_) => _markDirty(),\n                    ),\n                    const SizedBox(height: 7),\n                    Text('По одному значению в строке; также принимаются запятые. Сейчас IPv4.',\n                      style: TextStyle(fontSize: 10.5, color: Colors.white.withOpacity(0.45))),\n                  ],\n                ),\n              ),\n              const SizedBox(height: 18),\n\n              _sectionTitle('Device ID'),'''
+if s.count(ui_marker) != 1:
+    raise SystemExit('Settings UI insertion marker missing or ambiguous')
+SETTINGS_PAGE.write_text(s.replace(ui_marker, ui_insert, 1))
+print('Direct domain/IP bypass adaptation applied')
