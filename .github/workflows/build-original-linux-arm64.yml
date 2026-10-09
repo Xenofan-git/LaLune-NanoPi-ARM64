@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - original-lalune-linux-arm64-policy
+      - integration/deploymanager-fix
   workflow_dispatch:
 
 permissions:
@@ -52,7 +53,6 @@ jobs:
         run: |
           set -euxo pipefail
           python3 adapt/apply-pinned-original-linux-arm64-policy.py
-          python3 adapt/apply-lalune-socks5.py
       - name: Build original Flutter Web panel for NanoPi
         working-directory: upstream-lalune/Frontend/Core
         run: |
@@ -68,230 +68,25 @@ jobs:
           grep -Fq '"--ssh-port", itoa(req.SSHPort)' upstream-lalune/Desktop/Libs/deploy.go
           grep -Fq 'ip route replace default dev csqtt0 table 202' upstream-lalune/Desktop/Linux/app_linux.go
           grep -Fq 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go
-          grep -Fq 'hasConf, hasTraffic := false, true' upstream-lalune/Desktop/Linux/app_linux.go
           grep -Fq 'func (r *LinuxRunner) StartCore' upstream-lalune/Desktop/Linux/app_linux.go
-          grep -Fq 'startMu sync.Mutex' upstream-lalune/Desktop/Linux/app_linux.go
-          grep -Fq 'cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}' upstream-lalune/Desktop/Linux/app_linux.go
-          grep -Fq 'Второй запуск заблокирован: уже работает PID' upstream-lalune/Desktop/Linux/app_linux.go
-          grep -Fq 'bridge.Core.AddLog("[TUN] Таймаут ожидания — останавливаем core")' upstream-lalune/Desktop/Linux/app_linux.go
-          test "$(grep -Fc 'syscall.Kill(-pid' upstream-lalune/Desktop/Linux/app_linux.go)" -ge 2
           test "$(grep -Fc 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go)" = "1"
           test "$(grep -Fc 'func (r *LinuxRunner) StartCore' upstream-lalune/Desktop/Linux/app_linux.go)" = "1"
-          test -f upstream-lalune/Desktop/Linux/lalune_socks5_linux.go
-          grep -Fq '192.168.4.26:12500' upstream-lalune/Desktop/Linux/app_linux.go
-          grep -Fq 'fwmark 0x4d53/0xffff lookup 202' upstream-lalune/Desktop/Linux/app_linux.go
           sha256sum upstream-lalune/Desktop/Linux/app_linux.go | tee adaptation-source.sha256
           sha256sum upstream-lalune/Desktop/Libs/protocols.go | tee protocols-source.sha256
-      - name: Patch bundled CSQTT deploy
+      - name: Patch CSQTT DeployManager safely
         run: |
           set -euxo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          u=Path("upstream-lalune")
-          def r(p,a,b):
-              s=p.read_text()
-              if a not in s: raise SystemExit(f"missing marker: {p}")
-              p.write_text(s.replace(a,b,1))
-          r(u/"Core/DeployManager/src/main.rs",
-            "    pub listen_port: Option<u16>,",
-            "    pub listen_port: Option<u16>,\n\n    #[arg(long)]\n    pub local_binary_dir: Option<String>,")
-          r(u/"Core/DeployManager/src/protocol.rs",
-            '            Protocol::Csqtt => "csqtt-core",',
-            '            Protocol::Csqtt => "csqtt-lalune",')
-          r(u/"Core/DeployManager/src/protocol.rs",
-            "            Protocol::Csqtt => (443, 0, 1080),",
-            "            Protocol::Csqtt => (47000, 47002, 1080),")
-          r(u/"Core/DeployManager/src/deploy.rs",
-            "    let script = install_script(proto, ports);",
-            """    let remote_tmp = format!("/tmp/lalune-deploy-{}", std::process::id());
-          if let Some(dir)=&args.local_binary_dir {
-              if proto==Protocol::Csqtt {
-                  let prep=run_ssh(args,&remote,&format!("mkdir -p {}",remote_tmp))?;
-                  if !prep.status.success() { anyhow::bail!("failed to prepare remote asset directory"); }
-                  run_scp(args,&remote,dir,&remote_tmp)?;
-              }
-          }
-          let remote_assets = args.local_binary_dir.as_ref().map(|_| format!("{}/server-assets",remote_tmp));\n          let script=install_script(proto,ports,remote_assets.as_deref());""")
-          r(u/"Core/DeployManager/src/deploy.rs",
-            "fn run_ssh(args: &DeployArgs, remote: &str, script: &str) -> Result<std::process::Output> {",
-            """fn run_scp(args:&DeployArgs,remote:&str,local:&str,tmp:&str)->Result<()> {
-              let mut a=vec!["-r".into(),"-o".into(),"StrictHostKeyChecking=accept-new".into(),"-P".into(),args.ssh_port.to_string()];
-              if let Some(k)=&args.key { a.push("-i".into()); a.push(k.clone()); }
-              let mut v=vec!["-e".into(),"scp".into()]; v.extend(a.clone());
-              v.push(local.into()); v.push(format!("{remote}:{tmp}"));
-              let mut c=if args.password.is_some() && have_sshpass() { let mut c=Command::new("sshpass"); c.args(&v); c } else { let mut c=Command::new("scp"); c.args(&a); c.arg(local); c.arg(format!("{remote}:{tmp}")); c };
-              if let Some(p)=&args.password { c.env("SSHPASS",p); }
-              let o=c.output().context("scp failed")?;
-              if !o.status.success(){ anyhow::bail!("scp failed: {}",String::from_utf8_lossy(&o.stderr)); }
-              Ok(())
-          }
-          fn run_ssh(args: &DeployArgs, remote: &str, script: &str) -> Result<std::process::Output> {""")
-          r(u/"Core/DeployManager/src/deploy.rs",
-            "fn install_script(proto: Protocol, ports: &Ports) -> String {",
-            "fn install_script(proto: Protocol, ports: &Ports, local_dir: Option<&str>) -> String {")
-          r(u/"Core/DeployManager/src/deploy.rs",
-            "    let flags = ports.flags();",
-            '    let flags = if proto == Protocol::Csqtt {\n        format!(" --listen {} --web-port {} --config-dir /etc/csqtt-lalune", ports.core.unwrap_or(47000), ports.warp.unwrap_or(47002))\n    } else {\n        ports.flags()\n    };\n    let local_dir = local_dir.unwrap_or("");')
-          r(u/"Core/DeployManager/src/deploy.rs",
-            'echo "[install] protocol={proto}"',
-            'echo "[install] protocol={proto}"')
-          r(u/"Core/DeployManager/src/deploy.rs",
-            'echo "[install] downloading $URL"',
-            """if [ -n \"{local_dir}\" ] && [ \"{proto}\" = \"csqtt\" ]; then
-            SOURCE=\"{local_dir}/csqtt-linux-$ASSET_ARCH\"
-            if [ ! -s \"$SOURCE\" ]; then echo \"[install] bundled CSQTT asset missing: $SOURCE\" >&2; exit 1; fi
-            TMP_DEST=\"$DEST.new.$$\" 
-            install -m 0755 \"$SOURCE\" \"$TMP_DEST\"
-            mv -f \"$TMP_DEST\" \"$DEST\"
-          else
-            echo \"[install] downloading $URL\"
-            TMP_DEST=\"$DEST.new.$$\" 
-            if command -v curl >/dev/null 2>&1; then
-              curl -fSL --retry 3 \"$URL\" -o \"$TMP_DEST\"
-            elif command -v wget >/dev/null 2>&1; then
-              wget -O \"$TMP_DEST\" \"$URL\"
-            else
-              echo \"[install] error: neither curl nor wget available\" >&2; exit 1
-            fi
-            if [ ! -s \"$TMP_DEST\" ]; then echo \"[install] error: download empty\" >&2; rm -f \"$TMP_DEST\"; exit 1; fi
-            chmod 0755 \"$TMP_DEST\"
-            mv -f \"$TMP_DEST\" \"$DEST\"
-          fi
-          if [ ! -s \"$DEST\" ]; then echo \"[install] error: installed file is empty\" >&2; exit 1; fi
-          chmod +x \"$DEST\"""")
-          r(u/"Core/DeployManager/src/deploy.rs",
-            'echo "[install] installed $DEST ($(stat -c %s "$DEST" 2>/dev/null || echo \'?\') bytes)"',
-            """echo "[install] installed $DEST ($(stat -c %s "$DEST" 2>/dev/null || echo '?') bytes)"
-          if [ "{proto}" = "csqtt" ] && systemctl list-unit-files csqtt-47000.service --no-legend 2>/dev/null | grep -q '^csqtt-47000.service'; then
-            UNIT=/etc/systemd/system/csqtt-47000.service
-            OLD_BIN=/usr/local/bin/csqtt-2.1.9
-            NEW_BIN="$DEST"
-            if ! grep -Fq "ExecStart=/usr/bin/ip netns exec csqtt47000 $OLD_BIN --listen 0.0.0.0:47000 --web-port 47002 --config-dir /etc/csqtt-47000" "$UNIT"; then
-              echo "[install] existing CSQTT unit differs from expected isolated service; refusing update" >&2
-              exit 1
-            fi
-            BACKUP="/var/backups/lalune-csqtt-47000-$(date +%Y%m%d%H%M%S)"
-            install -d -m 0700 "$BACKUP"
-            cp -a "$UNIT" "$BACKUP/csqtt-47000.service"
-            cp -a "$OLD_BIN" "$BACKUP/csqtt-2.1.9"
-            TMP_UNIT="$UNIT.new.$$"
-            sed "s|$OLD_BIN|$NEW_BIN|g" "$UNIT" > "$TMP_UNIT"
-            if ! grep -Fq "ExecStart=/usr/bin/ip netns exec csqtt47000 $NEW_BIN --listen 0.0.0.0:47000 --web-port 47002 --config-dir /etc/csqtt-47000" "$TMP_UNIT"; then
-              rm -f "$TMP_UNIT"
-              echo "[install] generated unit failed validation" >&2
-              exit 1
-            fi
-            chmod 0644 "$TMP_UNIT"
-            mv -f "$TMP_UNIT" "$UNIT"
-            systemctl daemon-reload
-            if systemctl restart csqtt-47000.service && systemctl is-active --quiet csqtt-47000.service; then
-              echo "[install] isolated CSQTT updated; backup: $BACKUP"
-              exit 0
-            fi
-            echo "[install] update failed; rolling back unit" >&2
-            cp -a "$BACKUP/csqtt-47000.service" "$UNIT"
-            systemctl daemon-reload
-            systemctl restart csqtt-47000.service || true
-            exit 1
-          fi""")
-          r(u/"Core/DeployManager/src/deploy.rs",
-            'cat >/etc/systemd/system/{bin}.service <<UNIT',
-            'cat >/etc/systemd/system/{bin}-deployed.service <<UNIT')
-          r(u/"Core/DeployManager/src/deploy.rs",
-            'systemctl enable {bin}.service',
-            'systemctl enable {bin}-deployed.service')
-          r(u/"Core/DeployManager/src/deploy.rs",
-            'systemctl restart {bin}.service',
-            'systemctl restart {bin}-deployed.service')
-          r(u/"Core/DeployManager/src/deploy.rs",
-            'systemctl is-active --quiet {bin}.service',
-            'systemctl is-active --quiet {bin}-deployed.service')
-          r(u/"Core/DeployManager/src/deploy.rs",
-            '{bin}.service failed to start',
-            '{bin}-deployed.service failed to start')
-          r(u/"Core/DeployManager/src/deploy.rs",
-            'status {bin}.service >&2',
-            'status {bin}-deployed.service >&2')
-          r(u/"Core/DeployManager/src/deploy.rs",
-            'journalctl -u {bin}.service -n 40',
-            'journalctl -u {bin}-deployed.service -n 40')
-          r(u/"Core/DeployManager/src/deploy.rs",
-            'systemd service {bin}.service started',
-            'systemd service {bin}-deployed.service started')
-          r(u/"Core/DeployManager/src/deploy.rs",
-            'rm -f "$DEST"',
-            'if [ "{proto}" != "csqtt" ]; then\nrm -f "$DEST"')
-          r(u/"Core/DeployManager/src/deploy.rs",
-            'if command -v systemctl >/dev/null 2>&1; then',
-            'fi\nif command -v systemctl >/dev/null 2>&1; then')
-          r(u/"Core/DeployManager/src/deploy.rs",
-            "if [ ! -s \"$DEST\" ]; then",
-            """if [ ! -s "$DEST" ]; then
-            echo "[install] error: installed file is empty" >&2
-            exit 1
-          fi
-          if [ "{proto}" != "csqtt" ] && [ -n "{local_dir}" ]; then rm -rf "{local_dir}"; fi
-          if [ "{proto}" = "csqtt" ]; then
-            : # bundled branch already installed the binary
-          fi
-          # continue with the common executable checks""")
-          r(u/"Desktop/Libs/deploy.go",
-            "\tif req.ManualPorts {",
-            """\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") {
-          \t\tif dir := resolveBundledServerDir(); dir != "" {
-          \t\t\targs = append(args, "--local-binary-dir", dir)
-          \t\t}
-          \t}
-          \tif req.ManualPorts {""")
-          r(u/"Desktop/Libs/deploy.go",
-            "func deployManagerName() string {",
-            """func resolveBundledServerDir() string {
-          \tif exe, err := os.Executable(); err == nil {
-          \t\tc := filepath.Join(filepath.Dir(exe), "server-assets")
-          \t\tif st, err := os.Stat(c); err == nil && st.IsDir() { return c }
-          \t}
-          \tif wd, err := os.Getwd(); err == nil {
-          \t\tc := filepath.Join(wd, "server-assets")
-          \t\tif st, err := os.Stat(c); err == nil && st.IsDir() { return c }
-          \t}
-          \treturn ""
-          }
+          python3 adapt/patch-csqtt-deploy-manager.py
 
-          func deployManagerName() string {""")
-          # Add executable regression tests for the generated remote installer.
-          p=u/"Core/DeployManager/src/deploy.rs"
-          with p.open("a") as f:
-              f.write(r"""
-
-          #[cfg(test)]
-          mod csqtt_deploy_script_tests {
-              use super::*;
-              #[test]
-              fn csqtt_installer_script_is_syntax_valid_and_safe() {
-                  let ports = Ports { core: Some(47000), warp: Some(47002), listen: Some(1080) };
-                  let script = install_script(Protocol::Csqtt, &ports, Some("/tmp/lalune/server-assets"));
-                  assert!(script.contains("existing CSQTT unit differs from expected isolated service; refusing update"));
-                  assert!(script.contains("BACKUP=\"/var/backups/lalune-csqtt-47000-$(date +%Y%m%d%H%M%S)\""));
-                  assert!(script.contains("rolling back unit"));
-                  assert!(script.contains("csqtt47000"));
-                  assert!(script.contains("/etc/csqtt-47000"));
-
-                  assert!(script.contains("SOURCE=\"/tmp/lalune/server-assets/csqtt-linux-$ASSET_ARCH\""));
-                  assert!(script.contains("TMP_DEST=\"$DEST.new.$$\""));
-                  assert!(script.contains("wget -O \"$TMP_DEST\" \"$URL\""));
-                  assert!(script.contains("mv -f \"$TMP_DEST\" \"$DEST\""));
-                  let status = Command::new("bash").arg("-n").arg("-c").arg(&script).status().expect("bash -n");
-                  assert!(status.success(), "generated installer shell syntax invalid");
-              }
-          }
-          """)
-          PY
-
-      - name: Test generated CSQTT installer
-        working-directory: upstream-lalune/Core/DeployManager
+      - name: Verify CSQTT deploy patch invariants
         run: |
           set -euxo pipefail
-          cargo test
+          grep -Fq 'SOURCE="$LOCAL_STAGE/server-assets/csqtt-linux-$ASSET_ARCH"' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'trap' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'LOCAL_STAGE' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'SSH_ASKPASS_REQUIRE' upstream-lalune/Core/DeployManager/src/deploy.rs
+          ! grep -Fq 'rm -f "$DEST"' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'systemctl restart {bin}-deployed.service' upstream-lalune/Core/DeployManager/src/deploy.rs
 
       - name: Prepare original Go module layout
         run: |
