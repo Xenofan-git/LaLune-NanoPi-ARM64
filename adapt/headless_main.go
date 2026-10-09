@@ -373,6 +373,7 @@ func apiHandler(app *App) http.Handler {
     })
     mux.HandleFunc("/vk/import", func(w http.ResponseWriter, r *http.Request) {
         if !method(w, r, http.MethodPost) { return }
+        if !privateClient(r) { http.Error(w, "forbidden", http.StatusForbidden); return }
         var req struct { Token string `json:"token"` }
         if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&req); err != nil {
             w.WriteHeader(http.StatusBadRequest)
