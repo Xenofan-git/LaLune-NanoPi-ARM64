@@ -25,6 +25,16 @@ import (
 const headlessListen = "127.0.0.1:1062"
 const panelListen = "0.0.0.0:1061"
 
+// Set by the pinned ARM64 build workflow through Go -ldflags.
+var (
+    buildCommit = "unknown"
+    buildRunID = "unknown"
+    buildRunNumber = "unknown"
+    buildDate = "unknown"
+    buildBranch = "unknown"
+    buildUpstreamCommit = "unknown"
+)
+
 //go:embed frontend
 var panelAssets embed.FS
 
@@ -195,6 +205,12 @@ func apiHandler(app *App) http.Handler {
             "backend": "original-go",
             "core": "unknown",
             "ui": "0.6.0",
+            "commit": buildCommit,
+            "buildRun": buildRunID,
+            "buildNumber": buildRunNumber,
+            "buildDate": buildDate,
+            "buildBranch": buildBranch,
+            "upstreamCommit": buildUpstreamCommit,
         })
     })
 
