@@ -181,6 +181,11 @@ jobs:
           go build -trimpath -ldflags="-s -w" -o lalune-original-linux-arm64 .
           file lalune-original-linux-arm64
           test -s lalune-original-linux-arm64
+      - name: Set up .NET for ARM64 VK token fetcher
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
       - name: Fetch official CSQTT 2.1.9 server assets
         run: |
           set -euxo pipefail
@@ -198,6 +203,17 @@ jobs:
           grep -Fq '"assetName":  "csqtt-linux-amd64"' server-assets/csqtt.server-provenance.json
           grep -Fq '"assetName":  "csqtt-linux-armv7"' server-assets/csqtt.server-provenance.json
           grep -Fq 'readonly SCRIPT_VERSION="2.1.9"' server-assets/deploy.sh
+      - name: Build VK token fetcher for Linux ARM64
+        run: |
+          set -euxo pipefail
+          dotnet publish upstream-lalune/Core/LaLuneTokenFetcher/Playwright/LaLuneTokenFetcher.Playwright.csproj -c Release -r linux-arm64 --self-contained true -o /tmp/vk-token-fetcher-arm64
+          test -s /tmp/vk-token-fetcher-arm64/LaLuneTokenFetcher
+          mkdir -p /tmp/vk-token-fetcher-package/vk-token-fetcher
+          cp -a /tmp/vk-token-fetcher-arm64/. /tmp/vk-token-fetcher-package/vk-token-fetcher/
+          chmod 0755 /tmp/vk-token-fetcher-package/vk-token-fetcher/LaLuneTokenFetcher
+          (cd /tmp/vk-token-fetcher-package && zip -qr "$GITHUB_WORKSPACE/server-assets/LaLuneTokenFetcher_Linux_ARM64.zip" vk-token-fetcher)
+          sha256sum server-assets/LaLuneTokenFetcher_Linux_ARM64.zip | tee -a server-assets/SHA256SUMS
+          test -s server-assets/LaLuneTokenFetcher_Linux_ARM64.zip
 
       - name: Verify and package
         run: |
