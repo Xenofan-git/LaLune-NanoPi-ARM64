@@ -162,6 +162,30 @@ jobs:
           if [ ! -s \"$DEST\" ]; then echo \"[install] error: installed file is empty\" >&2; exit 1; fi
           chmod +x \"$DEST\"""")
           r(u/"Core/DeployManager/src/deploy.rs",
+            'cat >/etc/systemd/system/{bin}.service <<UNIT',
+            'cat >/etc/systemd/system/{bin}-deployed.service <<UNIT')
+          r(u/"Core/DeployManager/src/deploy.rs",
+            'systemctl enable {bin}.service',
+            'systemctl enable {bin}-deployed.service')
+          r(u/"Core/DeployManager/src/deploy.rs",
+            'systemctl restart {bin}.service',
+            'systemctl restart {bin}-deployed.service')
+          r(u/"Core/DeployManager/src/deploy.rs",
+            'systemctl is-active --quiet {bin}.service',
+            'systemctl is-active --quiet {bin}-deployed.service')
+          r(u/"Core/DeployManager/src/deploy.rs",
+            '{bin}.service failed to start',
+            '{bin}-deployed.service failed to start')
+          r(u/"Core/DeployManager/src/deploy.rs",
+            'status {bin}.service >&2',
+            'status {bin}-deployed.service >&2')
+          r(u/"Core/DeployManager/src/deploy.rs",
+            'journalctl -u {bin}.service -n 40',
+            'journalctl -u {bin}-deployed.service -n 40')
+          r(u/"Core/DeployManager/src/deploy.rs",
+            'systemd service {bin}.service started',
+            'systemd service {bin}-deployed.service started')
+          r(u/"Core/DeployManager/src/deploy.rs",
             "if [ ! -s \"$DEST\" ]; then",
             """if [ ! -s "$DEST" ]; then
             echo "[install] error: installed file is empty" >&2
