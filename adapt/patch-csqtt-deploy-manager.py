@@ -325,7 +325,7 @@ deploy_go = ROOT / "Desktop/Libs/deploy.go"
 replace_once(
     deploy_go,
     '\\tListenPort  int    `json:"listenPort"`',
-    '\\tListenPort  int    `json:"listenPort"`\\n\\tMainPassword string `json:"mainPassword"`\\n\\tWebUser string `json:"webUser"`\\n\\tWebPassword string `json:"webPassword"`\\n\\tDockerInstall bool `json:"dockerInstall"`',
+    '\\tListenPort  int    `json:"listenPort"`\\n\\tMainPassword string `json:"mainPassword"`\\n\\tWebUser string `json:"webUser"`\\n\\tWebPassword string `json:"webPassword"`\\n\\tDockerInstall bool `json:"dockerInstall"`\n\tUninstall bool `json:"uninstall"`',
 )
 replace_once(
     deploy_go,
@@ -341,7 +341,7 @@ replace_once(
     deploy_go,
     '\\tif req.SSHPort > 0 {',
     '''\\tsecretsFile := ""
-\\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") {
+\\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") && !req.Uninstall {
 \\t\\tf, err := os.CreateTemp("", "csqtt-deploy-secrets-*.txt")
 \\t\\tif err != nil { deployAppend("[deploy] не удалось создать временный файл авторизации"); return false }
 \\t\\t_ = f.Chmod(0600)
@@ -350,7 +350,7 @@ replace_once(
 \\t\\tif writeErr != nil || closeErr != nil { _ = os.Remove(f.Name()); deployAppend("[deploy] не удалось сохранить временные данные авторизации"); return false }
 \\t\\tsecretsFile = f.Name()
 \\t\\targs = append(args, "--secrets-file", secretsFile)
-\\t\\tif req.DockerInstall { args = append(args, "--install-in-docker") }
+\\t\\tif req.DockerInstall { args = append(args, "--install-in-docker") }\n\t\tif req.Uninstall { args = append(args, "--uninstall") }
 \\t}
 \\tif req.SSHPort > 0 {''',
 )
