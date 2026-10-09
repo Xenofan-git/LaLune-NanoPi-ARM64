@@ -350,9 +350,9 @@ replace_once(
 \\t\\tif writeErr != nil || closeErr != nil { _ = os.Remove(f.Name()); deployAppend("[deploy] не удалось сохранить временные данные авторизации"); return false }
 \\t\\tsecretsFile = f.Name()
 \\t\\targs = append(args, "--secrets-file", secretsFile)
-\\t\\tif req.DockerInstall { args = append(args, "--install-in-docker") }\n\t\tif req.Uninstall { args = append(args, "--uninstall") }
+\\t\\tif req.DockerInstall { args = append(args, "--install-in-docker") }\n\t\t
 \\t}
-\\tif req.SSHPort > 0 {''',
+\\tif req.Uninstall { args = append(args, "--uninstall") }\n\tif req.SSHPort > 0 {''',
 )
 replace_once(
     deploy_go,
