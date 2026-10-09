@@ -40,7 +40,7 @@ jobs:
           grep -q 't.cleanupDirectRoutingLocked()' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -q 'func TestDirectDomainValidation' adapt/headless_main_test.go
           grep -q 'func TestNormalizeDirectIPs' adapt/headless_main_test.go
-          grep -Fq 'regexp.MustCompile(`(?i)^([a-z0-9]' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'regexp.MustCompile("(?i)^([a-z0-9]' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -Fq 'if err := t.applyDirectRoutingLocked(); err != nil' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -Fq 't.cleanupDirectRoutingLocked()' adapt/apply-pinned-original-linux-arm64-policy.py
           python3 - <<'PY'
