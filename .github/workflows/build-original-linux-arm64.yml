@@ -234,9 +234,9 @@ jobs:
                   assert!(script.contains("refusing to overwrite an existing isolated CSQTT service"));
 
                   assert!(script.contains("SOURCE=\"/tmp/lalune/server-assets/csqtt-linux-$ASSET_ARCH\""));
-                  assert!(script.contains("TMP_DEST=\"$DEST.new.$\""));
-                  assert!(script.contains("wget -O \\"$TMP_DEST\\" \\"$URL\\""));
-                  assert!(script.contains("mv -f \\"$TMP_DEST\\" \\"$DEST\\""));
+                  assert!(script.contains("TMP_DEST=\"$DEST.new.$$\""));
+                  assert!(script.contains("wget -O \"$TMP_DEST\" \"$URL\""));
+                  assert!(script.contains("mv -f \"$TMP_DEST\" \"$DEST\""));
                   let status = Command::new("bash").arg("-n").arg("-c").arg(&script).status().expect("bash -n");
                   assert!(status.success(), "generated installer shell syntax invalid");
               }
