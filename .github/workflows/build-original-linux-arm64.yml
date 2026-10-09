@@ -46,6 +46,15 @@ jobs:
           grep -Fq 'validDirectDomain(s string) bool' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -Fq 'if err := t.applyDirectRoutingLocked(); err != nil' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -Fq 't.cleanupDirectRoutingLocked()' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'dnsmasqChanged = true' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'writeDirectFileAtomic(directNftPath' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'writeDirectFileAtomic(directDnsmasqPath' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'nft -c -f ' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq '"commit": buildCommit' adapt/headless_main.go
+          grep -Fq '"buildRun": buildRunID' adapt/headless_main.go
+          grep -Fq '"buildDate": buildDate' adapt/headless_main.go
+          grep -Fq '"buildBranch": buildBranch' adapt/headless_main.go
+          grep -Fq '"upstreamCommit": buildUpstreamCommit' adapt/headless_main.go
           python3 - <<'PY'
           from pathlib import Path
           import re
@@ -197,7 +206,8 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           set -euxo pipefail
-          go build -trimpath -ldflags="-s -w" -o lalune-original-linux-arm64 .
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          go build -trimpath -ldflags="-s -w -X main.buildCommit=${GITHUB_SHA} -X main.buildRunID=${GITHUB_RUN_ID} -X main.buildRunNumber=${GITHUB_RUN_NUMBER} -X main.buildDate=${BUILD_DATE} -X main.buildBranch=${GITHUB_REF_NAME} -X main.buildUpstreamCommit=e4a6d08b63aef6025bf8ad8f77da660ea552e04b" -o lalune-original-linux-arm64 .
           file lalune-original-linux-arm64
           test -s lalune-original-linux-arm64
       - name: Set up .NET for ARM64 VK token fetcher
