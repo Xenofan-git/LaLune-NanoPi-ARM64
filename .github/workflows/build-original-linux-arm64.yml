@@ -33,7 +33,7 @@ jobs:
           grep -q 'id="directIPs"' adapt/csqtt-panel-preview.html
           grep -q 'id="saveDirectRules"' adapt/csqtt-panel-preview.html
           ! grep -q 'Маршрутизация приложений' adapt/csqtt-panel-preview.html
-          test "$(grep -o 'class="tab' adapt/csqtt-panel-preview.html | wc -l)" -eq 5
+          test "$(grep -o 'data-page="' adapt/csqtt-panel-preview.html | wc -l)" -eq 5
           grep -q 'function directRuleErrors()' adapt/csqtt-panel-preview.html
           grep -q 'func (t \*LinuxTun) ApplyDirectRouting() error' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -q 't.applyDirectRoutingLocked()' adapt/apply-pinned-original-linux-arm64-policy.py
@@ -111,6 +111,10 @@ jobs:
           grep -Fq 'deploy_official_csqtt(args, ports)' upstream-lalune/Core/DeployManager/src/deploy.rs
           grep -Fq 'CSQTT_DEPLOY_MODE={mode}' upstream-lalune/Core/DeployManager/src/deploy.rs
           grep -Fq 'pub secrets_file: Option<String>' upstream-lalune/Core/DeployManager/src/main.rs
+          grep -Fq 'pub uninstall: bool' upstream-lalune/Core/DeployManager/src/main.rs
+          grep -Fq 'fn uninstall_official_csqtt' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'func validCSQTTSecret' upstream-lalune/Desktop/Libs/deploy.go
+          grep -Fq 'csqtt-deploy-secrets-*.txt' upstream-lalune/Desktop/Libs/deploy.go
 
       - name: Prepare original Go module layout
         run: |
