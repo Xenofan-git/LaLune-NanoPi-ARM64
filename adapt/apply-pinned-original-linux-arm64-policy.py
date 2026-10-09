@@ -408,12 +408,15 @@ func (t *LinuxTun) applyDirectRoutingLocked() error {
 \thadDnsmasq := false
 \tif _, err := os.Stat(directDnsmasqPath); err == nil {
 \t\thadDnsmasq = true
-\t\t_ = os.Remove(directDnsmasqPath)
+\t\tif err := os.Remove(directDnsmasqPath); err != nil {
+\t\t\treturn fmt.Errorf("удаление Direct dnsmasq-конфига: %w", err)
+\t\t}
 \t}
+\tdnsmasqChanged := includeRemoved || hadDnsmasq
 \t_ = os.Remove(directNftPath)
 
 \tif len(domains) == 0 && len(ips) == 0 {
-\t\tif hadDnsmasq || includeRemoved {
+\t\tif dnsmasqChanged {
 \t\t\tif err := t.app.runSudo("systemctl restart dnsmasq"); err != nil { return fmt.Errorf("перезапуск dnsmasq после очистки Direct: %w", err) }
 \t\t}
 \t\treturn nil
@@ -433,8 +436,11 @@ func (t *LinuxTun) applyDirectRoutingLocked() error {
 \tnft.WriteString("  }\n")
 \tnft.WriteString("}\n")
 
-\tif err := os.WriteFile(directNftPath, []byte(nft.String()), 0600); err != nil {
-\t\treturn fmt.Errorf("запись nft-конфига: %w", err)
+\tif err := writeDirectFileAtomic(directNftPath, []byte(nft.String()), 0600); err != nil {
+\t\treturn fmt.Errorf("атомарная запись nft-конфига: %w", err)
+\t}
+\tif err := t.app.runSudo("nft -c -f " + directNftPath); err != nil {
+\t\treturn fmt.Errorf("проверка nft direct policy: %w", err)
 \t}
 \tif err := t.app.runSudo("nft -f " + directNftPath); err != nil {
 \t\treturn fmt.Errorf("nft direct policy: %w", err)
@@ -449,15 +455,18 @@ func (t *LinuxTun) applyDirectRoutingLocked() error {
 \t\t\tline += d
 \t\t}
 \t\tline += "/4#inet#lalune_direct#direct4\n"
-\t\tif err := os.WriteFile(directDnsmasqPath, []byte(line), 0644); err != nil {
-\t\t\treturn fmt.Errorf("запись dnsmasq direct-конфига: %w", err)
+\t\tif err := writeDirectFileAtomic(directDnsmasqPath, []byte(line), 0644); err != nil {
+\t\t\treturn fmt.Errorf("атомарная запись dnsmasq direct-конфига: %w", err)
 \t\t}
 \t\tif err := ensureDirectDnsmasqInclude(); err != nil {
 \t\t\t_ = os.Remove(directDnsmasqPath)
 \t\t\treturn err
 \t\t}
+\t\tdnsmasqChanged = true
+\t}
+\tif dnsmasqChanged {
 \t\tif err := t.app.runSudo("systemctl restart dnsmasq"); err != nil {
-\t\t\treturn fmt.Errorf("перезапуск dnsmasq: %w", err)
+\t\t\treturn fmt.Errorf("перезапуск dnsmasq после изменения Direct: %w", err)
 \t\t}
 \t}
 
