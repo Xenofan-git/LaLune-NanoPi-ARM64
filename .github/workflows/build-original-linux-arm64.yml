@@ -17,7 +17,7 @@ jobs:
   build:
     name: Build pinned original Go Linux ARM64
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Validate adaptation
@@ -244,6 +244,35 @@ jobs:
           set -euxo pipefail
           git clone --depth 1 --branch v2.1.9 https://github.com/amurcanov/csqtt.git server-source
           python3 adapt/audit-csqtt-isolation.py
+      - name: Patch isolated LaLune CSQTT dataplane
+        run: |
+          set -euxo pipefail
+          python3 adapt/patch-csqtt-lalune-source.py
+          ! grep -R -nE 'csqtt1|10\\.66\\.67' server-source/rust-server --include='*.rs'
+          grep -Fq 'csqtt-lalune0' server-source/rust-server/net_setup.rs
+          grep -Fq '10.67.68.0/24' server-source/rust-server/tun_device.rs
+      - name: Set up Zig for musl ARM64 build
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.13.0
+      - name: Build isolated CSQTT server for Linux ARM64
+        working-directory: server-source/rust-server
+        env:
+          CSQTT_ZIG_TARGET: aarch64-linux-musl
+        run: |
+          set -euxo pipefail
+          rustup toolchain install 1.97.1 --profile minimal
+          rustup target add aarch64-unknown-linux-musl --toolchain 1.97.1
+          cargo +1.97.1 install cargo-zigbuild --locked
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER="$(command -v zig)" cargo +1.97.1 zigbuild --release --target aarch64-unknown-linux-musl
+          file target/aarch64-unknown-linux-musl/release/csqtt
+          test -s target/aarch64-unknown-linux-musl/release/csqtt
+          install -D -m 0755 target/aarch64-unknown-linux-musl/release/csqtt "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64"
+          "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64" --help > "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
+          grep -Fq -- '--listen' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
+          grep -Fq -- '--web-port' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
+          grep -Fq -- '--config-dir' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
+          sha256sum "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64" | tee -a "$GITHUB_WORKSPACE/server-assets/SHA256SUMS"
       - name: Build VK token fetcher for Linux ARM64
         run: |
           set -euxo pipefail
