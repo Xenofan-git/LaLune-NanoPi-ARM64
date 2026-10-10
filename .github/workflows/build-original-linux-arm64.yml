@@ -255,6 +255,12 @@ jobs:
           grep -Fq '"assetName":  "csqtt-linux-amd64"' server-assets/csqtt.server-provenance.json
           grep -Fq '"assetName":  "csqtt-linux-armv7"' server-assets/csqtt.server-provenance.json
           grep -Fq 'readonly SCRIPT_VERSION="2.1.9"' server-assets/deploy.sh
+      - name: Exercise LaLune installer lifecycle in disposable root
+        run: |
+          set -euxo pipefail
+          chmod 0755 adapt/test-csqtt-lalune-installer.sh
+          bash -n adapt/test-csqtt-lalune-installer.sh
+          bash adapt/test-csqtt-lalune-installer.sh
       - name: Audit upstream CSQTT isolation hazards
         run: |
           set -euxo pipefail
