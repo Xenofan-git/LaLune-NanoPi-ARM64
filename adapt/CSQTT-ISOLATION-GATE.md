@@ -18,7 +18,7 @@ Changing peer/web ports and config directory alone is not sufficient. In particu
 ## Required implementation before deployment can be enabled
 
 1. Build a LaLune-specific server asset from the pinned v2.1.9 source with a dedicated TUN interface (`csqtt-lalune0`) and tunnel subnet (`10.67.68.0/24`). Namespace the proxy-routing policy table/priority, packet marks, and every iptables comment used for cleanup/watchdog; verify the server cannot delete another CSQTT instance's rules or flush a shared policy table. CI must test these source invariants and run the ARM64 binary's `--help` under QEMU.
-2. Write a separate installer; do not invoke the upstream `deploy.sh install` or `uninstall`.
+2. A first dedicated installer/uninstaller pair now exists at `server-assets/install-csqtt-lalune.sh` and `server-assets/uninstall-csqtt-lalune.sh`. They do not invoke upstream `deploy.sh`, use ownership markers and isolated paths, preflight ports without killing listeners, and preserve config/state by default. This item is **implemented but not yet validated end-to-end**; DeployManager remains fail-closed and does not invoke these scripts yet.
 3. Keep all persistent data and helpers under `/etc/csqtt-lalune`, `/var/lib/csqtt-lalune`, `/var/log/csqtt-lalune`, and `/usr/local/lib/csqtt-lalune`; use `csqtt-lalune.service` and uniquely named helper/timer units.
 4. Use UDP 47000 and web 47002. Before changes, fail closed if either port is occupied or any LaLune-owned resource has an unexpected type/content. Never kill arbitrary port holders.
 5. Use uniquely named firewall tables/chains and uniquely marked rules; remove only exact LaLune-owned objects on uninstall. The current upstream runtime uses iptables and policy routing, so its cleanup markers, rule priorities, marks, and route tables must be LaLune-specific. Never flush shared tables or remove generic CSQTT rules.
@@ -28,4 +28,4 @@ Changing peer/web ports and config directory alone is not sufficient. In particu
 
 ## Safety invariant
 
-Until every item above passes, the DeployManager must refuse deployment and uninstallation without making remote changes. Existing CSQTT services, Android CSQTT, production routing, HydraRoute, and Tailscale are out of scope and must remain untouched.
+Until every item above passes, the DeployManager must refuse deployment and uninstallation without making remote changes. The new scripts are packaged candidates only; they are not authorization to run them on NanoPi. Existing CSQTT services, Android CSQTT, production routing, HydraRoute, and Tailscale are out of scope and must remain untouched.
