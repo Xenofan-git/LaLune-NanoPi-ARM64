@@ -138,11 +138,29 @@ jobs:
             sudo systemctl is-active --quiet csqtt-47000.service
             sudo systemctl is-active --quiet csqtt-47000-netns.service
             sudo sha256sum /etc/systemd/system/csqtt.service /etc/systemd/system/csqtt-47000.service /etc/systemd/system/csqtt-47000-netns.service > /tmp/production-units.before
+            sudo ip -4 route show table main > /tmp/main-routes.before
+            sudo ip -4 rule show > /tmp/ip-rules.before
+            sudo iptables-save > /tmp/iptables.before
             sudo /opt/lalune-package/install-csqtt-lalune.sh
             sudo systemctl is-active --quiet csqtt-lalune.service
             sudo systemctl is-active --quiet csqtt.service
             sudo systemctl is-active --quiet csqtt-47000.service
             sudo systemctl is-active --quiet csqtt-47000-netns.service
+            # The packaged service must bind only its dedicated ports.
+            for attempt in $(seq 1 20); do
+              if sudo ss -H -lun 'sport = :47000' | grep -q . && sudo ss -H -ltn 'sport = :47002' | grep -q .; then break; fi
+              sleep 1
+            done
+            sudo ss -H -lun 'sport = :47000' | grep -q .
+            sudo ss -H -ltn 'sport = :47002' | grep -q .
+            # Installing the isolated service must not change the main/default route table.
+            sudo ip -4 route show table main > /tmp/main-routes.after-install
+            sudo diff -u /tmp/main-routes.before /tmp/main-routes.after-install
+            # Every pre-existing policy rule and firewall rule must survive installation.
+            sudo ip -4 rule show > /tmp/ip-rules.after-install
+            sudo iptables-save > /tmp/iptables.after-install
+            while IFS= read -r rule; do grep -Fqx -- "$rule" /tmp/ip-rules.after-install; done < /tmp/ip-rules.before
+            while IFS= read -r rule; do grep -Fqx -- "$rule" /tmp/iptables.after-install; done < /tmp/iptables.before
             sudo sha256sum -c /tmp/production-units.before
             sudo /opt/lalune-package/uninstall-csqtt-lalune.sh
             ! sudo systemctl is-active --quiet csqtt-lalune.service
@@ -150,6 +168,12 @@ jobs:
             sudo systemctl is-active --quiet csqtt-47000.service
             sudo systemctl is-active --quiet csqtt-47000-netns.service
             sudo sha256sum -c /tmp/production-units.before
+            sudo ip -4 route show table main > /tmp/main-routes.after-uninstall
+            sudo diff -u /tmp/main-routes.before /tmp/main-routes.after-uninstall
+            sudo ip -4 rule show > /tmp/ip-rules.after-uninstall
+            sudo iptables-save > /tmp/iptables.after-uninstall
+            while IFS= read -r rule; do grep -Fqx -- "$rule" /tmp/ip-rules.after-uninstall; done < /tmp/ip-rules.before
+            while IFS= read -r rule; do grep -Fqx -- "$rule" /tmp/iptables.after-uninstall; done < /tmp/iptables.before
             sudo test -f /etc/csqtt-lalune/.managed-by-lalune
             sudo grep -Fxq CSQTT-LALUNE-MANAGED-V1 /etc/csqtt-lalune/.managed-by-lalune
             echo ARM64_SYSTEM_VM_LIFECYCLE_PASS'
