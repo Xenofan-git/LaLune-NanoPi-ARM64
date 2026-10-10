@@ -80,6 +80,34 @@ grep -q 'UDP port 47000 is occupied' "$ROOT/out"
 [[ ! -e "$ROOT/host/etc/csqtt-lalune" && ! -e "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
 ! grep -Eq 'stop|kill' "$TEST_SYSTEMCTL_LOG" 2>/dev/null
 
+# Case 1b: occupied TCP web port is also refused before any filesystem changes.
+if SS_MODE=occupied-tcp "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
+  echo "FAIL: installer accepted occupied TCP port" >&2; exit 1
+fi
+grep -q 'TCP port 47002 is occupied' "$ROOT/out"
+[[ ! -e "$ROOT/host/etc/csqtt-lalune" && ! -e "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
+
+# Case 1c: an existing TUN interface is never adopted or reconfigured.
+if IP_TUN_PRESENT=1 "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
+  echo "FAIL: installer accepted existing LaLune TUN" >&2; exit 1
+fi
+grep -q 'csqtt-lalune0 already exists' "$ROOT/out"
+[[ ! -e "$ROOT/host/etc/csqtt-lalune" ]]
+
+# Case 1d: non-empty dedicated route table is never flushed or adopted.
+if IP_ROUTE_PRESENT=1 "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
+  echo "FAIL: installer accepted non-empty LaLune route table" >&2; exit 1
+fi
+grep -q 'route table 47001/47066 is non-empty' "$ROOT/out"
+[[ ! -e "$ROOT/host/etc/csqtt-lalune" ]]
+
+# Case 1e: existing namespaced firewall markers are not adopted or deleted.
+if IPTABLES_RULES='-A OUTPUT -m comment --comment CSQTT_LALUNE_OLD -j ACCEPT' "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
+  echo "FAIL: installer accepted existing LaLune firewall markers" >&2; exit 1
+fi
+grep -q 'LaLune firewall markers already exist' "$ROOT/out"
+[[ ! -e "$ROOT/host/etc/csqtt-lalune" ]]
+
 # Case 2: pre-existing LaLune policy IDs are not adopted or modified.
 if IP_RULES='47001: from all fwmark 0x6741/0x6741 lookup 47001' "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
   echo "FAIL: installer accepted pre-existing policy IDs" >&2; exit 1
@@ -104,6 +132,25 @@ grep -q 'LaLune policy rules remain after stop' "$ROOT/out"
 [[ -x "$ROOT/host/usr/local/bin/csqtt-lalune" ]]
 [[ -f "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
 [[ -f "$ROOT/host/etc/csqtt-lalune/operator.conf" ]]
+
+# Residual TUN, route-table entries, and firewall markers each block removal.
+if IP_TUN_PRESENT=1 "$ROOT/package/uninstall.sh" >"$ROOT/out" 2>&1; then
+  echo "FAIL: uninstaller removed files while LaLune TUN remained" >&2; exit 1
+fi
+grep -q 'csqtt-lalune0 remains after stop' "$ROOT/out"
+[[ -x "$ROOT/host/usr/local/bin/csqtt-lalune" && -f "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
+
+if IP_RULES= IP_ROUTE_PRESENT=1 "$ROOT/package/uninstall.sh" >"$ROOT/out" 2>&1; then
+  echo "FAIL: uninstaller removed files while LaLune route table remained" >&2; exit 1
+fi
+grep -q 'route table entries remain after stop' "$ROOT/out"
+[[ -x "$ROOT/host/usr/local/bin/csqtt-lalune" && -f "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
+
+if IP_RULES= IP_ROUTE_PRESENT=0 IPTABLES_RULES='-A OUTPUT -m comment --comment CSQTT_LALUNE_OLD -j ACCEPT' "$ROOT/package/uninstall.sh" >"$ROOT/out" 2>&1; then
+  echo "FAIL: uninstaller removed files while LaLune firewall markers remained" >&2; exit 1
+fi
+grep -q 'firewall rules remain after stop' "$ROOT/out"
+[[ -x "$ROOT/host/usr/local/bin/csqtt-lalune" && -f "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
 
 # Clean uninstall removes only LaLune executable/unit/library; preserves config/state/log by default.
 IP_RULES= IP_ROUTE_PRESENT=0 IP_TUN_PRESENT=0 IPTABLES_RULES= "$ROOT/package/uninstall.sh" >"$ROOT/out"
