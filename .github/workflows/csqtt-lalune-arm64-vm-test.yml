@@ -1,23 +1,11 @@
 name: CSQTT LaLune ARM64 system VM lifecycle test
 
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - feature/csqtt-direct-route-tab
-    paths:
-      - "server-assets/install-csqtt-lalune.sh"
-      - "server-assets/uninstall-csqtt-lalune.sh"
-      - "adapt/test-csqtt-lalune-installer.sh"
-      - ".github/workflows/csqtt-lalune-arm64-vm-test.yml"
-  workflow_run:
-    workflows:
-      - Build pinned original LaLune Linux ARM64
-    types: [completed]
-    branches:
-      - feature/csqtt-direct-route-tab
+  workflow_call:
 
 permissions:
+  contents: read
+  actions: read
   contents: read
   actions: read
 
@@ -30,16 +18,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download actual ARM64 build artifact
-        if: github.event_name == 'workflow_run'
         uses: actions/download-artifact@v4
         with:
           name: lalune-original-linux-arm64
-          run-id: ${{ github.event.workflow_run.id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
           path: vm/artifact
 
       - name: Extract actual isolated server and installer
-        if: github.event_name == 'workflow_run'
         run: |
           set -euxo pipefail
           test -s vm/artifact/lalune-original-linux-arm64.tar.gz
@@ -120,21 +104,11 @@ jobs:
           set -euxo pipefail
           SSH="ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1"
           SCP="scp -i vm/id_ed25519 -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-          cat > vm/guest-binary.sh <<'EOF'
-          #!/bin/sh
-          exec /bin/sleep infinity
-          EOF
-          if [ -s vm/real/server-assets/csqtt-lalune-linux-arm64 ]; then
-            echo "Using the real ARM64 CSQTT LaLune server from the completed build artifact"
-            INSTALLER=vm/real/server-assets/install-csqtt-lalune.sh
-            UNINSTALLER=vm/real/server-assets/uninstall-csqtt-lalune.sh
-            BINARY=vm/real/server-assets/csqtt-lalune-linux-arm64
-          else
-            echo "No build artifact for push/manual run; exercising installer isolation with a stub"
-            INSTALLER=server-assets/install-csqtt-lalune.sh
-            UNINSTALLER=server-assets/uninstall-csqtt-lalune.sh
-            BINARY=vm/guest-binary.sh
-          fi
+          echo "Using the real ARM64 CSQTT server from this workflow's build artifact"
+          INSTALLER=vm/real/server-assets/install-csqtt-lalune.sh
+          UNINSTALLER=vm/real/server-assets/uninstall-csqtt-lalune.sh
+          BINARY=vm/real/server-assets/csqtt-lalune-linux-arm64
+          test -s "$BINARY"
           for unit in csqtt.service csqtt-47000.service csqtt-47000-netns.service; do
             cat > "vm/$unit" <<EOF
           [Unit]
@@ -153,11 +127,9 @@ jobs:
             sudo install -d -m 0755 /opt/lalune-package
             sudo install -m 0755 /home/tester/install-csqtt-lalune.sh /opt/lalune-package/install-csqtt-lalune.sh
             sudo install -m 0755 /home/tester/uninstall-csqtt-lalune.sh /opt/lalune-package/uninstall-csqtt-lalune.sh
-            if [ -f /home/tester/csqtt-lalune-linux-arm64 ]; then
-              sudo install -m 0755 /home/tester/csqtt-lalune-linux-arm64 /opt/lalune-package/csqtt-lalune-linux-arm64
-            else
-              sudo install -m 0755 /home/tester/guest-binary.sh /opt/lalune-package/csqtt-lalune-linux-arm64
-            fi
+            test -s /home/tester/csqtt-lalune-linux-arm64
+            sudo install -m 0755 /home/tester/csqtt-lalune-linux-arm64 /opt/lalune-package/csqtt-lalune-linux-arm64
+            file /opt/lalune-package/csqtt-lalune-linux-arm64
             sudo install -m 0644 /home/tester/csqtt.service /etc/systemd/system/csqtt.service
             sudo install -m 0644 /home/tester/csqtt-47000.service /etc/systemd/system/csqtt-47000.service
             sudo install -m 0644 /home/tester/csqtt-47000-netns.service /etc/systemd/system/csqtt-47000-netns.service
