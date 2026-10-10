@@ -69,6 +69,9 @@ chmod +x "$ROOT/bin/"*
 export PATH="$ROOT/bin:$PATH"
 export TEST_SYSTEMCTL_LOG="$ROOT/systemctl.log" TEST_ACTIVE="$ROOT/active"
 
+# Simulate standard host parent directories that exist on real Linux systems.
+mkdir -p "$ROOT/host/usr/local/bin" "$ROOT/host/etc/systemd/system"
+
 # Case 1: occupied UDP listener is not killed and no managed files are created.
 if SS_MODE=occupied-udp "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
   echo "FAIL: installer accepted occupied UDP port" >&2; exit 1
