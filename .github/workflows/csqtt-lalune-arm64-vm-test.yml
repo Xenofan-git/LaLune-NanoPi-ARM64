@@ -6,12 +6,9 @@ on:
 permissions:
   contents: read
   actions: read
-  contents: read
-  actions: read
 
 jobs:
   arm64-system-vm:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
