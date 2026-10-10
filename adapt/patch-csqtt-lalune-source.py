@@ -64,6 +64,15 @@ for old, new, label in proxy_policy_replacements:
         raise SystemExit(f"proxy_route.rs {label}: expected one declaration, found {count}")
     sources["proxy"] = sources["proxy"].replace(old, new, 1)
 
+# Update exact numeric fixtures too, so tests exercise the namespaced values.
+for old, new in [
+    ('"1066"', '"47066"'),
+    ('"30001"', '"47001"'),
+    ('"0x422"', '"0x6742"'),
+    ('"0x7531/0x7531"', '"0x6741/0x6741"'),
+]:
+    sources["proxy"] = sources["proxy"].replace(old, new)
+
 # Rule cleanup is marker-based, so the TPROXY comment must be unique as well.
 sources["proxy"] = sources["proxy"].replace("CSQTT_TPROXY", "CSQTT_LALUNE_TPROXY")
 
