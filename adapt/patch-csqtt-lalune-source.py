@@ -8,6 +8,7 @@ paths = {
     "tun": root / "tun_device.rs",
     "proxy": root / "proxy_route.rs",
     "model": root / "model.rs",
+    "protocol": root / "protocol.rs",
 }
 sources = {key: path.read_text() for key, path in paths.items()}
 replacements = [
@@ -20,6 +21,8 @@ replacements = [
     # Upstream uses this foreign-subnet test address twice; both occurrences must move
     # together so runtime logic and its unit test agree with the new LaLune subnet.
     ("tun", '[10, 66, 68, 2]', '[10, 67, 69, 2]', "foreign subnet reference", 2),
+    # Protocol fixtures embed the allocated client subnet in expected payloads.
+    ("protocol", "10.66.67", "10.67.68", "protocol client subnet", 2),
 ]
 for key, old, new, label, expected_count in replacements:
     count = sources[key].count(old)
