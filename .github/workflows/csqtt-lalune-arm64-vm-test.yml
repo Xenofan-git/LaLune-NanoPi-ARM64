@@ -31,7 +31,7 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p vm
-          curl -fL --retry 3 https://cloud.debian.org/images/cloud/trixie/latest/debian-13-nocloud-arm64.qcow2 -o vm/guest.qcow2
+          curl -fL --retry 3 https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-arm64.qcow2 -o vm/guest.qcow2
           ssh-keygen -q -t ed25519 -N '' -f vm/id_ed25519
           cat > vm/user-data <<'EOF'
           #cloud-config
