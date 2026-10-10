@@ -41,9 +41,9 @@ esac
 SH
 cat > "$ROOT/bin/ss" <<'SH'
 #!/usr/bin/env bash
-case "${SS_MODE:-clear}:$*" in
-  udp:*47000*) [[ "${SS_MODE:-clear}" == occupied-udp ]] && echo 'UNCONN 0 0 0.0.0.0:47000 0.0.0.0:*';;
-  tcp:*47002*) [[ "${SS_MODE:-clear}" == occupied-tcp ]] && echo 'LISTEN 0 128 0.0.0.0:47002 0.0.0.0:*';;
+case "$*" in
+  *"-lun"*"47000"*) [[ "${SS_MODE:-clear}" == occupied-udp ]] && echo 'UNCONN 0 0 0.0.0.0:47000 0.0.0.0:*';;
+  *"-ltn"*"47002"*) [[ "${SS_MODE:-clear}" == occupied-tcp ]] && echo 'LISTEN 0 128 0.0.0.0:47002 0.0.0.0:*';;
 esac
 exit 0
 SH
