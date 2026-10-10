@@ -75,7 +75,7 @@ jobs:
             -device virtio-blk-device,drive=seed \
             -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 \
             -device virtio-net-pci,netdev=net0 \
-            -nographic -daemonize -pidfile vm/qemu.pid -serial file:vm/serial.log
+            -display none -monitor none -daemonize -pidfile vm/qemu.pid -serial file:vm/serial.log
           for attempt in $(seq 1 90); do
             if ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=3 tester@127.0.0.1 'uname -m' 2>/dev/null | grep -qx aarch64; then
               exit 0
