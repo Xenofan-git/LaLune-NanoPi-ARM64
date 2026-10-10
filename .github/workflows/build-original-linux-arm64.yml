@@ -257,18 +257,18 @@ jobs:
           version: 0.13.0
       - name: Build isolated CSQTT server for Linux ARM64
         working-directory: server-source/rust-server
-        env:
-          CSQTT_ZIG_TARGET: aarch64-linux-musl
         run: |
           set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-user
           rustup toolchain install 1.97.1 --profile minimal
           rustup target add aarch64-unknown-linux-musl --toolchain 1.97.1
           cargo +1.97.1 install cargo-zigbuild --locked
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER="$(command -v zig)" cargo +1.97.1 zigbuild --release --target aarch64-unknown-linux-musl
+          cargo +1.97.1 zigbuild --release --target aarch64-unknown-linux-musl
           file target/aarch64-unknown-linux-musl/release/csqtt
           test -s target/aarch64-unknown-linux-musl/release/csqtt
           install -D -m 0755 target/aarch64-unknown-linux-musl/release/csqtt "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64"
-          "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64" --help > "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
+          qemu-aarch64 "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64" --help > "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
           grep -Fq -- '--listen' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
           grep -Fq -- '--web-port' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
           grep -Fq -- '--config-dir' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
