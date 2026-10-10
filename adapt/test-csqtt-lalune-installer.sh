@@ -153,7 +153,7 @@ rm "$ROOT/host/var/log/csqtt-lalune"
 
 # Case 1h: an ownership-marker symlink cannot authorize writes into an external file.
 mkdir -p "$ROOT/host/etc/csqtt-lalune" "$ROOT/external-marker-target"
-printf 'CSQTT-LALUNE-MANAGED-V1\\n' > "$ROOT/external-marker-target/marker"
+printf 'CSQTT-LALUNE-MANAGED-V1\n' > "$ROOT/external-marker-target/marker"
 ln -s "$ROOT/external-marker-target/marker" "$ROOT/host/etc/csqtt-lalune/.managed-by-lalune"
 if "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
   echo "FAIL: installer trusted a symlinked ownership marker" >&2; exit 1
