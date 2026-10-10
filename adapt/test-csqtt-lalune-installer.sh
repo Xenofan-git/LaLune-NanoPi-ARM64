@@ -119,6 +119,38 @@ grep -Fxq 'production-secret-placeholder' "$ROOT/host/etc/csqtt-lalune/operator.
 [[ ! -e "$ROOT/host/usr/local/bin/csqtt-lalune" ]]
 rm -rf "$ROOT/host/etc/csqtt-lalune"
 
+# Case 1g: symlinked owned paths are never followed, even if an external target exists.
+mkdir -p "$ROOT/external-config" "$ROOT/external-lib" "$ROOT/external-state" "$ROOT/external-log"
+printf 'external-data-must-survive\n' > "$ROOT/external-config/operator.conf"
+ln -s "$ROOT/external-config" "$ROOT/host/etc/csqtt-lalune"
+if "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
+  echo "FAIL: installer followed a symlinked config path" >&2; exit 1
+fi
+grep -q 'is a symlink' "$ROOT/out"
+grep -Fxq 'external-data-must-survive' "$ROOT/external-config/operator.conf"
+rm "$ROOT/host/etc/csqtt-lalune"
+ln -s "$ROOT/external-lib" "$ROOT/host/usr/local/lib/csqtt-lalune"
+if "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
+  echo "FAIL: installer followed a symlinked library path" >&2; exit 1
+fi
+grep -q 'is a symlink' "$ROOT/out"
+[[ -z "$(find "$ROOT/external-lib" -mindepth 1 -print -quit)" ]]
+rm "$ROOT/host/usr/local/lib/csqtt-lalune"
+ln -s "$ROOT/external-state" "$ROOT/host/var/lib/csqtt-lalune"
+if "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
+  echo "FAIL: installer followed a symlinked state path" >&2; exit 1
+fi
+grep -q 'is a symlink' "$ROOT/out"
+[[ -z "$(find "$ROOT/external-state" -mindepth 1 -print -quit)" ]]
+rm "$ROOT/host/var/lib/csqtt-lalune"
+ln -s "$ROOT/external-log" "$ROOT/host/var/log/csqtt-lalune"
+if "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
+  echo "FAIL: installer followed a symlinked log path" >&2; exit 1
+fi
+grep -q 'is a symlink' "$ROOT/out"
+[[ -z "$(find "$ROOT/external-log" -mindepth 1 -print -quit)" ]]
+rm "$ROOT/host/var/log/csqtt-lalune"
+
 # Case 2: pre-existing LaLune policy IDs are not adopted or modified.
 if IP_RULES='47001: from all fwmark 0x6741/0x6741 lookup 47001' "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
   echo "FAIL: installer accepted pre-existing policy IDs" >&2; exit 1
