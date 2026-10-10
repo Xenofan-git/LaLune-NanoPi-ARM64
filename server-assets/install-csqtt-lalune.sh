@@ -40,6 +40,12 @@ fi
 if [[ -e "$LIB" && ! -f "$LIB/.managed-by-lalune" ]]; then
   die "$LIB exists without our ownership marker; refusing to overwrite"
 fi
+for owned_dir in "$STATE" "$LOG"; do
+  if [[ -e "$owned_dir" ]]; then
+    [[ -f "$owned_dir/.managed-by-lalune" ]] || die "$owned_dir exists without our ownership marker; refusing to adopt it"
+    [[ "$(cat "$owned_dir/.managed-by-lalune")" == "$MARKER" ]] || die "$owned_dir ownership marker mismatch"
+  fi
+done
 
 # Never stop a running service automatically: a preflight failure must not
 # interrupt an already working instance. Upgrades require an explicit stop by
@@ -59,6 +65,8 @@ fi
 install -d -m 0750 "$ETC" "$STATE" "$LOG" "$LIB"
 printf '%s\n' "$MARKER" > "$ETC/.managed-by-lalune"
 printf '%s\n' "$MARKER" > "$LIB/.managed-by-lalune"
+printf '%s\n' "$MARKER" > "$STATE/.managed-by-lalune"
+printf '%s\n' "$MARKER" > "$LOG/.managed-by-lalune"
 install -m 0755 "$SOURCE" "${BIN}.new"
 mv -f -- "${BIN}.new" "$BIN"
 
