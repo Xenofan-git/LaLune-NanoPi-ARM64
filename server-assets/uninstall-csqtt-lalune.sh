@@ -18,10 +18,10 @@ for owned_path in "$UNIT_FILE" "$BIN" "$LIB" "$ETC" "$STATE" "$LOG"; do
 done
 [[ -f "$UNIT_FILE" ]] || die "our service unit is absent; refusing broad cleanup"
 grep -Fq 'Description=CSQTT LaLune isolated dataplane' "$UNIT_FILE" || die "service unit is not ours"
-[[ -f "$ETC/.managed-by-lalune" && "$(cat "$ETC/.managed-by-lalune")" == "$MARKER" ]] || die "config ownership marker missing or invalid"
-[[ -f "$LIB/.managed-by-lalune" && "$(cat "$LIB/.managed-by-lalune")" == "$MARKER" ]] || die "binary directory ownership marker missing or invalid"
-[[ -f "$STATE/.managed-by-lalune" && "$(cat "$STATE/.managed-by-lalune")" == "$MARKER" ]] || die "state ownership marker missing or invalid"
-[[ -f "$LOG/.managed-by-lalune" && "$(cat "$LOG/.managed-by-lalune")" == "$MARKER" ]] || die "log ownership marker missing or invalid"
+[[ -f "$ETC/.managed-by-lalune" && ! -L "$ETC/.managed-by-lalune" && "$(cat "$ETC/.managed-by-lalune")" == "$MARKER" ]] || die "config ownership marker missing or invalid"
+[[ -f "$LIB/.managed-by-lalune" && ! -L "$LIB/.managed-by-lalune" && "$(cat "$LIB/.managed-by-lalune")" == "$MARKER" ]] || die "binary directory ownership marker missing or invalid"
+[[ -f "$STATE/.managed-by-lalune" && ! -L "$STATE/.managed-by-lalune" && "$(cat "$STATE/.managed-by-lalune")" == "$MARKER" ]] || die "state ownership marker missing or invalid"
+[[ -f "$LOG/.managed-by-lalune" && ! -L "$LOG/.managed-by-lalune" && "$(cat "$LOG/.managed-by-lalune")" == "$MARKER" ]] || die "log ownership marker missing or invalid"
 
 systemctl disable --now "$UNIT" || die "could not stop/disable our service; preserving all files"
 command -v ip >/dev/null 2>&1 || die "iproute2 missing; preserving binary and service unit for manual cleanup"
