@@ -1,0 +1,140 @@
+name: CSQTT LaLune ARM64 system VM lifecycle test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/csqtt-direct-route-tab
+    paths:
+      - "server-assets/install-csqtt-lalune.sh"
+      - "server-assets/uninstall-csqtt-lalune.sh"
+      - "adapt/test-csqtt-lalune-installer.sh"
+      - ".github/workflows/csqtt-lalune-arm64-vm-test.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  arm64-system-vm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install QEMU system emulator and cloud-init image tools
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-arm qemu-efi-aarch64 cloud-image-utils openssh-client
+
+      - name: Prepare isolated Debian ARM64 guest
+        run: |
+          set -euxo pipefail
+          mkdir -p vm
+          curl -fL --retry 3 https://cloud.debian.org/images/cloud/trixie/latest/debian-13-nocloud-arm64.qcow2 -o vm/guest.qcow2
+          ssh-keygen -q -t ed25519 -N '' -f vm/id_ed25519
+          cat > vm/user-data <<'EOF'
+          #cloud-config
+          users:
+            - name: tester
+              groups: [sudo]
+              shell: /bin/bash
+              sudo: ALL=(ALL) NOPASSWD:ALL
+              ssh_authorized_keys:
+                - KEY_PLACEHOLDER
+          ssh_pwauth: false
+          package_update: true
+          packages:
+            - iproute2
+            - iptables
+            - iptables-persistent
+            - systemd
+            - openssh-server
+          EOF
+          sed -i "s|KEY_PLACEHOLDER|$(cat vm/id_ed25519.pub)|" vm/user-data
+          cat > vm/meta-data <<'EOF'
+          instance-id: lalune-isolation-test
+          local-hostname: lalune-arm64-test
+          EOF
+          cloud-localds vm/seed.iso vm/user-data vm/meta-data
+          qemu-img resize vm/guest.qcow2 8G
+
+      - name: Boot real ARM64 Linux guest
+        run: |
+          set -euxo pipefail
+          test -f /usr/share/AAVMF/AAVMF_CODE.fd
+          cp /usr/share/AAVMF/AAVMF_CODE.fd vm/firmware-code.fd
+          cp /usr/share/AAVMF/AAVMF_VARS.fd vm/firmware-vars.fd
+          qemu-system-aarch64 \
+            -machine virt -cpu max -m 3072 -smp 2 -accel tcg \
+            -drive if=pflash,format=raw,readonly=on,file=vm/firmware-code.fd \
+            -drive if=pflash,format=raw,file=vm/firmware-vars.fd \
+            -drive if=none,file=vm/guest.qcow2,format=qcow2,id=hd0 \
+            -device virtio-blk-device,drive=hd0 \
+            -drive file=vm/seed.iso,if=none,format=raw,id=seed \
+            -device virtio-blk-device,drive=seed \
+            -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 \
+            -device virtio-net-pci,netdev=net0 \
+            -nographic -daemonize -pidfile vm/qemu.pid -serial file:vm/serial.log
+          for attempt in $(seq 1 90); do
+            if ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=3 tester@127.0.0.1 'uname -m' 2>/dev/null | grep -qx aarch64; then
+              exit 0
+            fi
+            sleep 5
+          done
+          cat vm/serial.log
+          exit 1
+
+      - name: Test installer isolation and lifecycle in ARM64 system guest
+        run: |
+          set -euxo pipefail
+          SSH="ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1"
+          SCP="scp -i vm/id_ed25519 -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          $SCP server-assets/install-csqtt-lalune.sh server-assets/uninstall-csqtt-lalune.sh vm/guest-binary.sh tester@127.0.0.1:/home/tester/
+          cat > vm/guest-binary.sh <<'EOF'
+          #!/bin/sh
+          exec /bin/sleep infinity
+          EOF
+          $SCP vm/guest-binary.sh tester@127.0.0.1:/home/tester/csqtt-lalune-linux-arm64
+          $SSH 'set -eux
+            sudo install -d -m 0755 /opt/lalune-package
+            sudo install -m 0755 /home/tester/install-csqtt-lalune.sh /opt/lalune-package/install-csqtt-lalune.sh
+            sudo install -m 0755 /home/tester/uninstall-csqtt-lalune.sh /opt/lalune-package/uninstall-csqtt-lalune.sh
+            sudo install -m 0755 /home/tester/csqtt-lalune-linux-arm64 /opt/lalune-package/csqtt-lalune-linux-arm64
+            sudo systemctl enable --now csqtt.service
+            sudo systemctl enable --now csqtt-47000.service
+            sudo systemctl enable --now csqtt-47000-netns.service
+            sudo systemctl is-active --quiet csqtt.service
+            sudo systemctl is-active --quiet csqtt-47000.service
+            sudo systemctl is-active --quiet csqtt-47000-netns.service
+            sudo sha256sum /etc/systemd/system/csqtt.service /etc/systemd/system/csqtt-47000.service /etc/systemd/system/csqtt-47000-netns.service > /tmp/production-units.before
+            sudo /opt/lalune-package/install-csqtt-lalune.sh
+            sudo systemctl is-active --quiet csqtt-lalune.service
+            sudo systemctl is-active --quiet csqtt.service
+            sudo systemctl is-active --quiet csqtt-47000.service
+            sudo systemctl is-active --quiet csqtt-47000-netns.service
+            sudo sha256sum -c /tmp/production-units.before
+            sudo /opt/lalune-package/uninstall-csqtt-lalune.sh
+            ! sudo systemctl is-active --quiet csqtt-lalune.service
+            sudo systemctl is-active --quiet csqtt.service
+            sudo systemctl is-active --quiet csqtt-47000.service
+            sudo systemctl is-active --quiet csqtt-47000-netns.service
+            sudo sha256sum -c /tmp/production-units.before
+            test -f /etc/csqtt-lalune/.managed-by-lalune
+            echo ARM64_SYSTEM_VM_LIFECYCLE_PASS'
+          
+      - name: Upload guest diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lalune-arm64-system-vm-diagnostics
+          path: |
+            vm/serial.log
+            vm/user-data
+            vm/meta-data
+          if-no-files-found: ignore
+
+      - name: Stop QEMU guest
+        if: always()
+        run: |
+          if [ -f vm/qemu.pid ]; then kill "$(cat vm/qemu.pid)" || true; fi
