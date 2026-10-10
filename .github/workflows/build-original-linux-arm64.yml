@@ -330,7 +330,7 @@ jobs:
           cp adaptation-source.sha256 dist/
           cp protocols-source.sha256 dist/
           printf '%s\n' 'e4a6d08b63aef6025bf8ad8f77da660ea552e04b' > dist/UPSTREAM_COMMIT
-          sha256sum dist/lalune-original-linux-arm64 | tee dist/SHA256SUMS
+          (cd dist && sha256sum lalune-original-linux-arm64 > SHA256SUMS && sha256sum -c SHA256SUMS)
           tar -C dist -czf lalune-original-linux-arm64.tar.gz .
       - uses: actions/upload-artifact@v4
         with:
