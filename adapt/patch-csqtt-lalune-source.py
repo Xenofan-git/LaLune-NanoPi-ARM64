@@ -40,10 +40,10 @@ client_protocol_test_module = '''
 #[path = "../rust-client/protocol.rs"]
 mod client_protocol;
 '''
-marker = '#[cfg(test)]\\nmod tests {'
+marker = '#[cfg(test)]\nmod tests {'
 if sources["protocol"].count(marker) != 1:
     raise SystemExit("protocol.rs: expected one test module for real client parser binding")
-sources["protocol"] = sources["protocol"].replace(marker, marker + "\\n    " + client_protocol_test_module.strip().replace("\\n", "\\n    "), 1)
+sources["protocol"] = sources["protocol"].replace(marker, marker + "\n    " + client_protocol_test_module.strip().replace("\n", "\n    "), 1)
 
 roundtrip_test = '''
     #[test]
