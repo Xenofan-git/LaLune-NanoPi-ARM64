@@ -37,12 +37,35 @@ if model_count < 1:
     raise SystemExit("model.rs: expected legacy client subnet references to rename")
 sources["model"] = sources["model"].replace("10.66.67", "10.67.68")
 
-# The proxy-route module also writes rp_filter against the upstream TUN name and
-# contains fixtures that assert the old interface. Rename every occurrence there.
+# The proxy-route module also writes rp_filter against the TUN name and
+# mutates policy routing / iptables. Give every policy table, mark, and rule
+# comment its own namespace; otherwise its startup/cleanup can delete another
+# CSQTT instance's rules or flush a shared routing table.
 proxy_count = sources["proxy"].count("csqtt1")
 if proxy_count < 1:
     raise SystemExit("proxy_route.rs: expected legacy TUN references to rename")
 sources["proxy"] = sources["proxy"].replace("csqtt1", "csqtt-lalune0")
+
+proxy_policy_replacements = [
+    ('const LEGACY_POLICY_TABLE: &str = "1066";', 'const LEGACY_POLICY_TABLE: &str = "47066";', "legacy policy table"),
+    ('const LEGACY_POLICY_PRIORITY: &str = "1066";', 'const LEGACY_POLICY_PRIORITY: &str = "47066";', "legacy policy priority"),
+    ('const NAT_COMMENT: &str = "CSQTT_LOCAL_SOCKS";', 'const NAT_COMMENT: &str = "CSQTT_LALUNE_LOCAL_SOCKS";', "local SOCKS NAT marker"),
+    ('const MARK_COMMENT: &str = "CSQTT_LOCAL_SOCKS_MARK";', 'const MARK_COMMENT: &str = "CSQTT_LALUNE_LOCAL_SOCKS_MARK";', "local SOCKS mark marker"),
+    ('const POLICY_MARK: &str = "0x422";', 'const POLICY_MARK: &str = "0x6742";', "local SOCKS policy mark"),
+    ('const LEGACY_NAT_COMMENT: &str = "CSQTT_SOCKS";', 'const LEGACY_NAT_COMMENT: &str = "CSQTT_LALUNE_SOCKS";', "legacy NAT marker"),
+    ('const LEGACY_QUIC_COMMENT: &str = "CSQTT_CASCADE_NO_QUIC";', 'const LEGACY_QUIC_COMMENT: &str = "CSQTT_LALUNE_CASCADE_NO_QUIC";', "legacy QUIC marker"),
+    ('const TPROXY_TABLE: &str = "30001";', 'const TPROXY_TABLE: &str = "47001";', "TPROXY table"),
+    ('const TPROXY_PRIORITY: &str = "30001";', 'const TPROXY_PRIORITY: &str = "47001";', "TPROXY priority"),
+    ('const TPROXY_RULE_MARK: &str = "0x7531/0x7531";', 'const TPROXY_RULE_MARK: &str = "0x6741/0x6741";', "TPROXY mark"),
+]
+for old, new, label in proxy_policy_replacements:
+    count = sources["proxy"].count(old)
+    if count != 1:
+        raise SystemExit(f"proxy_route.rs {label}: expected one declaration, found {count}")
+    sources["proxy"] = sources["proxy"].replace(old, new, 1)
+
+# Rule cleanup is marker-based, so the TPROXY comment must be unique as well.
+sources["proxy"] = sources["proxy"].replace("CSQTT_TPROXY", "CSQTT_LALUNE_TPROXY")
 
 for key, path in paths.items():
     path.write_text(sources[key])
@@ -59,4 +82,16 @@ if 'pub const TUN_SUBNET: &str = "10.67.68.0/24";' not in sources["tun"]:
     raise SystemExit("dedicated subnet missing")
 if '[10, 67, 69, 2]' not in sources["tun"]:
     raise SystemExit("foreign subnet test reference missing after patch")
-print("Patched CSQTT v2.1.9: TUN=csqtt-lalune0, subnet=10.67.68.0/24")
+for marker in [
+    'const LEGACY_POLICY_TABLE: &str = "47066";',
+    'const TPROXY_TABLE: &str = "47001";',
+    'const TPROXY_RULE_MARK: &str = "0x6741/0x6741";',
+    'const NAT_COMMENT: &str = "CSQTT_LALUNE_LOCAL_SOCKS";',
+    'CSQTT_LALUNE_TPROXY',
+]:
+    if marker not in sources["proxy"]:
+        raise SystemExit(f"dedicated proxy routing namespace missing: {marker}")
+for forbidden in ['"1066"', '"30001"', '"0x422"', '"0x7531/0x7531"', 'CSQTT_TPROXY', 'CSQTT_LOCAL_SOCKS', 'CSQTT_SOCKS']:
+    if forbidden in sources["proxy"]:
+        raise SystemExit(f"shared proxy-routing marker remains: {forbidden}")
+print("Patched CSQTT v2.1.9: TUN=csqtt-lalune0, subnet=10.67.68.0/24, isolated proxy policy namespace")
