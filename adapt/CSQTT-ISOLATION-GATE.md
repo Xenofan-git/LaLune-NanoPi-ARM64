@@ -30,6 +30,18 @@ Changing peer/web ports and config directory alone is not sufficient. In particu
 
 Until every item above passes, the DeployManager must refuse deployment and uninstallation without making remote changes. The new scripts are packaged candidates only; they are not authorization to run them on NanoPi. Existing CSQTT services, Android CSQTT, production routing, HydraRoute, and Tailscale are out of scope and must remain untouched.
 
+## Protocol trace for the next test
+
+The pinned v2.1.9 source trace identifies why the current UDP fixture cannot establish tunnel readiness:
+
+- The existing pinned wire fixture is a legacy `CSQTT-WIRE-2` first-stage setup request. It proves credential decryption/session creation, but does not complete the client's current configuration exchange.
+- The client builds the follow-up request as `GETCONF:<local_port>|<device_id>|<password>|<generation_id>|<salt>|<worker_id>|<desired_stream_count>|CSQTT-WIRE-3`.
+- The server's configuration handler validates that request, allocates or resolves the device IP, then returns `TUNCONF:<device_ip>:<dns>:<client_port>:stream-v2` (or a denial/no-config response). The server's TUNCONF response must be decoded with the established session's actual packet keys; checking raw UDP bytes for the string would be invalid.
+- The client implementation is in upstream `rust-client/protocol.rs`, `rust-client/session.rs`, and `rust-client/wrap.rs`. The next harness should reuse those real protocol functions or equivalent server test helpers, not invent encryption or hard-code an encrypted response.
+- Only after authenticated configuration is decoded should a second test inject a valid IPv4 packet through the isolated TUN and assert it arrives at the authenticated opposite endpoint. The test must also assert that unrelated main routes and the three production-like services remain unchanged.
+
+This trace is analysis of pinned source, not a passing TUNCONF/data-plane test. No deployment authorization is implied.
+
 ## Current CI status and next end-to-end gate
 
 - CI run #352 (commit `cf201e2`) passed in a disposable ARM64 system VM. It proved that the packaged ARM64 server answers a pinned, encrypted upstream `GETCONF` fixture with a protocol response and that install/uninstall preserves the simulated pre-existing services and main routes.
