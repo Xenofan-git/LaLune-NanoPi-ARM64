@@ -233,8 +233,7 @@ jobs:
           unzip -p /tmp/csqtt-v2.1.9-arm64.apk assets/csqtt.server-provenance.json > server-assets/csqtt.server-provenance.json
           curl -fL --retry 3 https://raw.githubusercontent.com/amurcanov/csqtt/v2.1.9/app/src/main/assets/deploy.sh -o server-assets/deploy.sh
           chmod 0755 server-assets/csqtt-linux-arm64 server-assets/csqtt-linux-amd64 server-assets/csqtt-linux-armv7 server-assets/deploy.sh
-          install -m 0755 adapt/install-csqtt-lalune.sh server-assets/install-csqtt-lalune.sh
-          install -m 0755 adapt/uninstall-csqtt-lalune.sh server-assets/uninstall-csqtt-lalune.sh
+          chmod 0755 server-assets/install-csqtt-lalune.sh server-assets/uninstall-csqtt-lalune.sh
           bash -n server-assets/install-csqtt-lalune.sh
           bash -n server-assets/uninstall-csqtt-lalune.sh
           ! grep -Eq 'bash .*/deploy.sh (install|uninstall)|ip route flush cache|sysctl -w net.ipv4.conf.(all|default)' server-assets/install-csqtt-lalune.sh server-assets/uninstall-csqtt-lalune.sh
