@@ -108,6 +108,17 @@ fi
 grep -q 'LaLune firewall markers already exist' "$ROOT/out"
 [[ ! -e "$ROOT/host/etc/csqtt-lalune" ]]
 
+# Case 1f: an unmarked config directory is treated as operator-owned, never adopted.
+mkdir -p "$ROOT/host/etc/csqtt-lalune"
+printf 'production-secret-placeholder\n' > "$ROOT/host/etc/csqtt-lalune/operator.conf"
+if "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
+  echo "FAIL: installer adopted an unmarked config directory" >&2; exit 1
+fi
+grep -q 'exists without our ownership marker' "$ROOT/out"
+grep -Fxq 'production-secret-placeholder' "$ROOT/host/etc/csqtt-lalune/operator.conf"
+[[ ! -e "$ROOT/host/usr/local/bin/csqtt-lalune" ]]
+rm -rf "$ROOT/host/etc/csqtt-lalune"
+
 # Case 2: pre-existing LaLune policy IDs are not adopted or modified.
 if IP_RULES='47001: from all fwmark 0x6741/0x6741 lookup 47001' "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
   echo "FAIL: installer accepted pre-existing policy IDs" >&2; exit 1
@@ -121,6 +132,16 @@ grep -q 'CSQTT_LALUNE_INSTALL_OK' "$ROOT/out"
 [[ -x "$ROOT/host/usr/local/bin/csqtt-lalune" ]]
 grep -Fq 'Description=CSQTT LaLune isolated dataplane' "$ROOT/host/etc/systemd/system/csqtt-lalune.service"
 grep -Fq 'CSQTT-LALUNE-MANAGED-V1' "$ROOT/host/etc/csqtt-lalune/.managed-by-lalune"
+
+# An active LaLune unit is not silently stopped for an upgrade/reinstall.
+cp "$ROOT/host/usr/local/bin/csqtt-lalune" "$ROOT/binary-before-active-check"
+touch "$TEST_ACTIVE"
+if "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
+  echo "FAIL: installer accepted an active LaLune service" >&2; exit 1
+fi
+grep -q 'is already active; stop it deliberately' "$ROOT/out"
+cmp "$ROOT/binary-before-active-check" "$ROOT/host/usr/local/bin/csqtt-lalune"
+rm -f "$TEST_ACTIVE"
 
 # Preserve operator config and service files when routing cleanup is incomplete.
 mkdir -p "$ROOT/host/etc/csqtt-lalune"
@@ -160,5 +181,11 @@ grep -q 'CSQTT_LALUNE_UNINSTALL_OK' "$ROOT/out"
 [[ -f "$ROOT/host/etc/csqtt-lalune/operator.conf" ]]
 [[ -f "$ROOT/host/var/lib/csqtt-lalune/.managed-by-lalune" ]]
 [[ -f "$ROOT/host/var/log/csqtt-lalune/.managed-by-lalune" ]]
+
+# All service-control calls must be limited to the namespaced unit; never touch production CSQTT.
+if grep -E '(^|[[:space:]])(csqtt|csqtt-47000)(\.service|[[:space:]]|$)' "$TEST_SYSTEMCTL_LOG"; then
+  echo "FAIL: test harness observed a command targeting a production CSQTT unit" >&2; exit 1
+fi
+grep -Fq 'csqtt-lalune.service' "$TEST_SYSTEMCTL_LOG"
 
 echo "CSQTT LaLune installer/uninstaller disposable tests: PASS"
