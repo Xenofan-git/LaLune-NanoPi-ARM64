@@ -12,6 +12,10 @@ readonly MARKER="CSQTT-LALUNE-MANAGED-V1"
 die(){ echo "csqtt-lalune uninstall: $*" >&2; exit 1; }
 [[ ${EUID} -eq 0 ]] || die "run as root"
 if [[ $# -gt 1 || ( $# -eq 1 && "${1}" != "--purge" ) ]]; then die "usage: $0 [--purge]"; fi
+# Do not follow ownership markers through symlinks; all cleanup targets must be real paths.
+for owned_path in "$UNIT_FILE" "$BIN" "$LIB" "$ETC" "$STATE" "$LOG"; do
+  [[ ! -L "$owned_path" ]] || die "$owned_path is a symlink; refusing cleanup"
+done
 [[ -f "$UNIT_FILE" ]] || die "our service unit is absent; refusing broad cleanup"
 grep -Fq 'Description=CSQTT LaLune isolated dataplane' "$UNIT_FILE" || die "service unit is not ours"
 [[ -f "$ETC/.managed-by-lalune" && "$(cat "$ETC/.managed-by-lalune")" == "$MARKER" ]] || die "config ownership marker missing or invalid"
