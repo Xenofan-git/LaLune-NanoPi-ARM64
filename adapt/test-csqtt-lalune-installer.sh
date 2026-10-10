@@ -70,7 +70,7 @@ export PATH="$ROOT/bin:$PATH"
 export TEST_SYSTEMCTL_LOG="$ROOT/systemctl.log" TEST_ACTIVE="$ROOT/active"
 
 # Simulate standard host parent directories that exist on real Linux systems.
-mkdir -p "$ROOT/host/usr/local/bin" "$ROOT/host/etc/systemd/system"
+mkdir -p "$ROOT/host/usr/local/bin" "$ROOT/host/usr/local/lib" "$ROOT/host/etc/systemd/system" "$ROOT/host/var/lib" "$ROOT/host/var/log"
 
 # Case 1: occupied UDP listener is not killed and no managed files are created.
 if SS_MODE=occupied-udp "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
