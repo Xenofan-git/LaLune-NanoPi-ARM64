@@ -33,6 +33,64 @@ for key, old, new, label, expected_count in replacements:
         raise SystemExit(f"{label}: expected {expected_count} source occurrence(s), found {count}")
     sources[key] = sources[key].replace(old, new)
 
+# Bind the pinned client parser into the server's test module. This is test-only:
+# it lets a real server-produced encrypted response pass through the exact client parser
+# without introducing a second implementation or shipping client code in the server.
+client_protocol_test_module = '''
+#[path = "../rust-client/protocol.rs"]
+mod client_protocol;
+'''
+marker = '#[cfg(test)]\\nmod tests {'
+if sources["protocol"].count(marker) != 1:
+    raise SystemExit("protocol.rs: expected one test module for real client parser binding")
+sources["protocol"] = sources["protocol"].replace(marker, marker + "\\n    " + client_protocol_test_module.strip().replace("\\n", "\\n    "), 1)
+
+roundtrip_test = '''
+    #[test]
+    fn server_encrypted_tunconf_roundtrips_through_real_client_parser() {
+        let (mut engine, _events) = fixture_engine("wire-password");
+        engine.handle_unknown_legacy(
+            SocketAddr::from(([198, 51, 100, 20], 46000)),
+            None,
+            &fixture_wire(),
+        );
+        assert_eq!(engine.sessions.len(), 1);
+
+        let session = engine.sessions.iter_mut().next().unwrap().1;
+        let expected = b"TUNCONF:10.67.68.42:1.1.1.1,8.8.8.8:0:stream-v2";
+        let pool = crate::packet::PacketPool::new(1);
+        let mut packet = pool.try_acquire().expect("packet buffer");
+        let mut rng = StdRng::seed_from_u64(0x4353_5154_545f_4349);
+        wrap_legacy_into(session, expected, &mut rng, &mut packet, Instant::now(), false)
+            .expect("server must encrypt TUNCONF using the established session keys");
+
+        let mut wire = packet.as_slice().to_vec();
+        let decoded = unwrap_legacy_in_place(
+            &session.aes,
+            &session.hmac,
+            &session.chacha,
+            &mut wire,
+            None,
+            false,
+        )
+        .expect("session-authenticated TUNCONF must decrypt");
+        let plaintext = decoded.range.get(&wire);
+        assert_eq!(plaintext, expected);
+        assert_eq!(
+            client_protocol::parse_config_response(plaintext).unwrap(),
+            client_protocol::ConfigResponse::Config(
+                "TUNCONF:10.67.68.42:1.1.1.1,8.8.8.8:0:stream-v2".to_owned()
+            )
+        );
+    }
+'''
+test_anchor = '''
+    #[test]
+    fn client_getconf_fixture_authenticates_with_matching_password_only() {'''
+if sources["protocol"].count(test_anchor) != 1:
+    raise SystemExit("protocol.rs: expected unique GETCONF authentication test anchor")
+sources["protocol"] = sources["protocol"].replace(test_anchor, roundtrip_test + test_anchor, 1)
+
 # Device address allocation and legacy-import fixtures also embed the upstream subnet.
 # Move every occurrence in model.rs so newly allocated client IPs use the LaLune subnet.
 model_count = sources["model"].count("10.66.67")
