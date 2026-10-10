@@ -25,6 +25,8 @@ SOURCE="${HERE}/csqtt-lalune-linux-arm64"
 [[ -s "$SOURCE" ]] || die "missing isolated binary: $SOURCE"
 command -v systemctl >/dev/null 2>&1 || die "systemd is required"
 command -v ss >/dev/null 2>&1 || die "ss is required for safe port preflight"
+command -v ip >/dev/null 2>&1 || die "iproute2 is required for safe route/interface preflight"
+command -v iptables-save >/dev/null 2>&1 || die "iptables is required for safe firewall preflight"
 
 # Never adopt or overwrite another service or an unowned path.
 if [[ -e "$UNIT_FILE" ]] && ! grep -Fq 'Description=CSQTT LaLune isolated dataplane' "$UNIT_FILE"; then
@@ -60,6 +62,19 @@ if ss -H -lun "sport = :$UDP_PORT" | grep -q .; then
 fi
 if ss -H -ltn "sport = :$WEB_PORT" | grep -q .; then
   die "TCP port $WEB_PORT is occupied; no listener will be killed"
+fi
+if ip link show dev csqtt-lalune0 >/dev/null 2>&1; then
+  die "csqtt-lalune0 already exists; refusing to adopt or reconfigure an existing interface"
+fi
+RULES="$(ip -4 rule show)"
+if printf '%s\n' "$RULES" | grep -Eq '(^|[[:space:]])(47001|47066):|fwmark (0x6741|0x6742)(/|[[:space:]])|lookup (47001|47066)([[:space:]]|$)'; then
+  die "LaLune policy identifiers already exist; refusing to delete or reuse existing rules"
+fi
+if [[ -n "$(ip -4 route show table 47001 2>/dev/null)" || -n "$(ip -4 route show table 47066 2>/dev/null)" ]]; then
+  die "LaLune route table 47001/47066 is non-empty; refusing to flush or adopt it"
+fi
+if iptables-save 2>/dev/null | grep -Fq 'CSQTT_LALUNE_'; then
+  die "LaLune firewall markers already exist; refusing to adopt or clean up existing rules"
 fi
 
 install -d -m 0750 "$ETC" "$STATE" "$LOG" "$LIB"
