@@ -41,10 +41,17 @@ mod client_protocol {
     include!("../rust-client/protocol.rs");
 }
 '''
-marker = '#[cfg(test)]\nmod tests {'
-if sources["protocol"].count(marker) != 1:
+import re
+
+# Match the Rust test module structurally: whitespace between cfg(test) and
+# mod tests may differ across upstream formatting revisions.
+marker_pattern = re.compile(r'(?m)^#\[cfg\(test\)\]\s*^mod tests \{')
+match = marker_pattern.search(sources["protocol"])
+if not match or marker_pattern.search(sources["protocol"], match.end()):
     raise SystemExit("protocol.rs: expected one test module for real client parser binding")
-sources["protocol"] = sources["protocol"].replace(marker, marker + "\n    " + client_protocol_test_module.strip().replace("\n", "\n    "), 1)
+marker = match.group(0)
+insertion = "\n    " + client_protocol_test_module.strip().replace("\n", "\n    ")
+sources["protocol"] = sources["protocol"][:match.end()] + insertion + sources["protocol"][match.end():]
 
 roundtrip_test = '''
     #[test]
