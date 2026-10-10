@@ -233,6 +233,14 @@ jobs:
           unzip -p /tmp/csqtt-v2.1.9-arm64.apk assets/csqtt.server-provenance.json > server-assets/csqtt.server-provenance.json
           curl -fL --retry 3 https://raw.githubusercontent.com/amurcanov/csqtt/v2.1.9/app/src/main/assets/deploy.sh -o server-assets/deploy.sh
           chmod 0755 server-assets/csqtt-linux-arm64 server-assets/csqtt-linux-amd64 server-assets/csqtt-linux-armv7 server-assets/deploy.sh
+          install -m 0755 adapt/install-csqtt-lalune.sh server-assets/install-csqtt-lalune.sh
+          install -m 0755 adapt/uninstall-csqtt-lalune.sh server-assets/uninstall-csqtt-lalune.sh
+          bash -n server-assets/install-csqtt-lalune.sh
+          bash -n server-assets/uninstall-csqtt-lalune.sh
+          ! grep -Eq 'bash .*/deploy.sh (install|uninstall)|ip route flush cache|sysctl -w net.ipv4.conf.(all|default)' server-assets/install-csqtt-lalune.sh server-assets/uninstall-csqtt-lalune.sh
+          grep -Fq 'csqtt-lalune.service' server-assets/install-csqtt-lalune.sh
+          grep -Fq '10.67.68.0/24' server-assets/install-csqtt-lalune.sh adapt/CSQTT-LALUNE-INSTALLER.md
+          grep -Fq 'rm -rf -- "$ETC" "$STATE" "$LOG"' server-assets/uninstall-csqtt-lalune.sh
           sha256sum server-assets/* | tee server-assets/SHA256SUMS
           grep -Fq '"version":  "2.1.9"' server-assets/csqtt.server-provenance.json
           grep -Fq '"assetName":  "csqtt-linux-arm64"' server-assets/csqtt.server-provenance.json
@@ -311,6 +319,10 @@ jobs:
           cp -a server-assets dist/server-assets
           test -s dist/server-assets/csqtt-lalune-linux-arm64
           test -s dist/server-assets/csqtt-lalune-help.txt
+          test -x dist/server-assets/install-csqtt-lalune.sh
+          test -x dist/server-assets/uninstall-csqtt-lalune.sh
+          bash -n dist/server-assets/install-csqtt-lalune.sh
+          bash -n dist/server-assets/uninstall-csqtt-lalune.sh
           (cd "$GITHUB_WORKSPACE" && sha256sum -c server-assets/SHA256SUMS)
           ! grep -Fq 'starts_with("30001:")' server-source/rust-server/proxy_route.rs
           ! grep -Fq 'fwmark 0x7531' server-source/rust-server/proxy_route.rs
