@@ -238,6 +238,12 @@ jobs:
           bash -n server-assets/uninstall-csqtt-lalune.sh
           ! grep -Eq 'bash .*/deploy.sh (install|uninstall)|ip route flush cache|sysctl -w net.ipv4.conf.(all|default)' server-assets/install-csqtt-lalune.sh server-assets/uninstall-csqtt-lalune.sh
           grep -Fq 'csqtt-lalune.service' server-assets/install-csqtt-lalune.sh
+          grep -Fq 'csqtt-lalune0 already exists' server-assets/install-csqtt-lalune.sh
+          grep -Fq 'LaLune policy identifiers already exist' server-assets/install-csqtt-lalune.sh
+          grep -Fq 'LaLune firewall markers already exist' server-assets/install-csqtt-lalune.sh
+          grep -Fq 'refusing to adopt it' server-assets/install-csqtt-lalune.sh
+          grep -Fq 'systemctl disable --now "$UNIT"' server-assets/uninstall-csqtt-lalune.sh
+          ! grep -Eq 'ip route flush cache|ip route flush table (main|default)|ip route replace default|sysctl -w net.ipv4.conf.(all|default)' server-assets/install-csqtt-lalune.sh server-assets/uninstall-csqtt-lalune.sh
           grep -Fq '10.67.68.0/24' server-assets/install-csqtt-lalune.sh adapt/CSQTT-LALUNE-INSTALLER.md
           grep -Fq 'rm -rf -- "$ETC" "$STATE" "$LOG"' server-assets/uninstall-csqtt-lalune.sh
           sha256sum server-assets/* | tee server-assets/SHA256SUMS
