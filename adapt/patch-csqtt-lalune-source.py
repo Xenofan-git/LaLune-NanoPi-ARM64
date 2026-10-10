@@ -73,6 +73,21 @@ for old, new in [
 ]:
     sources["proxy"] = sources["proxy"].replace(old, new)
 
+# Runtime cleanup parses textual `ip rule show` output. These strings are
+# executable cleanup logic, not just test fixtures, so namespace them explicitly.
+for old, new, label in [
+    ('starts_with("30001:")', 'starts_with("47001:")', "TPROXY priority cleanup matcher"),
+    ('contains("fwmark 0x7531")', 'contains("fwmark 0x6741")', "TPROXY mark cleanup matcher"),
+    ('contains("lookup 30001")', 'contains("lookup 47001")', "TPROXY table cleanup matcher"),
+    ('starts_with("1066:")', 'starts_with("47066:")', "legacy priority cleanup matcher"),
+    ('contains("lookup 1066")', 'contains("lookup 47066")', "legacy table cleanup matcher"),
+    ('contains("fwmark 0x422")', 'contains("fwmark 0x6742")', "legacy mark cleanup matcher"),
+]:
+    count = sources["proxy"].count(old)
+    if count != 1:
+        raise SystemExit(f"proxy_route.rs {label}: expected one matcher, found {count}")
+    sources["proxy"] = sources["proxy"].replace(old, new, 1)
+
 # Flushing the kernel route cache is host-global and can disturb unrelated
 # routing domains. LaLune must mutate only its explicitly numbered policy tables.
 global_route_cache_flush = 'command_output("ip", &["route", "flush", "cache"])'
@@ -115,7 +130,7 @@ for marker in [
 ]:
     if marker not in sources["proxy"]:
         raise SystemExit(f"dedicated proxy routing namespace missing: {marker}")
-for forbidden in ['"1066"', '"30001"', '"0x422"', '"0x7531/0x7531"', 'CSQTT_TPROXY', 'CSQTT_LOCAL_SOCKS', 'CSQTT_SOCKS', 'route flush cache']:
+for forbidden in ['"1066"', '"30001"', '"0x422"', '"0x7531/0x7531"', 'starts_with("30001:")', 'fwmark 0x7531', 'lookup 30001', 'starts_with("1066:")', 'lookup 1066', 'fwmark 0x422', 'CSQTT_TPROXY', 'CSQTT_LOCAL_SOCKS', 'CSQTT_SOCKS', 'route flush cache']:
     if forbidden in sources["proxy"]:
         raise SystemExit(f"shared proxy-routing operation/marker remains: {forbidden}")
 print("Patched CSQTT v2.1.9: TUN=csqtt-lalune0, subnet=10.67.68.0/24, isolated policy tables; no global route-cache flush")
