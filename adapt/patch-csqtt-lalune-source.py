@@ -6,6 +6,7 @@ root = Path("server-source/rust-server")
 paths = {
     "net": root / "net_setup.rs",
     "tun": root / "tun_device.rs",
+    "proxy": root / "proxy_route.rs",
 }
 sources = {key: path.read_text() for key, path in paths.items()}
 replacements = [
@@ -24,6 +25,13 @@ for key, old, new, label, expected_count in replacements:
     if count != expected_count:
         raise SystemExit(f"{label}: expected {expected_count} source occurrence(s), found {count}")
     sources[key] = sources[key].replace(old, new)
+
+# The proxy-route module also writes rp_filter against the upstream TUN name and
+# contains fixtures that assert the old interface. Rename every occurrence there.
+proxy_count = sources["proxy"].count("csqtt1")
+if proxy_count < 1:
+    raise SystemExit("proxy_route.rs: expected legacy TUN references to rename")
+sources["proxy"] = sources["proxy"].replace("csqtt1", "csqtt-lalune0")
 
 for key, path in paths.items():
     path.write_text(sources[key])
