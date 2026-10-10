@@ -23,6 +23,10 @@ for file in "$ROOT/package/install.sh" "$ROOT/package/uninstall.sh"; do
     "$file"
 done
 
+# The disposable harness runs as the hosted runner user; bypass only the root guard
+# in relocated test copies. Production installer/uninstaller remain root-only.
+sed -i '/run as root/d' "$ROOT/package/install.sh" "$ROOT/package/uninstall.sh"
+
 cat > "$ROOT/bin/uname" <<'SH'
 #!/bin/sh
 case "$1" in -s) echo Linux;; -m) echo aarch64;; *) exec /usr/bin/uname "$@";; esac
