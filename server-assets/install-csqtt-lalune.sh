@@ -41,14 +41,16 @@ if [[ -e "$LIB" && ! -f "$LIB/.managed-by-lalune" ]]; then
   die "$LIB exists without our ownership marker; refusing to overwrite"
 fi
 
-# If our service is already installed, stop it only after verifying its identity.
-if [[ -e "$UNIT_FILE" ]]; then
-  systemctl stop "$UNIT" || die "could not stop our existing service"
+# Never stop a running service automatically: a preflight failure must not
+# interrupt an already working instance. Upgrades require an explicit stop by
+# the operator after checking the maintenance window.
+if [[ -e "$UNIT_FILE" ]] && systemctl is-active --quiet "$UNIT"; then
+  die "$UNIT is already active; stop it deliberately before replacing the binary"
 fi
 
-# Do not kill listeners. If either port is occupied, leave the host unchanged.
+# Do not kill listeners. Preflight both ports before making any filesystem changes.
 if ss -H -lun "sport = :$UDP_PORT" | grep -q .; then
-  if ! systemctl is-active --quiet "$UNIT"; then die "UDP port $UDP_PORT is occupied by another process"; fi
+  die "UDP port $UDP_PORT is occupied; no listener will be killed"
 fi
 if ss -H -ltn "sport = :$WEB_PORT" | grep -q .; then
   die "TCP port $WEB_PORT is occupied; no listener will be killed"
