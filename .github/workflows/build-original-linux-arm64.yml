@@ -287,7 +287,17 @@ jobs:
           file target/aarch64-unknown-linux-gnu/release/csqtt
           test -s target/aarch64-unknown-linux-gnu/release/csqtt
           install -D -m 0755 target/aarch64-unknown-linux-gnu/release/csqtt "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64"
+          # Resolve every ELF dependency against the same ARM64 sysroot used by QEMU.
+          aarch64-linux-gnu-readelf -h "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64" | grep -Fq 'AArch64'
+          aarch64-linux-gnu-readelf -l "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64" | grep -Fq '/lib/ld-linux-aarch64.so.1'
+          aarch64-linux-gnu-readelf -d "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64" > "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-needed.txt"
+          grep -Fq 'NEEDED' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-needed.txt"
           qemu-aarch64 -L /usr/aarch64-linux-gnu "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64" --help > "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
+          # Run the upstream Rust unit tests under ARM64 emulation, not only --help.
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER="qemu-aarch64 -L /usr/aarch64-linux-gnu" \
+            CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+            CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+            cargo +1.97.1 test --target aarch64-unknown-linux-gnu
           grep -Fq -- '--listen' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
           grep -Fq -- '--web-port' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
           grep -Fq -- '--config-dir' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
