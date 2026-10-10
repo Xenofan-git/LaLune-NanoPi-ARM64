@@ -114,7 +114,7 @@ printf 'production-secret-placeholder\n' > "$ROOT/host/etc/csqtt-lalune/operator
 if "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
   echo "FAIL: installer adopted an unmarked config directory" >&2; exit 1
 fi
-grep -q 'exists without our ownership marker' "$ROOT/out"
+grep -Eq 'exists without (our |a regular )ownership marker' "$ROOT/out"
 grep -Fxq 'production-secret-placeholder' "$ROOT/host/etc/csqtt-lalune/operator.conf"
 [[ ! -e "$ROOT/host/usr/local/bin/csqtt-lalune" ]]
 rm -rf "$ROOT/host/etc/csqtt-lalune"
