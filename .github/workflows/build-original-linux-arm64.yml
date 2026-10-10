@@ -7,22 +7,79 @@ on:
       - original-lalune-linux-arm64-policy
       - integration/deploymanager-fix
       - fix/captcha-stale-overlay
+      - feature/csqtt-direct-route-tab
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   build:
     name: Build pinned original Go Linux ARM64
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Validate adaptation
         run: |
           set -euxo pipefail
           test -f adapt/apply-pinned-original-linux-arm64-policy.py
+      - name: Validate CSQTT panel route UI
+        run: |
+          set -euxo pipefail
+          test -f adapt/csqtt-panel-preview.html
+          grep -q 'id="page-route"' adapt/csqtt-panel-preview.html
+          grep -q 'id="directDomains"' adapt/csqtt-panel-preview.html
+          grep -q 'id="directIPs"' adapt/csqtt-panel-preview.html
+          grep -q 'id="saveDirectRules"' adapt/csqtt-panel-preview.html
+          test "$(grep -o 'data-page="' adapt/csqtt-panel-preview.html | wc -l)" -eq 6
+          grep -q 'function directRuleErrors()' adapt/csqtt-panel-preview.html
+          grep -Fq 'func (t *LinuxTun) ApplyDirectRouting() error' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -q 't.applyDirectRoutingLocked()' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -q 't.cleanupDirectRoutingLocked()' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -q 'func TestDirectDomainValidation' adapt/headless_main_test.go
+          grep -q 'func TestNormalizeDirectIPs' adapt/headless_main_test.go
+          grep -Fq 'func TestDirectPlanTransitions' adapt/headless_main_test.go
+          grep -Fq 'func prepareDirectPlan(domainsRaw, ipsRaw string)' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'func writeDirectFileAtomic(path string, data []byte, mode os.FileMode) error' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'writeDirectFileAtomic(directDnsmasqMain' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'strings.Split(string(data),' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'strings.Join(out,' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'validDirectDomain(s string) bool' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'if err := t.applyDirectRoutingLocked(); err != nil' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 't.cleanupDirectRoutingLocked()' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'dnsmasqChanged = true' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'writeDirectFileAtomic(directNftPath' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'writeDirectFileAtomic(directDnsmasqPath' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'nft -c -f ' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq '"core": "csqtt-server/2.1.9"' adapt/headless_main.go
+          grep -Fq 'func TestVersionEndpointReportsBuildProvenance' adapt/headless_main_test.go
+          grep -Fq '"commit": buildCommit' adapt/headless_main.go
+          grep -Fq '"buildRun": buildRunID' adapt/headless_main.go
+          grep -Fq '"buildDate": buildDate' adapt/headless_main.go
+          grep -Fq '"buildBranch": buildBranch' adapt/headless_main.go
+          grep -Fq '"upstreamCommit": buildUpstreamCommit' adapt/headless_main.go
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          html = Path("adapt/csqtt-panel-preview.html").read_text()
+          scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.S)
+          assert scripts, "no inline panel script found"
+          Path("/tmp/csqtt-panel.js").write_text("\n".join(scripts))
+          PY
+          node --check /tmp/csqtt-panel.js
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          html = Path("adapt/csqtt-panel-preview.html").read_text()
+          ids = set(re.findall(r'\bid="([^"]+)"', html))
+          js = Path("/tmp/csqtt-panel.js").read_text()
+          refs = set(re.findall(r"\$\('([^']+)'\)", js))
+          missing = sorted(refs - ids)
+          if missing:
+              raise SystemExit("panel JS references missing DOM ids: " + ", ".join(missing))
+          PY
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -88,6 +145,21 @@ jobs:
           grep -Fq 'SSH_ASKPASS_REQUIRE' upstream-lalune/Core/DeployManager/src/deploy.rs
           ! grep -Fq 'rm -f "$DEST"' upstream-lalune/Core/DeployManager/src/deploy.rs
           grep -Fq 'systemctl restart {bin}-deployed.service' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'deploy_official_csqtt(args, ports)' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'CSQTT_DEPLOY_MODE={mode}' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'pub secrets_file: Option<String>' upstream-lalune/Core/DeployManager/src/main.rs
+          grep -Fq 'pub uninstall: bool' upstream-lalune/Core/DeployManager/src/main.rs
+          grep -Fq 'fn uninstall_official_csqtt' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'CSQTT_ISOLATION_REQUIRED' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'upstream cleanup is global and could remove Android/production CSQTT' upstream-lalune/Core/DeployManager/src/deploy.rs
+          ! grep -Fq 'bash /tmp/deploy.sh uninstall' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'func validCSQTTSecret' upstream-lalune/Desktop/Libs/deploy.go
+          grep -Fq 'VKTokenFetcherARM64Archive' upstream-lalune/Desktop/Libs/vktoken.go
+          grep -Fq 'ResolveChromiumExecutable' upstream-lalune/Core/LaLuneTokenFetcher/Playwright/PlaywrightTokenFetcher.cs
+          grep -Fq 'SaveVKTokenInput' upstream-lalune/Desktop/Libs/vktoken.go
+          grep -Fq 'mux.HandleFunc("/vk/import"' adapt/headless_main.go
+          grep -Fq 'id="vkImportPanel"' adapt/csqtt-panel-preview.html
+          grep -Fq 'csqtt-deploy-secrets-*.txt' upstream-lalune/Desktop/Libs/deploy.go
 
       - name: Prepare original Go module layout
         run: |
@@ -142,9 +214,15 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           set -euxo pipefail
-          go build -trimpath -ldflags="-s -w" -o lalune-original-linux-arm64 .
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          go build -trimpath -ldflags="-s -w -X main.buildCommit=${GITHUB_SHA} -X main.buildRunID=${GITHUB_RUN_ID} -X main.buildRunNumber=${GITHUB_RUN_NUMBER} -X main.buildDate=${BUILD_DATE} -X main.buildBranch=${GITHUB_REF_NAME} -X main.buildUpstreamCommit=e4a6d08b63aef6025bf8ad8f77da660ea552e04b" -o lalune-original-linux-arm64 .
           file lalune-original-linux-arm64
           test -s lalune-original-linux-arm64
+      - name: Set up .NET for ARM64 VK token fetcher
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
       - name: Fetch official CSQTT 2.1.9 server assets
         run: |
           set -euxo pipefail
@@ -152,12 +230,111 @@ jobs:
           curl -fL --retry 3 https://github.com/amurcanov/csqtt/releases/download/v2.1.9/CSQTT-arm64-v8a.apk -o /tmp/csqtt-v2.1.9-arm64.apk
           unzip -p /tmp/csqtt-v2.1.9-arm64.apk assets/csqtt-linux-arm64 > server-assets/csqtt-linux-arm64
           unzip -p /tmp/csqtt-v2.1.9-arm64.apk assets/csqtt-linux-amd64 > server-assets/csqtt-linux-amd64
+          unzip -p /tmp/csqtt-v2.1.9-arm64.apk assets/csqtt-linux-armv7 > server-assets/csqtt-linux-armv7
           unzip -p /tmp/csqtt-v2.1.9-arm64.apk assets/csqtt.server-provenance.json > server-assets/csqtt.server-provenance.json
-          chmod 0755 server-assets/csqtt-linux-arm64 server-assets/csqtt-linux-amd64
+          curl -fL --retry 3 https://raw.githubusercontent.com/amurcanov/csqtt/v2.1.9/app/src/main/assets/deploy.sh -o server-assets/deploy.sh
+          chmod 0755 server-assets/csqtt-linux-arm64 server-assets/csqtt-linux-amd64 server-assets/csqtt-linux-armv7 server-assets/deploy.sh
+          chmod 0755 server-assets/install-csqtt-lalune.sh server-assets/uninstall-csqtt-lalune.sh
+          bash -n server-assets/install-csqtt-lalune.sh
+          bash -n server-assets/uninstall-csqtt-lalune.sh
+          ! grep -Eq 'bash .*/deploy.sh (install|uninstall)|ip route flush cache|sysctl -w net.ipv4.conf.(all|default)' server-assets/install-csqtt-lalune.sh server-assets/uninstall-csqtt-lalune.sh
+          grep -Fq 'csqtt-lalune.service' server-assets/install-csqtt-lalune.sh
+          grep -Fq 'csqtt-lalune0 already exists' server-assets/install-csqtt-lalune.sh
+          grep -Fq 'LaLune policy identifiers already exist' server-assets/install-csqtt-lalune.sh
+          grep -Fq 'LaLune firewall markers already exist' server-assets/install-csqtt-lalune.sh
+          grep -Fq 'refusing to adopt it' server-assets/install-csqtt-lalune.sh
+          grep -Fq 'systemctl disable --now "$UNIT"' server-assets/uninstall-csqtt-lalune.sh
+          grep -Fq 'LaLune policy rules remain after stop' server-assets/uninstall-csqtt-lalune.sh
+          grep -Fq 'LaLune firewall rules remain after stop' server-assets/uninstall-csqtt-lalune.sh
+          grep -Fq 'preserving binary and service unit' server-assets/uninstall-csqtt-lalune.sh
+          ! grep -Eq 'ip route flush cache|ip route flush table (main|default)|ip route replace default|sysctl -w net.ipv4.conf.(all|default)' server-assets/install-csqtt-lalune.sh server-assets/uninstall-csqtt-lalune.sh
+          grep -Fq '10.67.68.0/24' server-assets/install-csqtt-lalune.sh adapt/CSQTT-LALUNE-INSTALLER.md
+          grep -Fq 'rm -rf -- "$ETC" "$STATE" "$LOG"' server-assets/uninstall-csqtt-lalune.sh
           sha256sum server-assets/* | tee server-assets/SHA256SUMS
           grep -Fq '"version":  "2.1.9"' server-assets/csqtt.server-provenance.json
           grep -Fq '"assetName":  "csqtt-linux-arm64"' server-assets/csqtt.server-provenance.json
           grep -Fq '"assetName":  "csqtt-linux-amd64"' server-assets/csqtt.server-provenance.json
+          grep -Fq '"assetName":  "csqtt-linux-armv7"' server-assets/csqtt.server-provenance.json
+          grep -Fq 'readonly SCRIPT_VERSION="2.1.9"' server-assets/deploy.sh
+      - name: Exercise LaLune installer lifecycle in disposable root
+        run: |
+          set -euxo pipefail
+          chmod 0755 adapt/test-csqtt-lalune-installer.sh
+          bash -n adapt/test-csqtt-lalune-installer.sh
+          bash adapt/test-csqtt-lalune-installer.sh
+      - name: Audit upstream CSQTT isolation hazards
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 --branch v2.1.9 https://github.com/amurcanov/csqtt.git server-source
+          python3 adapt/audit-csqtt-isolation.py
+      - name: Patch isolated LaLune CSQTT dataplane
+        run: |
+          set -euxo pipefail
+          python3 adapt/patch-csqtt-lalune-source.py
+          grep -Fq 'server_encrypted_tunconf_roundtrips_through_real_client_parser' server-source/rust-server/protocol.rs
+          grep -Fq 'include!("../rust-client/protocol.rs");' server-source/rust-server/protocol.rs
+          ! grep -R -nE 'csqtt1|10\\.66\\.67' server-source/rust-server --include='*.rs'
+          grep -Fq 'csqtt-lalune0' server-source/rust-server/net_setup.rs
+          grep -Fq '10.67.68.0/24' server-source/rust-server/tun_device.rs
+          grep -Fq 'const TPROXY_TABLE: &str = "47001";' server-source/rust-server/proxy_route.rs
+          grep -Fq 'const LEGACY_POLICY_TABLE: &str = "47066";' server-source/rust-server/proxy_route.rs
+          grep -Fq 'CSQTT_LALUNE_TPROXY' server-source/rust-server/proxy_route.rs
+          ! grep -Fq '"30001"' server-source/rust-server/proxy_route.rs
+          ! grep -Fq '"1066"' server-source/rust-server/proxy_route.rs
+          ! grep -Fq 'CSQTT_TPROXY' server-source/rust-server/proxy_route.rs
+      - name: Build isolated CSQTT server for Linux ARM64
+        working-directory: server-source/rust-server
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-user gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          rustup toolchain install 1.97.1 --profile minimal
+          rustup target add aarch64-unknown-linux-gnu --toolchain 1.97.1
+          CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+            cargo +1.97.1 build --release --target aarch64-unknown-linux-gnu
+          file target/aarch64-unknown-linux-gnu/release/csqtt
+          test -s target/aarch64-unknown-linux-gnu/release/csqtt
+          install -D -m 0755 target/aarch64-unknown-linux-gnu/release/csqtt "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64"
+          # Resolve every ELF dependency against the same ARM64 sysroot used by QEMU.
+          aarch64-linux-gnu-readelf -h "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64" | grep -Fq 'AArch64'
+          aarch64-linux-gnu-readelf -l "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64" | grep -Fq '/lib/ld-linux-aarch64.so.1'
+          aarch64-linux-gnu-readelf -d "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64" > "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-needed.txt"
+          grep -Fq 'NEEDED' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-needed.txt"
+          qemu-aarch64 -L /usr/aarch64-linux-gnu "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64" --help > "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
+          # Run the upstream Rust unit tests under ARM64 emulation, not only --help.
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER="qemu-aarch64 -L /usr/aarch64-linux-gnu" \
+            CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+            CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+            cargo +1.97.1 test --target aarch64-unknown-linux-gnu
+          grep -Fq -- '--listen' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
+          grep -Fq -- '--web-port' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
+          grep -Fq -- '--config-dir' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
+          (cd "$GITHUB_WORKSPACE" && sha256sum server-assets/csqtt-lalune-linux-arm64 | tee -a server-assets/SHA256SUMS)
+      - name: Build VK token fetcher for Linux ARM64
+        run: |
+          set -euxo pipefail
+          dotnet publish upstream-lalune/Core/LaLuneTokenFetcher/Playwright/LaLuneTokenFetcher.Playwright.csproj -c Release -r linux-arm64 --self-contained true -o /tmp/vk-token-fetcher-arm64
+          test -s /tmp/vk-token-fetcher-arm64/LaLuneTokenFetcher
+          mkdir -p /tmp/vk-token-fetcher-package/vk-token-fetcher
+          cp -a /tmp/vk-token-fetcher-arm64/. /tmp/vk-token-fetcher-package/vk-token-fetcher/
+          chmod 0755 /tmp/vk-token-fetcher-package/vk-token-fetcher/LaLuneTokenFetcher
+          (cd /tmp/vk-token-fetcher-package && zip -qr "$GITHUB_WORKSPACE/server-assets/LaLuneTokenFetcher_Linux_ARM64.zip" vk-token-fetcher)
+          sha256sum server-assets/LaLuneTokenFetcher_Linux_ARM64.zip | tee -a server-assets/SHA256SUMS
+          test -s server-assets/LaLuneTokenFetcher_Linux_ARM64.zip
+          cat > server-assets/install-vk-chromium.sh <<'SH'
+          #!/bin/sh
+          set -eu
+          if [ "$(id -u)" -ne 0 ]; then
+            echo "Run as root: sudo sh install-vk-chromium.sh" >&2
+            exit 1
+          fi
+          apt-get update
+          apt-get install -y chromium
+          command -v chromium
+          SH
+          chmod 0755 server-assets/install-vk-chromium.sh
+          sha256sum server-assets/install-vk-chromium.sh | tee -a server-assets/SHA256SUMS
 
       - name: Verify and package
         run: |
@@ -167,16 +344,89 @@ jobs:
           cp upstream-lalune/Desktop/Linux/lalune-original-linux-arm64 dist/
           cp upstream-lalune/Core/DeployManager/target/aarch64-unknown-linux-gnu/release/deploy-manager dist/
           cp -a server-assets dist/server-assets
+          test -s dist/server-assets/csqtt-lalune-linux-arm64
+          test -s dist/server-assets/csqtt-lalune-help.txt
+          test -x dist/server-assets/install-csqtt-lalune.sh
+          test -x dist/server-assets/uninstall-csqtt-lalune.sh
+          bash -n dist/server-assets/install-csqtt-lalune.sh
+          bash -n dist/server-assets/uninstall-csqtt-lalune.sh
+          (cd "$GITHUB_WORKSPACE" && sha256sum -c server-assets/SHA256SUMS)
+          ! grep -Fq 'starts_with("30001:")' server-source/rust-server/proxy_route.rs
+          ! grep -Fq 'fwmark 0x7531' server-source/rust-server/proxy_route.rs
+          ! grep -Fq 'lookup 30001' server-source/rust-server/proxy_route.rs
+          ! grep -Fq 'starts_with("1066:")' server-source/rust-server/proxy_route.rs
+          ! grep -Fq 'lookup 1066' server-source/rust-server/proxy_route.rs
+          ! grep -Fq 'fwmark 0x422' server-source/rust-server/proxy_route.rs
+          ! grep -Fq 'route flush cache' server-source/rust-server/proxy_route.rs
+          grep -Fq 'csqtt-lalune0' server-source/rust-server/net_setup.rs
+          grep -Fq '10.67.68.0/24' server-source/rust-server/tun_device.rs
+          ! grep -R -nE 'csqtt1|10\\.66\\.67' server-source/rust-server --include='*.rs'
+          test -s dist/server-assets/LaLuneTokenFetcher_Linux_ARM64.zip
+          test -s dist/server-assets/install-vk-chromium.sh
           cp adapt/csqtt-panel-preview.html dist/csqtt-panel-preview.html
           mkdir -p dist/web-dist
           cp adapt/csqtt-panel-preview.html dist/web-dist/index.html
           cp adaptation-source.sha256 dist/
           cp protocols-source.sha256 dist/
           printf '%s\n' 'e4a6d08b63aef6025bf8ad8f77da660ea552e04b' > dist/UPSTREAM_COMMIT
-          sha256sum dist/lalune-original-linux-arm64 | tee dist/SHA256SUMS
+          (cd dist && sha256sum lalune-original-linux-arm64 > SHA256SUMS && sha256sum -c SHA256SUMS)
           tar -C dist -czf lalune-original-linux-arm64.tar.gz .
       - uses: actions/upload-artifact@v4
         with:
           name: lalune-original-linux-arm64
           path: lalune-original-linux-arm64.tar.gz
           if-no-files-found: error
+
+      - name: Build minimal isolated NanoPi deployment package
+        run: |
+          set -euxo pipefail
+          rm -rf dist-csqtt-lalune
+          mkdir -p dist-csqtt-lalune
+          install -m 0755 server-assets/csqtt-lalune-linux-arm64 dist-csqtt-lalune/
+          install -m 0755 server-assets/install-csqtt-lalune.sh dist-csqtt-lalune/
+          install -m 0755 server-assets/uninstall-csqtt-lalune.sh dist-csqtt-lalune/
+          cat > dist-csqtt-lalune/README.txt <<'EOF'
+          CSQTT LaLune isolated ARM64 deployment package
+          
+          CONTENTS
+          - csqtt-lalune-linux-arm64: isolated ARM64 server binary
+          - install-csqtt-lalune.sh: fail-closed installer
+          - uninstall-csqtt-lalune.sh: scoped uninstaller; preserves config/state/logs by default
+          
+          SAFETY
+          - Do not run upstream deploy.sh or the full desktop bundle's deploy manager for this service.
+          - This package is for Linux ARM64 with systemd, iproute2, iptables-save and ss.
+          - Dedicated resources: csqtt-lalune.service, UDP 47000, TCP 47002, TUN csqtt-lalune0,
+            subnet 10.67.68.0/24, policy tables 47001/47066, marks 0x6741/0x6742.
+          - Installer refuses occupied ports, existing TUN interfaces, conflicting policy identifiers,
+            and unowned paths. It does not stop or modify generic CSQTT services.
+          - Uninstall without --purge preserves /etc/csqtt-lalune, /var/lib/csqtt-lalune and
+            /var/log/csqtt-lalune.
+          
+          VALIDATION STATUS
+          The isolated binary has passed an ARM64 Debian system-VM install/listener/uninstall lifecycle
+          and route-preservation test. This does not prove end-to-end peer authentication or user traffic.
+          Do not deploy to production until those tests and explicit operator approval are complete.
+          EOF
+          (
+            cd dist-csqtt-lalune
+            sha256sum csqtt-lalune-linux-arm64 install-csqtt-lalune.sh uninstall-csqtt-lalune.sh README.txt > SHA256SUMS
+            sha256sum -c SHA256SUMS
+            ! find . -maxdepth 1 -iname '*deploy.sh' | grep -q .
+            ! find . -maxdepth 1 -iname '*deploy-manager*' | grep -q .
+          )
+          tar -C dist-csqtt-lalune -czf csqtt-lalune-nanopi-arm64-isolated.tar.gz .
+          tar -tzf csqtt-lalune-nanopi-arm64-isolated.tar.gz | sort
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: csqtt-lalune-nanopi-arm64-isolated
+          path: csqtt-lalune-nanopi-arm64-isolated.tar.gz
+          if-no-files-found: error
+
+
+
+  arm64-system-vm:
+    name: Test real CSQTT artifact in ARM64 system VM
+    needs: build
+    uses: ./.github/workflows/csqtt-lalune-arm64-vm-test.yml

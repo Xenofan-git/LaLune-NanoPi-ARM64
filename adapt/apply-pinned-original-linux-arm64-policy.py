@@ -286,6 +286,49 @@ const directMark = "0x4c4c"
 const directRulePref = "22010"
 const directNftPath = "/run/lalune-direct.nft"
 const directDnsmasqPath = "/etc/dnsmasq.d/lalune-direct.conf"
+const directDnsmasqMain = "/etc/dnsmasq.conf"
+const directDnsmasqInclude = "conf-file=/etc/dnsmasq.d/lalune-direct.conf"
+
+func writeDirectFileAtomic(path string, data []byte, mode os.FileMode) error {
+	tmp := path + ".lalune-tmp"
+	if err := os.WriteFile(tmp, data, mode); err != nil { return err }
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func ensureDirectDnsmasqInclude() error {
+	data, err := os.ReadFile(directDnsmasqMain)
+	if err != nil { return fmt.Errorf("чтение %s: %w", directDnsmasqMain, err) }
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == directDnsmasqInclude { return nil }
+	}
+	content := strings.TrimRight(string(data), "\n") + "\n" + directDnsmasqInclude + "\n"
+	if err := writeDirectFileAtomic(directDnsmasqMain, []byte(content), 0644); err != nil {
+		return fmt.Errorf("обновление %s: %w", directDnsmasqMain, err)
+	}
+	return nil
+}
+
+func removeDirectDnsmasqInclude() (bool, error) {
+	data, err := os.ReadFile(directDnsmasqMain)
+	if err != nil { return false, fmt.Errorf("чтение %s: %w", directDnsmasqMain, err) }
+	lines := strings.Split(string(data), "\n")
+	out := make([]string, 0, len(lines))
+	changed := false
+	for _, line := range lines {
+		if strings.TrimSpace(line) == directDnsmasqInclude { changed = true; continue }
+		out = append(out, line)
+	}
+	if !changed { return false, nil }
+	content := strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
+	if err := writeDirectFileAtomic(directDnsmasqMain, []byte(content), 0644); err != nil {
+		return false, fmt.Errorf("обновление %s: %w", directDnsmasqMain, err)
+	}
+	return true, nil
+}
 
 func splitDirectList(raw string) []string {
 \treturn strings.FieldsFunc(raw, func(r rune) bool {
@@ -294,15 +337,11 @@ func splitDirectList(raw string) []string {
 }
 
 func validDirectDomain(s string) bool {
-\tif s == "" || strings.ContainsAny(s, "/#:=<>\"'\\\\") {
+\tif s == "" || strings.ContainsAny(s, "/#:=<>\\"'\\\\") {
 \t\treturn false
 \t}
-\tif strings.HasPrefix(s, "*.") {
-\t\ts = strings.TrimPrefix(s, "*.")
-\t}
-\treturn strings.Contains(s, ".") && regexp.MustCompile("^[A-Za-z0-9._*-]+$").MatchString(s)
+\treturn regexp.MustCompile("(?i)^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[.])+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$").MatchString(s)
 }
-
 func normalizeDirectIPs(raw string) ([]string, error) {
 \tvar out []string
 \tfor _, token := range splitDirectList(raw) {
@@ -320,47 +359,78 @@ func normalizeDirectIPs(raw string) ([]string, error) {
 \t\tif err != nil || n.IP.To4() == nil {
 \t\t\treturn nil, fmt.Errorf("некорректный IPv4/CIDR: %s", token)
 \t\t}
+\t\tones, _ := n.Mask.Size()
+\t\tif ones == 0 {
+\t\t\treturn nil, fmt.Errorf("CIDR по умолчанию запрещён для Direct: %s", token)
+\t\t}
 \t\tout = append(out, n.String())
 \t}
 \treturn out, nil
 }
 
+func prepareDirectPlan(domainsRaw, ipsRaw string) ([]string, []string, bool, error) {
+\tdomains := splitDirectList(domainsRaw)
+\tips, err := normalizeDirectIPs(ipsRaw)
+\tif err != nil { return nil, nil, false, err }
+\tfor _, domain := range domains {
+\t\tif !validDirectDomain(domain) {
+\t\t\treturn nil, nil, false, fmt.Errorf("некорректный домен Direct: %s", domain)
+\t\t}
+\t}
+\treturn domains, ips, len(domains) > 0, nil
+}
+
 func (t *LinuxTun) cleanupDirectRoutingLocked() {
 \tt.app.runSudo("ip rule del pref " + directRulePref + " 2>/dev/null || true")
 \tt.app.runSudo("nft delete table inet lalune_direct 2>/dev/null || true")
+\tincludeRemoved, includeErr := removeDirectDnsmasqInclude()
+\tconfigRemoved := false
 \tif _, err := os.Stat(directDnsmasqPath); err == nil {
 \t\t_ = os.Remove(directDnsmasqPath)
-\t\t_ = t.app.runSudo("systemctl restart dnsmasq")
+\t\tconfigRemoved = true
+\t}
+\tif includeErr != nil {
+\t\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Не удалось убрать dnsmasq include: %v", includeErr))
+\t} else if includeRemoved || configRemoved {
+\t\tif err := t.app.runSudo("systemctl restart dnsmasq"); err != nil {
+\t\t\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Не удалось перезапустить dnsmasq после очистки: %v", err))
+\t\t}
 \t}
 \t_ = os.Remove(directNftPath)
 }
 
-func (t *LinuxTun) applyDirectRoutingLocked() error {
-\tsettings := t.app.core.GetSettings()
-\tdomains := splitDirectList(settings.DirectDomains)
-\tips, err := normalizeDirectIPs(settings.DirectIPs)
-\tif err != nil {
-\t\treturn err
-\t}
-
-\tfor _, d := range domains {
-\t\tif !validDirectDomain(d) {
-\t\t\treturn fmt.Errorf("некорректный домен Direct: %s", d)
+func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
+\t// Once live state starts changing, any subsequent error must leave Direct
+\t// fully disabled rather than partially applied. TUN/CSQTT itself is untouched.
+\tmutating := false
+\tdefer func() {
+\t\tif retErr != nil && mutating {
+\t\t\tt.cleanupDirectRoutingLocked()
+\t\t\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Частичное применение отменено; Direct очищен: %v", retErr))
 \t\t}
-\t}
+\t}()
+\tsettings := t.app.core.GetSettings()
+\tdomains, ips, needsDnsmasq, err := prepareDirectPlan(settings.DirectDomains, settings.DirectIPs)
+\tif err != nil { return err }
 
+\tmutating = true
 \tt.app.runSudo("ip rule del pref " + directRulePref + " 2>/dev/null || true")
 \tt.app.runSudo("nft delete table inet lalune_direct 2>/dev/null || true")
+\tincludeRemoved, includeErr := removeDirectDnsmasqInclude()
+\tif includeErr != nil { return includeErr }
 \thadDnsmasq := false
 \tif _, err := os.Stat(directDnsmasqPath); err == nil {
 \t\thadDnsmasq = true
-\t\t_ = os.Remove(directDnsmasqPath)
+\t\tif err := os.Remove(directDnsmasqPath); err != nil {
+\t\t\treturn fmt.Errorf("удаление Direct dnsmasq-конфига: %w", err)
+\t\t}
 \t}
+\tdnsmasqChanged := includeRemoved || hadDnsmasq
 \t_ = os.Remove(directNftPath)
 
 \tif len(domains) == 0 && len(ips) == 0 {
-\t\tif hadDnsmasq {
-\t\t\t_ = t.app.runSudo("systemctl restart dnsmasq")
+\t\tif dnsmasqChanged {
+\t\t\tif err := t.app.runSudo("systemctl restart dnsmasq"); err != nil { return fmt.Errorf("перезапуск dnsmasq после очистки Direct: %w", err) }
 \t\t}
 \t\treturn nil
 \t}
@@ -379,14 +449,17 @@ func (t *LinuxTun) applyDirectRoutingLocked() error {
 \tnft.WriteString("  }\n")
 \tnft.WriteString("}\n")
 
-\tif err := os.WriteFile(directNftPath, []byte(nft.String()), 0600); err != nil {
-\t\treturn fmt.Errorf("запись nft-конфига: %w", err)
+\tif err := writeDirectFileAtomic(directNftPath, []byte(nft.String()), 0600); err != nil {
+\t\treturn fmt.Errorf("атомарная запись nft-конфига: %w", err)
+\t}
+\tif err := t.app.runSudo("nft -c -f " + directNftPath); err != nil {
+\t\treturn fmt.Errorf("проверка nft direct policy: %w", err)
 \t}
 \tif err := t.app.runSudo("nft -f " + directNftPath); err != nil {
 \t\treturn fmt.Errorf("nft direct policy: %w", err)
 \t}
 
-\tif len(domains) > 0 {
+\tif needsDnsmasq {
 \t\tline := "nftset=/"
 \t\tfor i, d := range domains {
 \t\t\tif i > 0 {
@@ -395,11 +468,18 @@ func (t *LinuxTun) applyDirectRoutingLocked() error {
 \t\t\tline += d
 \t\t}
 \t\tline += "/4#inet#lalune_direct#direct4\n"
-\t\tif err := os.WriteFile(directDnsmasqPath, []byte(line), 0644); err != nil {
-\t\t\treturn fmt.Errorf("запись dnsmasq direct-конфига: %w", err)
+\t\tif err := writeDirectFileAtomic(directDnsmasqPath, []byte(line), 0644); err != nil {
+\t\t\treturn fmt.Errorf("атомарная запись dnsmasq direct-конфига: %w", err)
 \t\t}
+\t\tif err := ensureDirectDnsmasqInclude(); err != nil {
+\t\t\t_ = os.Remove(directDnsmasqPath)
+\t\t\treturn err
+\t\t}
+\t\tdnsmasqChanged = true
+\t}
+\tif dnsmasqChanged {
 \t\tif err := t.app.runSudo("systemctl restart dnsmasq"); err != nil {
-\t\t\treturn fmt.Errorf("перезапуск dnsmasq: %w", err)
+\t\t\treturn fmt.Errorf("перезапуск dnsmasq после изменения Direct: %w", err)
 \t\t}
 \t}
 
@@ -520,4 +600,137 @@ replace_once(
 	return true
 }'''
 )
+
+# The upstream token-fetcher release is Linux x64 only. Bundle a native
+# linux-arm64 build and let Playwright use Debian's system Chromium on NanoPi.
+VTOKEN = UPSTREAM / "Desktop/Libs/vktoken.go"
+replace_once(
+    VTOKEN,
+    'VKTokenFetcherArchive = "LaLuneTokenFetcher_%s.zip"',
+    'VKTokenFetcherArchive = "LaLuneTokenFetcher_%s.zip"\n\tVKTokenFetcherARM64Archive = "LaLuneTokenFetcher_Linux_ARM64.zip"',
+)
+replace_once(
+    VTOKEN,
+    '// EnsureVKTokenFetcher — скачивает и устанавливает LaLuneTokenFetcher.',
+    '''func (a *AppCore) bundledVKTokenFetcherArchive() string {
+    candidates := []string{}
+    if exe, err := os.Executable(); err == nil {
+        candidates = append(candidates, filepath.Join(filepath.Dir(exe), "server-assets", VKTokenFetcherARM64Archive))
+    }
+    candidates = append(candidates, filepath.Join("/usr/local/lib/lalune/server-assets", VKTokenFetcherARM64Archive))
+    for _, candidate := range candidates {
+        if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() && info.Size() > 0 {
+            return candidate
+        }
+    }
+    return ""
+}
+
+// EnsureVKTokenFetcher — скачивает и устанавливает LaLuneTokenFetcher.'''
+)
+replace_once(
+    VTOKEN,
+    'if !DownloadFile(url, zipPath) {',
+    '''if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
+        bundled := a.bundledVKTokenFetcherArchive()
+        if bundled == "" {
+            return false, fmt.Errorf("для NanoPi ARM64 не найден bundled LaLuneTokenFetcher_Linux_ARM64.zip")
+        }
+        data, err := os.ReadFile(bundled)
+        if err != nil {
+            return false, fmt.Errorf("не удалось прочитать ARM64 token fetcher: %w", err)
+        }
+        if err := os.WriteFile(zipPath, data, 0600); err != nil {
+            return false, fmt.Errorf("не удалось подготовить ARM64 token fetcher: %w", err)
+        }
+        archiveName = VKTokenFetcherARM64Archive
+        a.AddLog(fmt.Sprintf("[VK] Использую локальный ARM64 token fetcher: %s", bundled))
+    } else if !DownloadFile(url, zipPath) {'''
+)
+
+
+replace_once(
+    VTOKEN,
+    '"strings"',
+    '"strings"\n\t"net/url"'
+)
+replace_once(
+    VTOKEN,
+    'func (a *AppCore) HasVKToken() bool {',
+    '''func (a *AppCore) SaveVKTokenInput(value string) error {
+    value = strings.TrimSpace(value)
+    token := value
+    if strings.Contains(value, "://") {
+        parsed, err := url.Parse(value)
+        if err != nil { return fmt.Errorf("некорректная ссылка OAuth: %w", err) }
+        token = parsed.Query().Get("access_token")
+        if token == "" && parsed.Fragment != "" {
+            fragment, err := url.ParseQuery(parsed.Fragment)
+            if err != nil { return fmt.Errorf("не удалось разобрать фрагмент OAuth: %w", err) }
+            token = fragment.Get("access_token")
+        }
+    } else if strings.Contains(value, "access_token=") {
+        fragment := strings.TrimPrefix(value, "#")
+        parsed, err := url.ParseQuery(fragment)
+        if err == nil { token = parsed.Get("access_token") }
+    }
+    token = strings.TrimSpace(token)
+    if len(token) < 20 || strings.ContainsAny(token, " \\t\\r\\n") {
+        return fmt.Errorf("не найден корректный access_token; вставьте URL после успешного входа VK или сам токен")
+    }
+    if err := os.MkdirAll(a.appDir, 0700); err != nil {
+        return fmt.Errorf("не удалось создать каталог токена: %w", err)
+    }
+    data, err := json.MarshalIndent(VKTokenJSON{Token: token, SavedAt: time.Now()}, "", "  ")
+    if err != nil { return fmt.Errorf("не удалось сериализовать VK токен: %w", err) }
+    if err := os.WriteFile(a.vkTokenFile(), data, 0600); err != nil {
+        return fmt.Errorf("не удалось сохранить VK токен: %w", err)
+    }
+    if err := os.Chmod(a.vkTokenFile(), 0600); err != nil {
+        return fmt.Errorf("не удалось ограничить права VK токена: %w", err)
+    }
+    return nil
+}
+
+func (a *AppCore) HasVKToken() bool {'''
+)
+
+FETCHER = UPSTREAM / "Core/LaLuneTokenFetcher/Playwright/PlaywrightTokenFetcher.cs"
+replace_once(
+    FETCHER,
+    '                    Headless = false,',
+    '                    Headless = OperatingSystem.IsLinux(),\n                    ExecutablePath = ResolveChromiumExecutable(),'
+)
+replace_once(
+    FETCHER,
+    '    private static bool IsBrowserMissing(PlaywrightException ex)',
+    '''    private static string? ResolveChromiumExecutable()
+    {
+        if (!OperatingSystem.IsLinux() ||
+            System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture != System.Runtime.InteropServices.Architecture.Arm64)
+        {
+            return null;
+        }
+
+        var configured = Environment.GetEnvironmentVariable("PLAYWRIGHT_CHROMIUM_EXECUTABLE");
+        if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
+        {
+            return configured;
+        }
+
+        foreach (var candidate in new[] { "/usr/bin/chromium", "/usr/bin/chromium-browser" })
+        {
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new ChromiumMissingException(
+            "Для VK-авторизации на NanoPi ARM64 нужен системный Chromium. Установите пакет chromium.");
+    }
+
+    private static bool IsBrowserMissing(PlaywrightException ex)'''
+)
+
 print('Direct domain/IP bypass and explicit selection clearing adaptations applied')

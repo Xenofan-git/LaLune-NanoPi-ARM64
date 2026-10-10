@@ -25,6 +25,16 @@ import (
 const headlessListen = "127.0.0.1:1062"
 const panelListen = "0.0.0.0:1061"
 
+// Set by the pinned ARM64 build workflow through Go -ldflags.
+var (
+    buildCommit = "unknown"
+    buildRunID = "unknown"
+    buildRunNumber = "unknown"
+    buildDate = "unknown"
+    buildBranch = "unknown"
+    buildUpstreamCommit = "unknown"
+)
+
 //go:embed frontend
 var panelAssets embed.FS
 
@@ -193,8 +203,14 @@ func apiHandler(app *App) http.Handler {
         writeJSON(w, map[string]any{
             "api": 1,
             "backend": "original-go",
-            "core": "unknown",
+            "core": "csqtt-server/2.1.9",
             "ui": "0.6.0",
+            "commit": buildCommit,
+            "buildRun": buildRunID,
+            "buildNumber": buildRunNumber,
+            "buildDate": buildDate,
+            "buildBranch": buildBranch,
+            "upstreamCommit": buildUpstreamCommit,
         })
     })
 
@@ -370,6 +386,22 @@ func apiHandler(app *App) http.Handler {
     mux.HandleFunc("/vk/login", func(w http.ResponseWriter, r *http.Request) {
         if !method(w, r, http.MethodPost) { return }
         writeJSON(w, map[string]bool{"ok": app.LoginVK()})
+    })
+    mux.HandleFunc("/vk/import", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodPost) { return }
+        if !privateClient(r) { http.Error(w, "forbidden", http.StatusForbidden); return }
+        var req struct { Token string `json:"token"` }
+        if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&req); err != nil {
+            w.WriteHeader(http.StatusBadRequest)
+            writeJSON(w, map[string]any{"ok": false, "error": "Некорректный запрос"})
+            return
+        }
+        if err := app.core.SaveVKTokenInput(req.Token); err != nil {
+            w.WriteHeader(http.StatusBadRequest)
+            writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+            return
+        }
+        writeJSON(w, map[string]bool{"ok": true})
     })
     mux.HandleFunc("/vk/delete", func(w http.ResponseWriter, r *http.Request) {
         if !method(w, r, http.MethodPost) { return }
