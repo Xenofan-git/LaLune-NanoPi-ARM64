@@ -10,16 +10,46 @@ on:
       - "server-assets/uninstall-csqtt-lalune.sh"
       - "adapt/test-csqtt-lalune-installer.sh"
       - ".github/workflows/csqtt-lalune-arm64-vm-test.yml"
+  workflow_run:
+    workflows:
+      - Build pinned original LaLune Linux ARM64
+    types: [completed]
+    branches:
+      - feature/csqtt-direct-route-tab
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   arm64-system-vm:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download actual ARM64 build artifact
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: lalune-original-linux-arm64
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: vm/artifact
+
+      - name: Extract actual isolated server and installer
+        if: github.event_name == 'workflow_run'
+        run: |
+          set -euxo pipefail
+          test -s vm/artifact/lalune-original-linux-arm64.tar.gz
+          mkdir -p vm/real
+          tar -xzf vm/artifact/lalune-original-linux-arm64.tar.gz -C vm/real
+          test -s vm/real/server-assets/csqtt-lalune-linux-arm64
+          test -x vm/real/server-assets/install-csqtt-lalune.sh
+          test -x vm/real/server-assets/uninstall-csqtt-lalune.sh
+          file vm/real/server-assets/csqtt-lalune-linux-arm64
+          sha256sum vm/real/server-assets/csqtt-lalune-linux-arm64
 
       - name: Install QEMU system emulator and cloud-init image tools
         run: |
@@ -94,6 +124,17 @@ jobs:
           #!/bin/sh
           exec /bin/sleep infinity
           EOF
+          if [ -s vm/real/server-assets/csqtt-lalune-linux-arm64 ]; then
+            echo "Using the real ARM64 CSQTT LaLune server from the completed build artifact"
+            INSTALLER=vm/real/server-assets/install-csqtt-lalune.sh
+            UNINSTALLER=vm/real/server-assets/uninstall-csqtt-lalune.sh
+            BINARY=vm/real/server-assets/csqtt-lalune-linux-arm64
+          else
+            echo "No build artifact for push/manual run; exercising installer isolation with a stub"
+            INSTALLER=server-assets/install-csqtt-lalune.sh
+            UNINSTALLER=server-assets/uninstall-csqtt-lalune.sh
+            BINARY=vm/guest-binary.sh
+          fi
           for unit in csqtt.service csqtt-47000.service csqtt-47000-netns.service; do
             cat > "vm/$unit" <<EOF
           [Unit]
@@ -107,12 +148,16 @@ jobs:
           WantedBy=multi-user.target
           EOF
           done
-          $SCP server-assets/install-csqtt-lalune.sh server-assets/uninstall-csqtt-lalune.sh vm/guest-binary.sh vm/csqtt.service vm/csqtt-47000.service vm/csqtt-47000-netns.service tester@127.0.0.1:/home/tester/
+          $SCP "$INSTALLER" "$UNINSTALLER" "$BINARY" vm/csqtt.service vm/csqtt-47000.service vm/csqtt-47000-netns.service tester@127.0.0.1:/home/tester/
           $SSH 'set -eux
             sudo install -d -m 0755 /opt/lalune-package
             sudo install -m 0755 /home/tester/install-csqtt-lalune.sh /opt/lalune-package/install-csqtt-lalune.sh
             sudo install -m 0755 /home/tester/uninstall-csqtt-lalune.sh /opt/lalune-package/uninstall-csqtt-lalune.sh
-            sudo install -m 0755 /home/tester/guest-binary.sh /opt/lalune-package/csqtt-lalune-linux-arm64
+            if [ -f /home/tester/csqtt-lalune-linux-arm64 ]; then
+              sudo install -m 0755 /home/tester/csqtt-lalune-linux-arm64 /opt/lalune-package/csqtt-lalune-linux-arm64
+            else
+              sudo install -m 0755 /home/tester/guest-binary.sh /opt/lalune-package/csqtt-lalune-linux-arm64
+            fi
             sudo install -m 0644 /home/tester/csqtt.service /etc/systemd/system/csqtt.service
             sudo install -m 0644 /home/tester/csqtt-47000.service /etc/systemd/system/csqtt-47000.service
             sudo install -m 0644 /home/tester/csqtt-47000-netns.service /etc/systemd/system/csqtt-47000-netns.service
