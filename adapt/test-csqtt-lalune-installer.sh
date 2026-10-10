@@ -151,6 +151,17 @@ grep -q 'is a symlink' "$ROOT/out"
 [[ -z "$(find "$ROOT/external-log" -mindepth 1 -print -quit)" ]]
 rm "$ROOT/host/var/log/csqtt-lalune"
 
+# Case 1h: an ownership-marker symlink cannot authorize writes into an external file.
+mkdir -p "$ROOT/host/etc/csqtt-lalune" "$ROOT/external-marker-target"
+printf 'CSQTT-LALUNE-MANAGED-V1\\n' > "$ROOT/external-marker-target/marker"
+ln -s "$ROOT/external-marker-target/marker" "$ROOT/host/etc/csqtt-lalune/.managed-by-lalune"
+if "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
+  echo "FAIL: installer trusted a symlinked ownership marker" >&2; exit 1
+fi
+grep -q 'regular ownership marker' "$ROOT/out"
+grep -Fxq 'CSQTT-LALUNE-MANAGED-V1' "$ROOT/external-marker-target/marker"
+rm -rf "$ROOT/host/etc/csqtt-lalune"
+
 # Case 2: pre-existing LaLune policy IDs are not adopted or modified.
 if IP_RULES='47001: from all fwmark 0x6741/0x6741 lookup 47001' "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
   echo "FAIL: installer accepted pre-existing policy IDs" >&2; exit 1
