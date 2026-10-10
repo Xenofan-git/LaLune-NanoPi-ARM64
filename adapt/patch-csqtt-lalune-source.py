@@ -73,6 +73,21 @@ for old, new in [
 ]:
     sources["proxy"] = sources["proxy"].replace(old, new)
 
+# Flushing the kernel route cache is host-global and can disturb unrelated
+# routing domains. LaLune must mutate only its explicitly numbered policy tables.
+global_route_cache_flush = 'command_output("ip", &["route", "flush", "cache"])'
+global_route_cache_flush_count = sources["proxy"].count(global_route_cache_flush)
+if global_route_cache_flush_count != 2:
+    raise SystemExit(
+        "proxy_route.rs: expected exactly two global route-cache flushes to remove, "
+        f"found {global_route_cache_flush_count}"
+    )
+sources["proxy"] = sources["proxy"].replace(
+    '    let _ = command_output("ip", &["route", "flush", "cache"]).await;\n', ""
+)
+if global_route_cache_flush in sources["proxy"]:
+    raise SystemExit("global route-cache flush remains in proxy_route.rs")
+
 # Rule cleanup is marker-based, so the TPROXY comment must be unique as well.
 sources["proxy"] = sources["proxy"].replace("CSQTT_TPROXY", "CSQTT_LALUNE_TPROXY")
 
@@ -100,7 +115,7 @@ for marker in [
 ]:
     if marker not in sources["proxy"]:
         raise SystemExit(f"dedicated proxy routing namespace missing: {marker}")
-for forbidden in ['"1066"', '"30001"', '"0x422"', '"0x7531/0x7531"', 'CSQTT_TPROXY', 'CSQTT_LOCAL_SOCKS', 'CSQTT_SOCKS']:
+for forbidden in ['"1066"', '"30001"', '"0x422"', '"0x7531/0x7531"', 'CSQTT_TPROXY', 'CSQTT_LOCAL_SOCKS', 'CSQTT_SOCKS', 'route flush cache']:
     if forbidden in sources["proxy"]:
-        raise SystemExit(f"shared proxy-routing marker remains: {forbidden}")
-print("Patched CSQTT v2.1.9: TUN=csqtt-lalune0, subnet=10.67.68.0/24, isolated proxy policy namespace")
+        raise SystemExit(f"shared proxy-routing operation/marker remains: {forbidden}")
+print("Patched CSQTT v2.1.9: TUN=csqtt-lalune0, subnet=10.67.68.0/24, isolated policy tables; no global route-cache flush")
