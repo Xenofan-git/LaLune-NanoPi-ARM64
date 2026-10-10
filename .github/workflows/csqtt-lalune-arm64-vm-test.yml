@@ -153,9 +153,21 @@ jobs:
             done
             sudo ss -H -lun 'sport = :47000' | grep -q .
             sudo ss -H -ltn 'sport = :47002' | grep -q .
-            # Integration smoke: verify the web listener speaks HTTP, the UDP socket
-            # accepts a datagram without crashing the service, and capture diagnostics.
-            # This is deliberately NOT reported as peer authentication or tunnel traffic.
+            # Configure a disposable, deterministic protocol credential in this VM only.
+            # The fixture is the upstream CSQTT-WIRE-2 encrypted GETCONF test packet
+            # for password wire-password/device wire-device, not a production secret.
+            sudo mkdir -p /etc/systemd/system/csqtt-lalune.service.d
+            sudo tee /etc/systemd/system/csqtt-lalune.service.d/ci-protocol-test.conf >/dev/null <<'EOF'
+          [Service]
+          ExecStart=
+          ExecStart=/usr/local/bin/csqtt-lalune --listen 0.0.0.0:47000 --web-port 47002 --config-dir /etc/csqtt-lalune --password wire-password --device-id wire-device
+          EOF
+            sudo systemctl daemon-reload
+            sudo systemctl restart csqtt-lalune.service
+            for attempt in $(seq 1 20); do
+              if sudo ss -H -lun 'sport = :47000' | grep -q . && sudo ss -H -ltn 'sport = :47002' | grep -q .; then break; fi
+              sleep 1
+            done
             sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-before-probe.log
             python3 - <<'PY'
           import socket
@@ -164,25 +176,46 @@ jobs:
           from urllib.error import HTTPError, URLError
 
           # The test server intentionally uses a self-signed certificate. Disable
-          # certificate verification only for this loopback smoke test; production
-          # certificate validation is not changed.
+          # verification only for this loopback CI probe.
           context = ssl._create_unverified_context()
           try:
               with urllib.request.urlopen("https://127.0.0.1:47002/", timeout=5, context=context) as response:
-                  print("WEB_HTTP_STATUS", response.status)
+                  print("WEB_HTTPS_STATUS", response.status)
           except HTTPError as exc:
-              print("WEB_HTTP_STATUS", exc.code)
+              print("WEB_HTTPS_STATUS", exc.code)
           except (URLError, TimeoutError, OSError) as exc:
               raise SystemExit(f"web listener did not return HTTPS: {exc}")
 
-          # Exercise the UDP receive path with a bounded invalid probe. The server
-          # must remain alive; this does not emulate a valid CSQTT peer handshake.
+          # Real server-side authentication smoke: send the pinned upstream
+          # encrypted GETCONF fixture for password wire-password and require the
+          # server to return an encrypted protocol response, not merely accept UDP.
+          fixture = bytes.fromhex(
+              "b06f77881122334410203040bede0002325566775199aa009e2a813c2df794"
+              "354293ade7b0b8ef4aa6297cf3cc8b0a372342fbd678c10260dc543f833826"
+              "2292992b12600eaa12d0d3155fa7179b62cd34ac41afb32db0ab7f6dced9"
+              "e1bb0620daa26d1743f2c25af6bd9ade9901"
+          )
           sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-          sock.settimeout(2)
+          sock.settimeout(5)
+          sock.sendto(fixture, ("127.0.0.1", 47000))
+          try:
+              response, peer = sock.recvfrom(65535)
+          except socket.timeout:
+              raise SystemExit("valid encrypted CSQTT GETCONF fixture received no server response")
+          finally:
+              sock.close()
+          if len(response) < 32:
+              raise SystemExit(f"CSQTT response too short: {len(response)} bytes")
+          print("CSQTT_AUTH_HANDSHAKE_RESPONSE", len(response), "bytes from", peer)
+
+          # A malformed datagram must not stop the real server after handshake.
+          sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
           sock.sendto(b"CSQTT_LALUNE_INVALID_SMOKE_PROBE", ("127.0.0.1", 47000))
           sock.close()
-          print("UDP_DATAGRAM_SENT")
+          print("UDP_INVALID_PROBE_SENT")
           PY
+            sudo systemctl is-active --quiet csqtt-lalune.service
+            sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-after-probe.log
             sudo systemctl is-active --quiet csqtt-lalune.service
             sleep 1
             sudo systemctl is-active --quiet csqtt-lalune.service
