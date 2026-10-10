@@ -39,7 +39,7 @@ if [[ -e "$UNIT_FILE" ]] && ! grep -Fq 'Description=CSQTT LaLune isolated datapl
   die "$UNIT_FILE already exists and is not our service"
 fi
 if [[ -e "$ETC" ]]; then
-  [[ -f "$ETC/.managed-by-lalune" ]] || die "$ETC exists without our ownership marker; refusing to adopt it"
+  [[ -f "$ETC/.managed-by-lalune" && ! -L "$ETC/.managed-by-lalune" ]] || die "$ETC exists without a regular ownership marker; refusing to adopt it"
   [[ "$(cat "$ETC/.managed-by-lalune")" == "$MARKER" ]] || die "ownership marker mismatch"
 fi
 if [[ -e "$BIN" && ! -e "$UNIT_FILE" ]]; then
@@ -50,7 +50,7 @@ if [[ -e "$LIB" && ! -f "$LIB/.managed-by-lalune" ]]; then
 fi
 for owned_dir in "$STATE" "$LOG"; do
   if [[ -e "$owned_dir" ]]; then
-    [[ -f "$owned_dir/.managed-by-lalune" ]] || die "$owned_dir exists without our ownership marker; refusing to adopt it"
+    [[ -f "$owned_dir/.managed-by-lalune" && ! -L "$owned_dir/.managed-by-lalune" ]] || die "$owned_dir exists without a regular ownership marker; refusing to adopt it"
     [[ "$(cat "$owned_dir/.managed-by-lalune")" == "$MARKER" ]] || die "$owned_dir ownership marker mismatch"
   fi
 done
