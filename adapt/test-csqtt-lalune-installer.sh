@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -Eeuo pipefail
+set -Eeuxo pipefail
 
 # Disposable, rootless-compatible harness: rewrite installer-owned absolute
 # paths into a temp root and shadow system commands with deterministic stubs.
