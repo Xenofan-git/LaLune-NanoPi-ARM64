@@ -136,7 +136,8 @@ jobs:
             sudo systemctl is-active --quiet csqtt-47000.service
             sudo systemctl is-active --quiet csqtt-47000-netns.service
             sudo sha256sum -c /tmp/production-units.before
-            test -f /etc/csqtt-lalune/.managed-by-lalune
+            sudo test -f /etc/csqtt-lalune/.managed-by-lalune
+            sudo grep -Fxq CSQTT-LALUNE-MANAGED-V1 /etc/csqtt-lalune/.managed-by-lalune
             echo ARM64_SYSTEM_VM_LIFECYCLE_PASS'
           
       - name: Upload guest diagnostics on failure
