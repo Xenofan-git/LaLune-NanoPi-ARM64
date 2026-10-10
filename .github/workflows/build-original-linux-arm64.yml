@@ -272,7 +272,7 @@ jobs:
           set -euxo pipefail
           python3 adapt/patch-csqtt-lalune-source.py
           grep -Fq 'server_encrypted_tunconf_roundtrips_through_real_client_parser' server-source/rust-server/protocol.rs
-          grep -Fq '#[path = "../rust-client/protocol.rs"]' server-source/rust-server/protocol.rs
+          grep -Fq 'include!("../rust-client/protocol.rs");' server-source/rust-server/protocol.rs
           ! grep -R -nE 'csqtt1|10\\.66\\.67' server-source/rust-server --include='*.rs'
           grep -Fq 'csqtt-lalune0' server-source/rust-server/net_setup.rs
           grep -Fq '10.67.68.0/24' server-source/rust-server/tun_device.rs
