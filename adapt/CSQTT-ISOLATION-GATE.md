@@ -48,3 +48,26 @@ This trace is analysis of pinned source, not a passing TUNCONF/data-plane test. 
 - This is **not** proof of client-side `TUNCONF` handling or real IP packet delivery through the TUN dataplane. The test fixture currently validates only the encrypted setup request/response at UDP level.
 - Before enabling deployment, extend the VM test to seed a disposable device/password configuration, assert a decoded `TUNCONF` containing the expected test IP/DNS, and then run a two-ended data-plane test that sends a known IP packet through an authenticated CSQTT session and verifies delivery on the opposite TUN/UDP endpoint. The test must fail if it merely observes an open port or a non-empty encrypted response.
 - NanoPi installation remains unauthorized and must not be attempted as part of these CI steps.
+
+## Comparative source audit (2026-10-10)
+
+Pinned references used for comparison:
+
+- LaLune desktop Linux implementation: `Endlad2/LaLune@e4a6d08b63aef6025bf8ad8f77da660ea552e04b`, file `Desktop/Linux/app_linux.go`.
+- CSQTT server: `amurcanov/csqtt@v2.1.9`, files `app/src/main/assets/deploy.sh`, `rust-server/net_setup.rs`, `rust-server/tun_device.rs`, and `rust-server/protocol.rs`.
+- Integration patcher: `adapt/patch-csqtt-lalune-source.py` in this repository.
+
+### Confirmed differences
+
+1. Original LaLune Linux client creates `csqtt0`, appends DNS servers to the host `/etc/resolv.conf`, and installs `default dev csqtt0`. That behavior must not be copied into the NanoPi gateway path: it changes host-wide routing/DNS rather than confining client traffic to a dedicated policy route.
+2. Original CSQTT v2.1.9 server hard-codes `csqtt1`, `10.66.67.1`, and `10.66.67.0/24` across more than one Rust module. The integration patcher changes both TUN definitions, the subnet prefix used by the route table, model-side subnet references, and protocol test fixtures; changing only `net_setup.rs` would be incomplete.
+3. The upstream proxy-routing module uses fixed policy table/priority values, packet marks, and iptables comments. The patcher assigns LaLune-specific values (`47001`, `47066`, `0x6741`, `0x6742`) and LaLune-prefixed comments, and removes global `ip route flush cache` operations. This is a source-level adaptation; runtime ownership behavior still requires behavioral tests.
+4. The original server's configuration protocol and the current VM smoke test are different levels of validation. The VM sends the pinned legacy `CSQTT-WIRE-2` fixture and checks only that the server returns at least 32 bytes. It does not prove the current `CSQTT-WIRE-3` configuration request, authenticated `TUNCONF` decoding, or IP packet forwarding.
+
+### Newly explicit acceptance tests still required
+
+- Run the upstream Rust unit tests against the patched server source (including protocol/configuration tests) and verify the subnet-related tests have been adapted rather than silently skipped.
+- Add a test that demonstrates the current client configuration request is accepted and that the response is decoded into the expected test IP/DNS using the real session keys.
+- Add a two-ended test that sends a valid IPv4 packet through an authenticated session and observes the same packet at the intended peer TUN/UDP endpoint.
+- Verify route-rule/firewall cleanup by comparing exact pre-existing entries before and after start/stop, including an adversarial rule with a similar but non-identical comment. Text grep checks alone are not sufficient.
+- Keep the deployment gate closed until these tests pass. Do not run the package on NanoPi as part of this audit.
