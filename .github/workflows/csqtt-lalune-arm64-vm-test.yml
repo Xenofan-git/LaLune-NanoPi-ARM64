@@ -153,6 +153,37 @@ jobs:
             done
             sudo ss -H -lun 'sport = :47000' | grep -q .
             sudo ss -H -ltn 'sport = :47002' | grep -q .
+            # Integration smoke: verify the web listener speaks HTTP, the UDP socket
+            # accepts a datagram without crashing the service, and capture diagnostics.
+            # This is deliberately NOT reported as peer authentication or tunnel traffic.
+            sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-before-probe.log
+            python3 - <<'PY'
+          import socket
+          import urllib.request
+          from urllib.error import HTTPError, URLError
+
+          # Any HTTP status (including 4xx/5xx) proves an HTTP response was received.
+          try:
+              with urllib.request.urlopen("http://127.0.0.1:47002/", timeout=5) as response:
+                  print("WEB_HTTP_STATUS", response.status)
+          except HTTPError as exc:
+              print("WEB_HTTP_STATUS", exc.code)
+          except (URLError, TimeoutError, OSError) as exc:
+              raise SystemExit(f"web listener did not return HTTP: {exc}")
+
+          # Exercise the UDP receive path with a bounded invalid probe. The server
+          # must remain alive; this does not emulate a valid CSQTT peer handshake.
+          sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+          sock.settimeout(2)
+          sock.sendto(b"CSQTT_LALUNE_INVALID_SMOKE_PROBE", ("127.0.0.1", 47000))
+          sock.close()
+          print("UDP_DATAGRAM_SENT")
+          PY
+            sudo systemctl is-active --quiet csqtt-lalune.service
+            sleep 1
+            sudo systemctl is-active --quiet csqtt-lalune.service
+            sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-after-probe.log
+            diff -u /tmp/csqtt-lalune-before-probe.log /tmp/csqtt-lalune-after-probe.log > /tmp/csqtt-lalune-probe-diff.log || true
             # Installing the isolated service must not change the main/default route table.
             sudo ip -4 route show table main > /tmp/main-routes.after-install
             # The dedicated TUN subnet route is expected while the isolated service is running.
