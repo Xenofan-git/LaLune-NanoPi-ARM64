@@ -375,6 +375,54 @@ jobs:
           path: lalune-original-linux-arm64.tar.gz
           if-no-files-found: error
 
+      - name: Build minimal isolated NanoPi deployment package
+        run: |
+          set -euxo pipefail
+          rm -rf dist-csqtt-lalune
+          mkdir -p dist-csqtt-lalune
+          install -m 0755 server-assets/csqtt-lalune-linux-arm64 dist-csqtt-lalune/
+          install -m 0755 server-assets/install-csqtt-lalune.sh dist-csqtt-lalune/
+          install -m 0755 server-assets/uninstall-csqtt-lalune.sh dist-csqtt-lalune/
+          cat > dist-csqtt-lalune/README.txt <<'EOF'
+          CSQTT LaLune isolated ARM64 deployment package
+          
+          CONTENTS
+          - csqtt-lalune-linux-arm64: isolated ARM64 server binary
+          - install-csqtt-lalune.sh: fail-closed installer
+          - uninstall-csqtt-lalune.sh: scoped uninstaller; preserves config/state/logs by default
+          
+          SAFETY
+          - Do not run upstream deploy.sh or the full desktop bundle's deploy manager for this service.
+          - This package is for Linux ARM64 with systemd, iproute2, iptables-save and ss.
+          - Dedicated resources: csqtt-lalune.service, UDP 47000, TCP 47002, TUN csqtt-lalune0,
+            subnet 10.67.68.0/24, policy tables 47001/47066, marks 0x6741/0x6742.
+          - Installer refuses occupied ports, existing TUN interfaces, conflicting policy identifiers,
+            and unowned paths. It does not stop or modify generic CSQTT services.
+          - Uninstall without --purge preserves /etc/csqtt-lalune, /var/lib/csqtt-lalune and
+            /var/log/csqtt-lalune.
+          
+          VALIDATION STATUS
+          The isolated binary has passed an ARM64 Debian system-VM install/listener/uninstall lifecycle
+          and route-preservation test. This does not prove end-to-end peer authentication or user traffic.
+          Do not deploy to production until those tests and explicit operator approval are complete.
+          EOF
+          (
+            cd dist-csqtt-lalune
+            sha256sum csqtt-lalune-linux-arm64 install-csqtt-lalune.sh uninstall-csqtt-lalune.sh README.txt > SHA256SUMS
+            sha256sum -c SHA256SUMS
+            ! find . -maxdepth 1 -iname '*deploy.sh' | grep -q .
+            ! find . -maxdepth 1 -iname '*deploy-manager*' | grep -q .
+          )
+          tar -C dist-csqtt-lalune -czf csqtt-lalune-nanopi-arm64-isolated.tar.gz .
+          tar -tzf csqtt-lalune-nanopi-arm64-isolated.tar.gz | sort
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: csqtt-lalune-nanopi-arm64-isolated
+          path: csqtt-lalune-nanopi-arm64-isolated.tar.gz
+          if-no-files-found: error
+
+
 
   arm64-system-vm:
     name: Test real CSQTT artifact in ARM64 system VM
