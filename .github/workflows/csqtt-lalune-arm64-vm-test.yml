@@ -137,15 +137,29 @@ jobs:
             sudo systemctl is-active --quiet csqtt.service
             sudo systemctl is-active --quiet csqtt-47000.service
             sudo systemctl is-active --quiet csqtt-47000-netns.service
+            # Seed explicitly foreign resources, not just whatever defaults happen
+            # to exist in the guest. LaLune must preserve them through install AND removal.
+            sudo ip route add blackhole 198.18.77.0/24 table 42424
+            sudo ip rule add priority 42424 to 198.18.77.0/24 lookup 42424
+            sudo iptables -I OUTPUT 1 -d 198.18.77.0/24 -m comment --comment FOREIGN_TEST_RULE_KEEP -j ACCEPT
             sudo sha256sum /etc/systemd/system/csqtt.service /etc/systemd/system/csqtt-47000.service /etc/systemd/system/csqtt-47000-netns.service > /tmp/production-units.before
+            sudo systemctl show -p ActiveState -p SubState csqtt.service csqtt-47000.service csqtt-47000-netns.service > /tmp/production-states.before
             sudo ip -4 route show table main > /tmp/main-routes.before
+            sudo ip -4 route show table 42424 > /tmp/foreign-routes.before
             sudo ip -4 rule show > /tmp/ip-rules.before
             sudo iptables-save > /tmp/iptables.before
+            grep -Fq 'blackhole 198.18.77.0/24' /tmp/foreign-routes.before
+            grep -Fq '42424: from all to 198.18.77.0/24 lookup 42424' /tmp/ip-rules.before
+            grep -Fq 'FOREIGN_TEST_RULE_KEEP' /tmp/iptables.before
             sudo /opt/lalune-package/install-csqtt-lalune.sh
             sudo systemctl is-active --quiet csqtt-lalune.service
             sudo systemctl is-active --quiet csqtt.service
             sudo systemctl is-active --quiet csqtt-47000.service
             sudo systemctl is-active --quiet csqtt-47000-netns.service
+            sudo systemctl show -p ActiveState -p SubState csqtt.service csqtt-47000.service csqtt-47000-netns.service > /tmp/production-states.after-install
+            diff -u /tmp/production-states.before /tmp/production-states.after-install
+            sudo ip -4 route show table 42424 > /tmp/foreign-routes.after-install
+            diff -u /tmp/foreign-routes.before /tmp/foreign-routes.after-install
             # The packaged service must bind only its dedicated ports.
             for attempt in $(seq 1 20); do
               if sudo ss -H -lun 'sport = :47000' | grep -q . && sudo ss -H -ltn 'sport = :47002' | grep -q .; then break; fi
@@ -239,6 +253,10 @@ jobs:
             sudo systemctl is-active --quiet csqtt-47000.service
             sudo systemctl is-active --quiet csqtt-47000-netns.service
             sudo sha256sum -c /tmp/production-units.before
+            sudo systemctl show -p ActiveState -p SubState csqtt.service csqtt-47000.service csqtt-47000-netns.service > /tmp/production-states.after-uninstall
+            diff -u /tmp/production-states.before /tmp/production-states.after-uninstall
+            sudo ip -4 route show table 42424 > /tmp/foreign-routes.after-uninstall
+            diff -u /tmp/foreign-routes.before /tmp/foreign-routes.after-uninstall
             sudo ip -4 route show table main > /tmp/main-routes.after-uninstall
             sudo diff -u /tmp/main-routes.before /tmp/main-routes.after-uninstall
             sudo ip -4 rule show > /tmp/ip-rules.after-uninstall
