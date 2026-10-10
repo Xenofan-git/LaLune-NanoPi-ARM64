@@ -90,17 +90,33 @@ jobs:
           set -euxo pipefail
           SSH="ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1"
           SCP="scp -i vm/id_ed25519 -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-          $SCP server-assets/install-csqtt-lalune.sh server-assets/uninstall-csqtt-lalune.sh vm/guest-binary.sh tester@127.0.0.1:/home/tester/
           cat > vm/guest-binary.sh <<'EOF'
           #!/bin/sh
           exec /bin/sleep infinity
           EOF
-          $SCP vm/guest-binary.sh tester@127.0.0.1:/home/tester/csqtt-lalune-linux-arm64
+          for unit in csqtt.service csqtt-47000.service csqtt-47000-netns.service; do
+            cat > "vm/$unit" <<EOF
+          [Unit]
+          Description=Disposable pre-existing production-like $unit
+          After=network.target
+          [Service]
+          Type=simple
+          ExecStart=/bin/sleep infinity
+          Restart=on-failure
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          done
+          $SCP server-assets/install-csqtt-lalune.sh server-assets/uninstall-csqtt-lalune.sh vm/guest-binary.sh vm/csqtt.service vm/csqtt-47000.service vm/csqtt-47000-netns.service tester@127.0.0.1:/home/tester/
           $SSH 'set -eux
             sudo install -d -m 0755 /opt/lalune-package
             sudo install -m 0755 /home/tester/install-csqtt-lalune.sh /opt/lalune-package/install-csqtt-lalune.sh
             sudo install -m 0755 /home/tester/uninstall-csqtt-lalune.sh /opt/lalune-package/uninstall-csqtt-lalune.sh
-            sudo install -m 0755 /home/tester/csqtt-lalune-linux-arm64 /opt/lalune-package/csqtt-lalune-linux-arm64
+            sudo install -m 0755 /home/tester/guest-binary.sh /opt/lalune-package/csqtt-lalune-linux-arm64
+            sudo install -m 0644 /home/tester/csqtt.service /etc/systemd/system/csqtt.service
+            sudo install -m 0644 /home/tester/csqtt-47000.service /etc/systemd/system/csqtt-47000.service
+            sudo install -m 0644 /home/tester/csqtt-47000-netns.service /etc/systemd/system/csqtt-47000-netns.service
+            sudo systemctl daemon-reload
             sudo systemctl enable --now csqtt.service
             sudo systemctl enable --now csqtt-47000.service
             sudo systemctl enable --now csqtt-47000-netns.service
