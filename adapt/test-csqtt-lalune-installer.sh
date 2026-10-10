@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Disposable, rootless-compatible harness: rewrite installer-owned absolute
+# paths into a temp root and shadow system commands with deterministic stubs.
+ROOT="$(mktemp -d)"
+trap 'rm -rf "$ROOT"' EXIT
+mkdir -p "$ROOT/package" "$ROOT/bin"
+cp server-assets/install-csqtt-lalune.sh "$ROOT/package/install.sh"
+cp server-assets/uninstall-csqtt-lalune.sh "$ROOT/package/uninstall.sh"
+printf 'test-binary\n' > "$ROOT/package/csqtt-lalune-linux-arm64"
+chmod +x "$ROOT/package/install.sh" "$ROOT/package/uninstall.sh"
+
+# Relocate only the installer's owned paths. Never execute these scripts on host paths.
+for file in "$ROOT/package/install.sh" "$ROOT/package/uninstall.sh"; do
+  sed -i \
+    -e "s|/usr/local/bin/csqtt-lalune|$ROOT/host/usr/local/bin/csqtt-lalune|g" \
+    -e "s|/usr/local/lib/csqtt-lalune|$ROOT/host/usr/local/lib/csqtt-lalune|g" \
+    -e "s|/etc/csqtt-lalune|$ROOT/host/etc/csqtt-lalune|g" \
+    -e "s|/var/lib/csqtt-lalune|$ROOT/host/var/lib/csqtt-lalune|g" \
+    -e "s|/var/log/csqtt-lalune|$ROOT/host/var/log/csqtt-lalune|g" \
+    -e "s|/etc/systemd/system/csqtt-lalune.service|$ROOT/host/etc/systemd/system/csqtt-lalune.service|g" \
+    "$file"
+done
+
+cat > "$ROOT/bin/uname" <<'SH'
+#!/bin/sh
+case "$1" in -s) echo Linux;; -m) echo aarch64;; *) exec /usr/bin/uname "$@";; esac
+SH
+cat > "$ROOT/bin/systemctl" <<'SH'
+#!/usr/bin/env bash
+set -eu
+printf '%s\n' "$*" >> "$TEST_SYSTEMCTL_LOG"
+case "$1" in
+  is-active) [[ -f "$TEST_ACTIVE" ]];;
+  start) touch "$TEST_ACTIVE";;
+  stop|disable) rm -f "$TEST_ACTIVE";;
+  disable) rm -f "$TEST_ACTIVE";;
+  *) exit 0;;
+esac
+SH
+cat > "$ROOT/bin/ss" <<'SH'
+#!/usr/bin/env bash
+case "${SS_MODE:-clear}:$*" in
+  udp:*47000*) [[ "${SS_MODE:-clear}" == occupied-udp ]] && echo 'UNCONN 0 0 0.0.0.0:47000 0.0.0.0:*';;
+  tcp:*47002*) [[ "${SS_MODE:-clear}" == occupied-tcp ]] && echo 'LISTEN 0 128 0.0.0.0:47002 0.0.0.0:*';;
+esac
+exit 0
+SH
+cat > "$ROOT/bin/ip" <<'SH'
+#!/usr/bin/env bash
+set -eu
+case "$*" in
+  "link show dev csqtt-lalune0") [[ "${IP_TUN_PRESENT:-0}" == 1 ]] && exit 0 || exit 1;;
+  "-4 rule show") printf '%s\n' "${IP_RULES:-}";;
+  "-4 route show table 47001"|"-4 route show table 47066") [[ "${IP_ROUTE_PRESENT:-0}" == 1 ]] && echo 'default dev fake0';;
+  *) exit 0;;
+esac
+SH
+cat > "$ROOT/bin/iptables-save" <<'SH'
+#!/bin/sh
+printf '%s\n' "${IPTABLES_RULES:-}"
+SH
+chmod +x "$ROOT/bin/"*
+export PATH="$ROOT/bin:$PATH"
+export TEST_SYSTEMCTL_LOG="$ROOT/systemctl.log" TEST_ACTIVE="$ROOT/active"
+
+# Case 1: occupied UDP listener is not killed and no managed files are created.
+if SS_MODE=occupied-udp "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
+  echo "FAIL: installer accepted occupied UDP port" >&2; exit 1
+fi
+grep -q 'UDP port 47000 is occupied' "$ROOT/out"
+[[ ! -e "$ROOT/host/etc/csqtt-lalune" && ! -e "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
+! grep -Eq 'stop|kill' "$TEST_SYSTEMCTL_LOG" 2>/dev/null
+
+# Case 2: pre-existing LaLune policy IDs are not adopted or modified.
+if IP_RULES='47001: from all fwmark 0x6741/0x6741 lookup 47001' "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
+  echo "FAIL: installer accepted pre-existing policy IDs" >&2; exit 1
+fi
+grep -q 'LaLune policy identifiers already exist' "$ROOT/out"
+[[ ! -e "$ROOT/host/etc/csqtt-lalune" ]]
+
+# Case 3: successful isolated install in the temporary root.
+SS_MODE=clear IP_RULES= IP_ROUTE_PRESENT=0 IP_TUN_PRESENT=0 IPTABLES_RULES= "$ROOT/package/install.sh" >"$ROOT/out"
+grep -q 'CSQTT_LALUNE_INSTALL_OK' "$ROOT/out"
+[[ -x "$ROOT/host/usr/local/bin/csqtt-lalune" ]]
+grep -Fq 'Description=CSQTT LaLune isolated dataplane' "$ROOT/host/etc/systemd/system/csqtt-lalune.service"
+grep -Fq 'CSQTT-LALUNE-MANAGED-V1' "$ROOT/host/etc/csqtt-lalune/.managed-by-lalune"
+
+# Preserve operator config and service files when routing cleanup is incomplete.
+mkdir -p "$ROOT/host/etc/csqtt-lalune"
+printf 'keep-me\n' > "$ROOT/host/etc/csqtt-lalune/operator.conf"
+if IP_RULES='47066: from all fwmark 0x6742 lookup 47066' "$ROOT/package/uninstall.sh" >"$ROOT/out" 2>&1; then
+  echo "FAIL: uninstaller removed service with residual policy rule" >&2; exit 1
+fi
+grep -q 'LaLune policy rules remain after stop' "$ROOT/out"
+[[ -x "$ROOT/host/usr/local/bin/csqtt-lalune" ]]
+[[ -f "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
+[[ -f "$ROOT/host/etc/csqtt-lalune/operator.conf" ]]
+
+# Clean uninstall removes only LaLune executable/unit/library; preserves config/state/log by default.
+IP_RULES= IP_ROUTE_PRESENT=0 IP_TUN_PRESENT=0 IPTABLES_RULES= "$ROOT/package/uninstall.sh" >"$ROOT/out"
+grep -q 'CSQTT_LALUNE_UNINSTALL_OK' "$ROOT/out"
+[[ ! -e "$ROOT/host/usr/local/bin/csqtt-lalune" ]]
+[[ ! -e "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
+[[ -f "$ROOT/host/etc/csqtt-lalune/operator.conf" ]]
+[[ -f "$ROOT/host/var/lib/csqtt-lalune/.managed-by-lalune" ]]
+[[ -f "$ROOT/host/var/log/csqtt-lalune/.managed-by-lalune" ]]
+
+echo "CSQTT LaLune installer/uninstaller disposable tests: PASS"
