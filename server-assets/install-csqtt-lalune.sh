@@ -28,6 +28,12 @@ command -v ss >/dev/null 2>&1 || die "ss is required for safe port preflight"
 command -v ip >/dev/null 2>&1 || die "iproute2 is required for safe route/interface preflight"
 command -v iptables-save >/dev/null 2>&1 || die "iptables is required for safe firewall preflight"
 
+# Reject symlinks before checking ownership markers or writing anything. A marker
+# reachable through a symlink does not make the external target LaLune-owned.
+for owned_path in "$UNIT_FILE" "$BIN" "$LIB" "$ETC" "$STATE" "$LOG"; do
+  [[ ! -L "$owned_path" ]] || die "$owned_path is a symlink; refusing to follow or replace it"
+done
+
 # Never adopt or overwrite another service or an unowned path.
 if [[ -e "$UNIT_FILE" ]] && ! grep -Fq 'Description=CSQTT LaLune isolated dataplane' "$UNIT_FILE"; then
   die "$UNIT_FILE already exists and is not our service"
