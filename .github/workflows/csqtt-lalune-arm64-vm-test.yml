@@ -159,17 +159,21 @@ jobs:
             sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-before-probe.log
             python3 - <<'PY'
           import socket
+          import ssl
           import urllib.request
           from urllib.error import HTTPError, URLError
 
-          # Any HTTP status (including 4xx/5xx) proves an HTTP response was received.
+          # The test server intentionally uses a self-signed certificate. Disable
+          # certificate verification only for this loopback smoke test; production
+          # certificate validation is not changed.
+          context = ssl._create_unverified_context()
           try:
-              with urllib.request.urlopen("http://127.0.0.1:47002/", timeout=5) as response:
+              with urllib.request.urlopen("https://127.0.0.1:47002/", timeout=5, context=context) as response:
                   print("WEB_HTTP_STATUS", response.status)
           except HTTPError as exc:
               print("WEB_HTTP_STATUS", exc.code)
           except (URLError, TimeoutError, OSError) as exc:
-              raise SystemExit(f"web listener did not return HTTP: {exc}")
+              raise SystemExit(f"web listener did not return HTTPS: {exc}")
 
           # Exercise the UDP receive path with a bounded invalid probe. The server
           # must remain alive; this does not emulate a valid CSQTT peer handshake.
