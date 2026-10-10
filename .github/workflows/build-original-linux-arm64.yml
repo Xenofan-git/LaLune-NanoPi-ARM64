@@ -243,6 +243,9 @@ jobs:
           grep -Fq 'LaLune firewall markers already exist' server-assets/install-csqtt-lalune.sh
           grep -Fq 'refusing to adopt it' server-assets/install-csqtt-lalune.sh
           grep -Fq 'systemctl disable --now "$UNIT"' server-assets/uninstall-csqtt-lalune.sh
+          grep -Fq 'LaLune policy rules remain after stop' server-assets/uninstall-csqtt-lalune.sh
+          grep -Fq 'LaLune firewall rules remain after stop' server-assets/uninstall-csqtt-lalune.sh
+          grep -Fq 'preserving binary and service unit' server-assets/uninstall-csqtt-lalune.sh
           ! grep -Eq 'ip route flush cache|ip route flush table (main|default)|ip route replace default|sysctl -w net.ipv4.conf.(all|default)' server-assets/install-csqtt-lalune.sh server-assets/uninstall-csqtt-lalune.sh
           grep -Fq '10.67.68.0/24' server-assets/install-csqtt-lalune.sh adapt/CSQTT-LALUNE-INSTALLER.md
           grep -Fq 'rm -rf -- "$ETC" "$STATE" "$LOG"' server-assets/uninstall-csqtt-lalune.sh
