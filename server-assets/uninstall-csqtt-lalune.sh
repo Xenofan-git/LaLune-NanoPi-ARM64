@@ -24,7 +24,7 @@ command -v ip >/dev/null 2>&1 || die "iproute2 missing; preserving binary and se
 command -v iptables-save >/dev/null 2>&1 || die "iptables-save missing; preserving binary and service unit for manual cleanup"
 if ip link show dev csqtt-lalune0 >/dev/null 2>&1; then die "csqtt-lalune0 remains after stop; preserving binary and service unit"; fi
 RULES="$(ip -4 rule show)"
-if printf '%s\\n' "$RULES" | grep -Eq '(^|[[:space:]])(47001|47066):|fwmark (0x6741|0x6742)(/|[[:space:]])|lookup (47001|47066)([[:space:]]|$)'; then die "LaLune policy rules remain after stop; preserving binary and service unit"; fi
+if printf '%s\n' "$RULES" | grep -Eq '(^|[[:space:]])(47001|47066):|fwmark (0x6741|0x6742)(/|[[:space:]])|lookup (47001|47066)([[:space:]]|$)'; then die "LaLune policy rules remain after stop; preserving binary and service unit"; fi
 if [[ -n "$(ip -4 route show table 47001 2>/dev/null)" || -n "$(ip -4 route show table 47066 2>/dev/null)" ]]; then die "LaLune route table entries remain after stop; preserving binary and service unit"; fi
 if iptables-save 2>/dev/null | grep -Fq 'CSQTT_LALUNE_'; then die "LaLune firewall rules remain after stop; preserving binary and service unit"; fi
 systemctl reset-failed "$UNIT" >/dev/null 2>&1 || true
