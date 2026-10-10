@@ -23,6 +23,9 @@ replacements = [
     ("tun", '[10, 66, 68, 2]', '[10, 67, 69, 2]', "foreign subnet reference", 2),
     # Protocol fixtures embed the allocated client subnet in expected payloads.
     ("protocol", "10.66.67", "10.67.68", "protocol client subnet", 2),
+    # The hot tunnel-configuration test formats this address from octets, so
+    # rewriting dotted-decimal fixtures alone leaves the runtime test on the old subnet.
+    ("protocol", "[10, 66, 67, 42]", "[10, 67, 68, 42]", "hot tunnel configuration numeric subnet fixture", 1),
 ]
 for key, old, new, label, expected_count in replacements:
     count = sources[key].count(old)
