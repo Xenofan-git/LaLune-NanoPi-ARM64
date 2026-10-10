@@ -156,8 +156,8 @@ jobs:
             # Installing the isolated service must not change the main/default route table.
             sudo ip -4 route show table main > /tmp/main-routes.after-install
             # The dedicated TUN subnet route is expected while the isolated service is running.
-            grep -Fq '10.67.68.0/24 dev csqtt-lalune0' /tmp/main-routes.after-install
-            grep -vF '10.67.68.0/24 dev csqtt-lalune0' /tmp/main-routes.after-install > /tmp/main-routes.unrelated-after-install
+            awk '$1 == "10.67.68.0/24" && $3 == "csqtt-lalune0" { found=1 } END { exit !found }' /tmp/main-routes.after-install
+            awk '!($1 == "10.67.68.0/24" && $3 == "csqtt-lalune0")' /tmp/main-routes.after-install > /tmp/main-routes.unrelated-after-install
             sudo diff -u /tmp/main-routes.before /tmp/main-routes.unrelated-after-install
             # Every pre-existing policy rule and firewall rule must survive installation.
             sudo ip -4 rule show > /tmp/ip-rules.after-install
