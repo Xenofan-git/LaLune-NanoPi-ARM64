@@ -7,6 +7,7 @@ paths = {
     "net": root / "net_setup.rs",
     "tun": root / "tun_device.rs",
     "proxy": root / "proxy_route.rs",
+    "model": root / "model.rs",
 }
 sources = {key: path.read_text() for key, path in paths.items()}
 replacements = [
@@ -25,6 +26,13 @@ for key, old, new, label, expected_count in replacements:
     if count != expected_count:
         raise SystemExit(f"{label}: expected {expected_count} source occurrence(s), found {count}")
     sources[key] = sources[key].replace(old, new)
+
+# Device address allocation and legacy-import fixtures also embed the upstream subnet.
+# Move every occurrence in model.rs so newly allocated client IPs use the LaLune subnet.
+model_count = sources["model"].count("10.66.67")
+if model_count < 1:
+    raise SystemExit("model.rs: expected legacy client subnet references to rename")
+sources["model"] = sources["model"].replace("10.66.67", "10.67.68")
 
 # The proxy-route module also writes rp_filter against the upstream TUN name and
 # contains fixtures that assert the old interface. Rename every occurrence there.
