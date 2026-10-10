@@ -373,3 +373,9 @@ jobs:
           name: lalune-original-linux-arm64
           path: lalune-original-linux-arm64.tar.gz
           if-no-files-found: error
+
+
+  arm64-system-vm:
+    name: Test real CSQTT artifact in ARM64 system VM
+    needs: build
+    uses: ./.github/workflows/csqtt-lalune-arm64-vm-test.yml
