@@ -37,8 +37,9 @@ for key, old, new, label, expected_count in replacements:
 # it lets a real server-produced encrypted response pass through the exact client parser
 # without introducing a second implementation or shipping client code in the server.
 client_protocol_test_module = '''
-#[path = "../rust-client/protocol.rs"]
-mod client_protocol;
+mod client_protocol {
+    include!("../rust-client/protocol.rs");
+}
 '''
 marker = '#[cfg(test)]\nmod tests {'
 if sources["protocol"].count(marker) != 1:
