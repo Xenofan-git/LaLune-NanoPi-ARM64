@@ -20,6 +20,15 @@ replace_once(
 # DeployManager CLI calls this option --ssh-port. Keep the original UI/API
 # contract while fixing the actual CLI invocation.
 BRIDGE = UPSTREAM / "Desktop/Libs/bridge.go"
+# Propagate Linux TUN setup failures through the shared interface so the
+# runner can fail closed before starting the packet bridge.
+bridge_source = BRIDGE.read_text()
+old_tun_interface = '\\tSetupRoutes(tunIP string, tunDNS string)'
+new_tun_interface = '\\tSetupRoutes(tunIP string, tunDNS string) error'
+if bridge_source.count(old_tun_interface) != 1:
+    raise SystemExit("TunInterface SetupRoutes marker missing or ambiguous")
+bridge_source = bridge_source.replace(old_tun_interface, new_tun_interface, 1)
+BRIDGE.write_text(bridge_source)
 
 # New CSQTT core Auto VK protocol: stdin bootstrap replaces obsolete --token.
 bs = BRIDGE.read_text()
