@@ -132,7 +132,12 @@ jobs:
           test "$(git -C upstream-lalune rev-parse HEAD)" = "e4a6d08b63aef6025bf8ad8f77da660ea552e04b"
           grep -Fq 'return "client-linux-arm64"' upstream-lalune/Desktop/Libs/protocols.go
           grep -Fq '"--ssh-port", itoa(req.SSHPort)' upstream-lalune/Desktop/Libs/deploy.go
-          grep -Fq 'ip route replace default dev csqtt0 table 202' upstream-lalune/Desktop/Linux/app_linux.go
+          # Verify the isolated policy-routing implementation, not an obsolete literal command.
+          grep -Fq 'ip -o route show table 202' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -Fq 'ip -o rule show pref 22020' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -Fq 'ip route add default dev csqtt0 table 202' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -Fq 'ip route del default dev csqtt0 table 202' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -Fq 'resolvectl dns csqtt0' upstream-lalune/Desktop/Linux/app_linux.go
           grep -Fq 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go
           grep -Fq 'func (r *LinuxRunner) StartCore' upstream-lalune/Desktop/Linux/app_linux.go
           test "$(grep -Fc 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go)" = "1"
