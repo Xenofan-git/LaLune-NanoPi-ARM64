@@ -583,7 +583,7 @@ if s.count(marker) != 1:
 s = s.replace(marker, linux_direct + marker, 1)
 
 # SetupRoutes and CleanupRoutes above are complete ownership-safe implementations.
-// Legacy text replacements removed: their old markers intentionally no longer exist.
+# Legacy text replacements removed: their old markers intentionally no longer exist.
 LINUX.write_text(s)
 
 # Add direct routing preferences to the persisted settings model.
