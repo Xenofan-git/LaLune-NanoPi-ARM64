@@ -53,6 +53,108 @@ marker = match.group(0)
 insertion = "\n    " + client_protocol_test_module.strip().replace("\n", "\n    ")
 sources["protocol"] = sources["protocol"][:match.end()] + insertion + sources["protocol"][match.end():]
 
+dataplane_test = '''
+    struct CaptureSink {
+        udp: Vec<Vec<u8>>,
+        tun: Vec<Vec<u8>>,
+    }
+
+    impl CaptureSink {
+        fn new() -> Self {
+            Self { udp: Vec::new(), tun: Vec::new() }
+        }
+    }
+
+    impl PacketOutput for CaptureSink {
+        fn has_udp_tx_slot(&self) -> bool { true }
+
+        fn send_udp_with_duplicate_priority<F>(
+            &mut self,
+            _peer: SocketAddr,
+            _source_ip: Option<IpAddr>,
+            _duplicate: bool,
+            _class: crate::striped_scheduler::PacketClass,
+            build: F,
+        ) -> bool
+        where
+            F: FnOnce(&mut PacketBuf) -> bool,
+        {
+            let pool = crate::packet::PacketPool::new(1);
+            let Some(mut packet) = pool.try_acquire() else { return false; };
+            if !build(&mut packet) { return false; }
+            self.udp.push(packet.as_slice().to_vec());
+            true
+        }
+
+        fn request_udp_flush(&mut self) {}
+
+        fn write_tun_priority(
+            &mut self,
+            payload: &[u8],
+            _class: crate::striped_scheduler::PacketClass,
+        ) -> bool {
+            self.tun.push(payload.to_vec());
+            true
+        }
+    }
+
+    fn ipv4_packet(src: [u8; 4], dst: [u8; 4], marker: u8) -> Vec<u8> {
+        let mut packet = vec![0u8; 28];
+        packet[0] = 0x45;
+        packet[2..4].copy_from_slice(&(packet.len() as u16).to_be_bytes());
+        packet[8] = 64;
+        packet[9] = 17;
+        packet[12..16].copy_from_slice(&src);
+        packet[16..20].copy_from_slice(&dst);
+        packet[20..28].copy_from_slice(&[marker, 1, 2, 3, 4, 5, 6, 7]);
+        packet
+    }
+
+    #[test]
+    fn encrypted_ipv4_packets_cross_server_tun_in_both_directions() {
+        let (mut engine, _events, _worker_output) =
+            fixture_engine_with_worker("wire-password", 0, 1);
+        let peer = SocketAddr::from(([198, 51, 100, 20], 46000));
+        engine.handle_unknown_legacy(peer, None, &fixture_wire());
+        assert_eq!(engine.sessions.len(), 1);
+        let session_id = engine.sessions.iter().next().unwrap().id;
+        assert!(engine.activate_tunnel(session_id, [10, 67, 68, 42], 77, 1, 1));
+
+        // Client -> server: the authenticated encrypted UDP payload must emerge
+        // from the server's TUN sink as the identical IPv4 packet.
+        let client_packet = ipv4_packet([10, 67, 68, 42], [192, 0, 2, 10], 0xa1);
+        let mut client_wire = {
+            let slot = engine.by_id.get(&session_id).copied().unwrap();
+            let session = engine.sessions.get_mut(slot).unwrap();
+            let pool = crate::packet::PacketPool::new(1);
+            let mut output = pool.try_acquire().unwrap();
+            let mut rng = StdRng::seed_from_u64(0x434c_4945_4e54);
+            wrap_legacy_into(session, &client_packet, &mut rng, &mut output, Instant::now(), false).unwrap();
+            output.as_slice().to_vec()
+        };
+        let mut sink = CaptureSink::new();
+        engine.on_udp(peer, None, &mut client_wire, &mut sink);
+        assert_eq!(sink.tun, vec![client_packet], "client IPv4 packet must be delivered to server TUN");
+
+        // Server -> client: a packet addressed to the active tunnel IP must be
+        // routed, encrypted with the established session, and recover unchanged.
+        let server_packet = ipv4_packet([192, 0, 2, 10], [10, 67, 68, 42], 0xb2);
+        let mut server_input = server_packet.clone();
+        engine.on_tun(&mut server_input, &mut sink);
+        engine.on_tun_batch_end(&mut sink);
+        assert_eq!(sink.udp.len(), 1, "server TUN packet must produce an encrypted UDP datagram");
+        let mut server_wire = sink.udp.pop().unwrap();
+        let decoded = {
+            let slot = engine.by_id.get(&session_id).copied().unwrap();
+            let session = engine.sessions.get(slot).unwrap();
+            unwrap_legacy_in_place(&session.aes, &session.hmac, &session.chacha, &mut server_wire, Some(session.is_srtp), false)
+                .expect("server-to-client datagram must authenticate and decrypt")
+        };
+        let plain = decoded.range.get(&server_wire);
+        assert_eq!(flow_frame::payload(plain), server_packet.as_slice(), "client must recover identical IPv4 packet");
+    }
+'''
+
 roundtrip_test = '''
     #[test]
     fn server_encrypted_tunconf_roundtrips_through_real_client_parser() {
@@ -97,7 +199,7 @@ test_anchor = '''
     fn client_getconf_fixture_authenticates_with_matching_password_only() {'''
 if sources["protocol"].count(test_anchor) != 1:
     raise SystemExit("protocol.rs: expected unique GETCONF authentication test anchor")
-sources["protocol"] = sources["protocol"].replace(test_anchor, roundtrip_test + test_anchor, 1)
+sources["protocol"] = sources["protocol"].replace(test_anchor, dataplane_test + roundtrip_test + test_anchor, 1)
 
 # Device address allocation and legacy-import fixtures also embed the upstream subnet.
 # Move every occurrence in model.rs so newly allocated client IPs use the LaLune subnet.
