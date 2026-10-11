@@ -118,7 +118,7 @@ dataplane_test = '''
         let peer = SocketAddr::from(([198, 51, 100, 20], 46000));
         engine.handle_unknown_legacy(peer, None, &fixture_wire());
         assert_eq!(engine.sessions.len(), 1);
-        let session_id = engine.sessions.iter().next().unwrap().id;
+        let session_id = engine.sessions.iter().next().unwrap().1.id;
         assert!(engine.activate_tunnel(session_id, [10, 67, 68, 42], 77, 1, 1));
 
         // Client -> server: the authenticated encrypted UDP payload must emerge
