@@ -204,39 +204,53 @@ dataplane_test = '''
         let session_id = engine.sessions.iter().next().unwrap().1.id;
         assert!(engine.activate_tunnel(session_id, [10, 67, 68, 42], 77, 1, 1));
 
-        // Client -> server: the authenticated encrypted UDP payload must emerge
-        // from the server's TUN sink as the identical IPv4 packet.
+        // The server's live UDP ingress consumes the legacy CSQTT wire format,
+        // not the client's standalone RTP/AEAD obfuscation wrapper. Build a
+        // correctly authenticated legacy datagram using the established
+        // session crypto, then feed it through the real on_udp -> TUN path.
         let client_packet = ipv4_packet([10, 67, 68, 42], [192, 0, 2, 10], 0xa1);
-        let client_pool = crate::packet::PacketPool::new(2);
-        let client_cipher = client_obfs_test::ObfsCipher::new(
-            client_wrap_test::derive_wrap_key("wire-password").unwrap()
-        ).unwrap();
-        let client_config = client_obfs_test::ObfsConfig::new(client_obfs_test::ObfsMode::Audio);
-        let mut client_state = client_obfs_test::ObfsState::new();
-        let mut client_packet_buf = client_packet_test::PacketBuf::new();
-        client_packet_buf.read_area()[..client_packet.len()].copy_from_slice(&client_packet);
-        client_packet_buf.set_read_len(client_packet.len()).unwrap();
-        client_cipher.wrap(&mut client_packet_buf, &client_config, &mut client_state).unwrap();
-        let mut client_wire = client_packet_buf.as_slice().to_vec();
+        let mut client_wire = {
+            let session = engine.sessions.iter_mut().next().unwrap().1;
+            let pool = crate::packet::PacketPool::new(1);
+            let mut packet = pool.try_acquire().expect("client packet buffer");
+            let mut rng = StdRng::seed_from_u64(0x4353_5154_545f_5550);
+            wrap_legacy_into(session, &client_packet, &mut rng, &mut packet, Instant::now(), false)
+                .expect("encode authenticated CSQTT client datagram");
+            packet.as_slice().to_vec()
+        };
         let mut sink = CaptureSink::new();
         engine.on_udp(peer, None, &mut client_wire, &mut sink);
-        assert_eq!(sink.tun, vec![client_packet], "real pinned client obfs packet must reach server TUN unchanged");
+        assert_eq!(
+            sink.tun,
+            vec![client_packet],
+            "authenticated CSQTT IPv4 datagram must reach server TUN unchanged"
+        );
 
         // Server -> client: a packet addressed to the active tunnel IP must be
-        // routed, encrypted with the established session, and recover unchanged.
+        // routed and encrypted. Decode it with the same session crypto and
+        // verify byte-for-byte recovery of the IPv4 payload.
         let server_packet = ipv4_packet([192, 0, 2, 10], [10, 67, 68, 42], 0xb2);
         let mut server_input = server_packet.clone();
         engine.on_tun(&mut server_input, &mut sink);
         engine.on_tun_batch_end(&mut sink);
         assert_eq!(sink.udp.len(), 1, "server TUN packet must produce an encrypted UDP datagram");
-        let server_wire = sink.udp.pop().unwrap();
-        let mut client_downlink = client_packet_test::PacketBuf::new();
-        client_downlink.read_area()[..server_wire.len()].copy_from_slice(&server_wire);
-        client_downlink.set_read_len(server_wire.len()).unwrap();
-        client_cipher.unwrap(&mut client_downlink, client_obfs_test::ObfsMode::Audio)
-            .expect("actual pinned client must authenticate and decrypt server datagram");
-        assert_eq!(flow_frame::payload(client_downlink.as_slice()), server_packet.as_slice(),
-            "actual pinned client must recover identical IPv4 packet");
+        let mut server_wire = sink.udp.pop().unwrap();
+        let decoded = {
+            let session = engine.sessions.iter_mut().next().unwrap().1;
+            unwrap_legacy_in_place(
+                &session.aes,
+                &session.hmac,
+                &session.chacha,
+                &mut server_wire,
+                Some(session.is_srtp),
+                false,
+            ).expect("server datagram must authenticate and decrypt")
+        };
+        assert_eq!(
+            decoded.range.get(&server_wire),
+            server_packet.as_slice(),
+            "client must recover the identical IPv4 packet"
+        );
     }
 '''
 
