@@ -302,7 +302,89 @@ jobs:
           if "dev csqtt-lalune0" not in route:
               sock.close()
               raise SystemExit(f"client tunnel address is not routed through live TUN: {route.strip()}")
-          sock.close()
+
+          # Real bidirectional dataplane probe through the live ARM64 process.
+          # Linux sends an ICMP echo request into the actual TUN; the CSQTT server
+          # must encrypt it back to this authenticated UDP peer. We decode that
+          # packet with the client wire key, synthesize an ICMP echo reply, encrypt
+          # it using the same client wire format, and require the kernel ping to
+          # receive that reply through the server's TUN. This is stronger than
+          # checking interface counters or an arbitrary UDP response.
+          def make_wire(payload, sequence):
+              import struct
+              header = bytearray(24)
+              header[0] = 0xB0  # RTP v2, extension, padding
+              header[1] = 111
+              header[2:4] = struct.pack("!H", sequence & 0xffff)
+              header[4:8] = struct.pack("!I", 0x10203040 + sequence)
+              header[8:12] = struct.pack("!I", 0x11223344)
+              header[12:14] = b"\\xbe\\xde"
+              header[14:16] = b"\\x00\\x02"
+              header[16:24] = b"\\x32\\x01\\x02\\x03\\x51\\x00\\x01\\x00"
+              nonce = bytes(header[8:12] + header[2:4] + b"\\x00\\x00" + header[4:8])
+              return bytes(header) + ChaCha20Poly1305(key).encrypt(nonce, payload, bytes(header)) + b"\\x01"
+
+          def decrypt_wire(wire):
+              if len(wire) < 41 or wire[0] >> 6 != 2 or wire[12:14] != b"\\xbe\\xde":
+                  raise SystemExit(f"live dataplane returned invalid RTP packet: {len(wire)} bytes")
+              end = len(wire)
+              if wire[0] & 0x20:
+                  padding = wire[-1]
+                  if padding < 1 or padding > end - 40:
+                      raise SystemExit("invalid dataplane RTP padding")
+                  end -= padding
+              nonce = wire[8:12] + wire[2:4] + b"\\x00\\x00" + wire[4:8]
+              try:
+                  return ChaCha20Poly1305(key).decrypt(nonce, wire[24:end], wire[:24])
+              except Exception as exc:
+                  raise SystemExit(f"live dataplane packet failed client AEAD authentication: {exc}")
+
+          def checksum(data):
+              if len(data) & 1:
+                  data += b"\\x00"
+              total = sum((data[i] << 8) + data[i + 1] for i in range(0, len(data), 2))
+              while total >> 16:
+                  total = (total & 0xffff) + (total >> 16)
+              return (~total) & 0xffff
+
+          import subprocess
+          ping = subprocess.Popen(
+              ["ping", "-n", "-I", "csqtt-lalune0", "-c", "1", "-W", "6", "10.67.68.2"],
+              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+          )
+          try:
+              sock.settimeout(8)
+              packet_wire, peer = sock.recvfrom(65535)
+              packet = decrypt_wire(packet_wire)
+              if len(packet) < 28 or packet[0] >> 4 != 4 or packet[9] != 1:
+                  raise SystemExit(f"server TUN downlink was not IPv4 ICMP: {packet[:32]!r}")
+              ip_header_len = (packet[0] & 0x0f) * 4
+              if packet[ ip_header_len ] != 8:
+                  raise SystemExit(f"expected ICMP echo request from Linux TUN, got type {packet[ip_header_len]}")
+              print("LIVE_TUN_DOWNLINK_IPV4_DECRYPTED", len(packet), "bytes", packet[12:16], "->", packet[16:20])
+
+              reply = bytearray(packet)
+              reply[12:16], reply[16:20] = packet[16:20], packet[12:16]
+              reply[ip_header_len] = 0
+              reply[ip_header_len + 2:ip_header_len + 4] = b"\\x00\\x00"
+              reply[ip_header_len + 2:ip_header_len + 4] = checksum(bytes(reply[ip_header_len:])).to_bytes(2, "big")
+              reply[10:12] = b"\\x00\\x00"
+              reply[10:12] = checksum(bytes(reply[:ip_header_len])).to_bytes(2, "big")
+              sock.sendto(make_wire(bytes(reply), 0x2345), ("127.0.0.1", 47000))
+              try:
+                  ping_output, _ = ping.communicate(timeout=8)
+              except subprocess.TimeoutExpired:
+                  ping.kill()
+                  ping_output, _ = ping.communicate()
+                  raise SystemExit("kernel ping timed out waiting for the encrypted ICMP reply through CSQTT TUN")
+              if ping.returncode != 0:
+                  raise SystemExit(f"kernel did not receive the authenticated CSQTT ICMP reply: {ping_output}")
+              print("LIVE_TUN_BIDIRECTIONAL_IPV4_PASS", ping_output.strip().replace("\\n", " | "))
+          finally:
+              if ping.poll() is None:
+                  ping.kill()
+                  ping.wait()
+              sock.close()
 
           # A malformed datagram must not stop the real server after handshake.
           sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
