@@ -189,7 +189,11 @@ old_runner = """		if tun, ok := bridge.Tun.(*LinuxTun); ok {
 			tun.SetupRoutes(tunIP, tunDNS)
 		}"""
 new_runner = """        if tun, ok := bridge.Tun.(*LinuxTun); ok {
-            tun.SetupRoutes(tunIP, tunDNS)
+            if err := tun.SetupRoutes(tunIP, tunDNS); err != nil {
+                bridge.Core.AddLog(fmt.Sprintf("[TUN] Подключение отменено: %v", err))
+                bridge.Core.SetConnected(false)
+                return
+            }
             bridge.StartTunnel(coreListenPort)
         }"""
 if old_runner not in s:
@@ -198,7 +202,7 @@ s = s.replace(old_runner, new_runner, 1)
 
 start = s.index("func (t *LinuxTun) SetupRoutes")
 end = s.index("\n}\n\nfunc (t *LinuxTun) CleanupRoutes", start) + 2
-setup = '''func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) {
+setup = '''func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.app.core.AddLog(fmt.Sprintf("[TUN] Настройка TUN (IP: %s, DNS: %s)...", tunIP, tunDNS))
@@ -206,7 +210,7 @@ setup = '''func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) {
 	ip := net.ParseIP(strings.TrimSpace(tunIP))
 	if ip == nil || ip.To4() == nil {
 		t.app.core.AddLog("[TUN] ОШИБКА: некорректный IPv4 TUN; настройка отменена")
-		return
+		return fmt.Errorf("invalid TUN IPv4 address %q", tunIP)
 	}
 	var dnsServers []string
 	for _, raw := range strings.Split(tunDNS, ",") {
@@ -215,25 +219,26 @@ setup = '''func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) {
 		parsed := net.ParseIP(d)
 		if parsed == nil || parsed.To4() == nil {
 			t.app.core.AddLog(fmt.Sprintf("[TUN] ОШИБКА: некорректный DNS IPv4 %q; настройка отменена", d))
-			return
+			return fmt.Errorf("invalid TUN DNS IPv4 %q", d)
 		}
 		dnsServers = append(dnsServers, parsed.To4().String())
 	}
 	// Refuse to touch a non-empty table or occupied rule priority.
 	if err := t.app.runSudo("test -z \\"$(ip -o route show table 202 2>/dev/null)\\" && test -z \\"$(ip -o rule show pref 22020 2>/dev/null)\\""); err != nil {
 		t.app.core.AddLog(fmt.Sprintf("[TUN] ОШИБКА: table 202 или priority 22020 уже заняты; чужие записи сохранены: %v", err))
-		return
+		return fmt.Errorf("TUN routing table 202 or rule priority 22020 is already occupied: %w", err)
 	}
 	cmd := fmt.Sprintf("ip tuntap add dev csqtt0 mode tun && ip addr add %s/32 dev csqtt0 && ip link set csqtt0 up && ip link set csqtt0 mtu 1300", ip.To4().String())
 	if err := t.app.runSudo(cmd); err != nil {
 		t.app.core.AddLog(fmt.Sprintf("[TUN] ОШИБКА создания интерфейса: %v", err))
-		return
+		return fmt.Errorf("create csqtt0: %w", err)
 	}
 	createdRoutes := []string{}
 	createdRule := false
 	rollback := func() {
 		if createdRule { _ = t.app.runSudo("ip rule del pref 22020 from 192.168.5.0/24 lookup 202") }
 		for i := len(createdRoutes)-1; i >= 0; i-- { _ = t.app.runSudo(createdRoutes[i]) }
+		t.cleanupDirectRoutingLocked()
 		_ = t.app.runSudo("resolvectl revert csqtt0")
 		_ = t.app.runSudo("ip tuntap del dev csqtt0 mode tun")
 	}
@@ -245,25 +250,30 @@ setup = '''func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) {
 		if err := t.app.runSudo(pair.add); err != nil {
 			t.app.core.AddLog(fmt.Sprintf("[TUN] ОШИБКА %q: %v; откат", pair.add, err))
 			rollback()
-			return
+			return fmt.Errorf("add TUN route %q: %w", pair.add, err)
 		}
 		createdRoutes = append(createdRoutes, pair.del)
 	}
 	if err := t.app.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202"); err != nil {
 		t.app.core.AddLog(fmt.Sprintf("[TUN] ОШИБКА policy rule: %v; откат", err))
 		rollback()
-		return
+		return fmt.Errorf("add TUN policy rule: %w", err)
 	}
 	createdRule = true
 	if len(dnsServers) > 0 {
 		if err := t.app.runSudo("resolvectl dns csqtt0 " + strings.Join(dnsServers, " ")); err != nil {
-			t.app.core.AddLog(fmt.Sprintf("[TUN] DNS для csqtt0 недоступен через systemd-resolved; /etc/resolv.conf не изменялся: %v", err))
+			t.app.core.AddLog(fmt.Sprintf("[TUN] DNS для csqtt0 недоступен через systemd-resolved; /etc/resolv.conf не изменялся: %v; откат", err))
+            rollback()
+            return fmt.Errorf("configure csqtt0 DNS: %w", err)
 		}
 	}
 	if err := t.applyDirectRoutingLocked(); err != nil {
-		t.app.core.AddLog(fmt.Sprintf("[DIRECT] Ошибка применения: %v", err))
+		t.app.core.AddLog(fmt.Sprintf("[DIRECT] Ошибка применения: %v; откат TUN", err))
+        rollback()
+        return fmt.Errorf("apply Direct routing: %w", err)
 	}
 	t.app.core.AddLog("[TUN] TUN настроен успешно (table 202; чужие маршруты и DNS сохранены)")
+    return nil
 }'''
 s = s[:start] + setup + s[end:]
 start = s.index("func (t *LinuxTun) CleanupRoutes")
