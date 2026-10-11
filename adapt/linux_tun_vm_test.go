@@ -48,6 +48,9 @@ func installTunCommandShims(t *testing.T, failContains string) string {
 func readTunCommandLog(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return ""
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
