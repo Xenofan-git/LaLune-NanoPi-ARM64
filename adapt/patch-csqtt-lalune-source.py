@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Patch pinned upstream CSQTT v2.1.9 source for an isolated LaLune dataplane."""
 from pathlib import Path
+import re as _re
 
 root = Path("server-source/rust-server")
 paths = {
@@ -31,7 +32,6 @@ client_obfs = _re.sub(
 if "use super::client_packet_test::{PacketBuf, PACKET_CAPACITY};" not in client_obfs:
     raise SystemExit("failed to adapt pinned client PacketBuf import")
 client_obfs = client_obfs.replace("rand::", "rand10::")
-import re as _re
 client_obfs = _re.sub(r"\n#\[cfg\(test\)\]\nmod tests \{.*\Z", "\n", client_obfs, flags=_re.S)
 if "crate::wrap::" in client_obfs or "rand::" in client_obfs:
     raise SystemExit("client obfuscation test adapter has unresolved module/dependency names")
