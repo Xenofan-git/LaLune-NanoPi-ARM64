@@ -90,6 +90,45 @@ insertion = "\n    " + client_protocol_test_module.strip().replace("\n", "\n    
 sources["protocol"] = sources["protocol"][:match.end()] + insertion + sources["protocol"][match.end():]
 
 dataplane_test = '''
+    mod client_packet_test {
+        use std::ops::Range;
+        pub const PACKET_CAPACITY: usize = super::PACKET_CAPACITY;
+        pub struct PacketBuf { storage: [u8; PACKET_CAPACITY], start: usize, end: usize }
+        impl PacketBuf {
+            pub fn new() -> Self {
+                let start = PACKET_CAPACITY / 2;
+                Self { storage: [0; PACKET_CAPACITY], start, end: start }
+            }
+            pub fn is_empty(&self) -> bool { self.start == self.end }
+            pub fn len(&self) -> usize { self.end - self.start }
+            pub fn range(&self) -> Range<usize> { self.start..self.end }
+            pub fn read_area(&mut self) -> &mut [u8] { &mut self.storage[self.start..] }
+            pub fn set_read_len(&mut self, len: usize) -> Result<(), &'static str> {
+                if self.start + len > PACKET_CAPACITY { return Err("client packet exceeds buffer capacity"); }
+                self.end = self.start + len;
+                Ok(())
+            }
+            pub fn prepend(&mut self, len: usize) -> &mut [u8] {
+                assert!(len <= self.start);
+                self.start -= len;
+                &mut self.storage[self.start..self.start + len]
+            }
+            pub fn extend_tail(&mut self, len: usize) -> &mut [u8] {
+                assert!(self.end + len <= PACKET_CAPACITY);
+                let start = self.end;
+                self.end += len;
+                &mut self.storage[start..self.end]
+            }
+            pub fn set_range(&mut self, range: Range<usize>) {
+                assert!(range.start <= range.end && range.end <= PACKET_CAPACITY);
+                self.start = range.start;
+                self.end = range.end;
+            }
+            pub fn storage_mut(&mut self) -> &mut [u8] { &mut self.storage }
+            pub fn as_slice(&self) -> &[u8] { &self.storage[self.start..self.end] }
+        }
+    }
+
     mod client_wrap_test {
         include!("client_wrap_test.rs");
     }
