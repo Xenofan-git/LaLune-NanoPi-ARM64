@@ -101,7 +101,8 @@ dataplane_test = '''
     fn ipv4_packet(src: [u8; 4], dst: [u8; 4], marker: u8) -> Vec<u8> {
         let mut packet = vec![0u8; 28];
         packet[0] = 0x45;
-        packet[2..4].copy_from_slice(&(packet.len() as u16).to_be_bytes());
+        let packet_len = packet.len() as u16;
+        packet[2..4].copy_from_slice(&packet_len.to_be_bytes());
         packet[8] = 64;
         packet[9] = 17;
         packet[12..16].copy_from_slice(&src);
