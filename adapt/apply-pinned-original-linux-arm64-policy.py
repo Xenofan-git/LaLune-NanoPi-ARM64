@@ -365,9 +365,11 @@ replace_once(
 linux_direct = r'''
 const directMark = "0x4c4c"
 const directRulePref = "22010"
-const directNftPath = "/run/lalune-direct.nft"
-const directDnsmasqPath = "/etc/dnsmasq.d/lalune-direct.conf"
-const directDnsmasqMain = "/etc/dnsmasq.conf"
+
+// Paths are variables so tests can isolate Direct's filesystem effects in a tempdir.
+var directNftPath = "/run/lalune-direct.nft"
+var directDnsmasqPath = "/etc/dnsmasq.d/lalune-direct.conf"
+var directDnsmasqMain = "/etc/dnsmasq.conf"
 const directDnsmasqInclude = "conf-file=/etc/dnsmasq.d/lalune-direct.conf"
 
 func writeDirectFileAtomic(path string, data []byte, mode os.FileMode) error {
