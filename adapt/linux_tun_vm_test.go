@@ -74,6 +74,48 @@ func TestLinuxTunRejectsInvalidConfigBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestLinuxTunSuccessfulSetupBuildsIsolatedPolicy(t *testing.T) {
+	logPath := installTunCommandShims(t, "")
+	app := tunTestApp()
+	if err := app.tun.SetupRoutes("192.0.2.10", "8.8.8.8,1.1.1.1"); err != nil {
+		t.Fatalf("valid TUN setup failed: %v", err)
+	}
+	log := readTunCommandLog(t, logPath)
+	for _, required := range []string{
+		"SUDO ip tuntap add dev csqtt0 mode tun",
+		"SUDO ip route add 192.168.4.0/24 dev eth0 table 202",
+		"SUDO ip route add 192.168.5.0/24 dev eth1 table 202",
+		"SUDO ip route add default dev csqtt0 table 202",
+		"SUDO ip rule add pref 22020 from 192.168.5.0/24 lookup 202",
+		"SUDO resolvectl dns csqtt0 8.8.8.8 1.1.1.1",
+	} {
+		if !strings.Contains(log, required) {
+			t.Fatalf("successful setup trace missing %q:\\n%s", required, log)
+		}
+	}
+	if strings.Contains(log, "SUDO ip route add default dev csqtt0\n") {
+		t.Fatalf("setup installed a global default route instead of table 202:\\n%s", log)
+	}
+	assertNoDirectCleanup(t, log)
+}
+
+func TestLinuxTunCleanupRefusesUnownedState(t *testing.T) {
+	logPath := installTunCommandShims(t, "")
+	app := tunTestApp()
+	// The shims report no CSQTT-owned rule/default route. Cleanup must be a no-op.
+	app.tun.CleanupRoutes()
+	log := readTunCommandLog(t, logPath)
+	if strings.Contains(log, "SUDO ip rule del pref 22020") ||
+		strings.Contains(log, "SUDO ip route del default dev csqtt0 table 202") ||
+		strings.Contains(log, "SUDO ip tuntap del dev csqtt0 mode tun") {
+		t.Fatalf("cleanup touched unowned TUN state:\\n%s", log)
+	}
+	if !strings.Contains(log, "SUDO ip rule show pref 22020") {
+		t.Fatalf("cleanup did not verify ownership before mutation:\\n%s", log)
+	}
+	assertNoDirectCleanup(t, log)
+}
+
 func TestLinuxTunRefusesForeignTableOrRule(t *testing.T) {
 	t.Run("foreign route table", func(t *testing.T) {
 		logPath := installTunCommandShims(t, "")
