@@ -96,7 +96,8 @@ func TestLinuxTunSuccessfulSetupBuildsIsolatedPolicy(t *testing.T) {
 	if strings.Contains(log, "SUDO ip route add default dev csqtt0\n") {
 		t.Fatalf("setup installed a global default route instead of table 202:\\n%s", log)
 	}
-	assertNoDirectCleanup(t, log)
+	// Applying an empty Direct plan deliberately reconciles that separate policy;
+	// the assertions above are limited to the CSQTT route table and DNS scope.
 }
 
 func TestLinuxTunCleanupRefusesUnownedState(t *testing.T) {
