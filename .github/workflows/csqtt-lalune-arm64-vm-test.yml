@@ -184,7 +184,7 @@ jobs:
               sleep 1
             done
             sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-before-probe.log
-            python3 - <<'PY_CSQTT_VM_TEST'
+            python3 - <<'"'"'PY_CSQTT_VM_TEST'"'"'
           import socket
           import ssl
           import urllib.request
