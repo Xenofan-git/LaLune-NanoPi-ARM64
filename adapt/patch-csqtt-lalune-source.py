@@ -230,7 +230,7 @@ dataplane_test = '''
         engine.on_tun_batch_end(&mut sink);
         assert_eq!(sink.udp.len(), 1, "server TUN packet must produce an encrypted UDP datagram");
         let server_wire = sink.udp.pop().unwrap();
-        let mut client_downlink = client_obfs_test::PacketBuf::new();
+        let mut client_downlink = client_packet_test::PacketBuf::new();
         client_downlink.read_area()[..server_wire.len()].copy_from_slice(&server_wire);
         client_downlink.set_read_len(server_wire.len()).unwrap();
         client_cipher.unwrap(&mut client_downlink, client_obfs_test::ObfsMode::Audio)
