@@ -25,8 +25,8 @@ if "pub fn derive_wrap_key(" not in client_wrap or "pub fn unwrap(" not in clien
 client_wrap = client_wrap.replace("#[cfg(test)]\nmod tests {", "#[cfg(test)]\nmod tests {", 1)
 # Client's rand 0.10 API is aliased so the server's pinned rand 0.8 remains unchanged.
 client_obfs = _re.sub(
-    r"use crate::\\{\\s*packet::\\{PACKET_CAPACITY, PacketBuf\\},\\s*wrap::WRAP_KEY_LEN,\\s*\\};",
-    "use super::client_packet_test::{PacketBuf, PACKET_CAPACITY};\\nuse super::client_wrap_test::WRAP_KEY_LEN;",
+    r"use crate::\{\s*packet::\{PACKET_CAPACITY, PacketBuf\},\s*wrap::WRAP_KEY_LEN,\s*\};",
+    "use super::client_packet_test::{PacketBuf, PACKET_CAPACITY};\nuse super::client_wrap_test::WRAP_KEY_LEN;",
     client_obfs,
 )
 if "use super::client_packet_test::{PacketBuf, PACKET_CAPACITY};" not in client_obfs:
