@@ -38,7 +38,7 @@ cargo = cargo_path.read_text()
 cargo_anchor = "[dependencies]\n"
 if cargo.count(cargo_anchor) != 1:
     raise SystemExit("Cargo.toml: expected one dependencies section")
-for dependency in ['rand10 = { package = "rand", version = "0.10.2" }', 'hmac = "0.13.0"', 'sha1 = "0.11.0"']:
+for dependency in ['rand10 = { package = "rand", version = "0.10.2" }', 'hmac = "0.13.0"', 'sha1 = "0.11.0"', 'getrandom = "0.3.4"']:
     if dependency not in cargo:
         cargo = cargo.replace(cargo_anchor, cargo_anchor + dependency + "\n", 1)
 cargo_path.write_text(cargo)
