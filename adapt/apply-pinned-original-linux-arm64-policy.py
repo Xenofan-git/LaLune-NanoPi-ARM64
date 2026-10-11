@@ -260,6 +260,9 @@ setup = '''func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) {
 			t.app.core.AddLog(fmt.Sprintf("[TUN] DNS для csqtt0 недоступен через systemd-resolved; /etc/resolv.conf не изменялся: %v", err))
 		}
 	}
+	if err := t.applyDirectRoutingLocked(); err != nil {
+		t.app.core.AddLog(fmt.Sprintf("[DIRECT] Ошибка применения: %v", err))
+	}
 	t.app.core.AddLog("[TUN] TUN настроен успешно (table 202; чужие маршруты и DNS сохранены)")
 }'''
 s = s[:start] + setup + s[end:]
@@ -274,6 +277,7 @@ cleanup = '''func (t *LinuxTun) CleanupRoutes() {
 		t.app.core.AddLog("[TUN] Очистка пропущена: правило/маршрут не подтверждают владение")
 		return
 	}
+	t.cleanupDirectRoutingLocked()
 	t.app.core.AddLog("[TUN] Удаление TUN...")
 	for _, command := range []string{
 		"ip rule del pref 22020 from 192.168.5.0/24 lookup 202",
