@@ -29,6 +29,7 @@ jobs:
           test -s vm/real/server-assets/csqtt-lalune-linux-arm64
           test -x vm/real/server-assets/install-csqtt-lalune.sh
           test -x vm/real/server-assets/uninstall-csqtt-lalune.sh
+          test -x vm/real/client-tun-tests-arm64
           file vm/real/server-assets/csqtt-lalune-linux-arm64
           sha256sum vm/real/server-assets/csqtt-lalune-linux-arm64
 
@@ -353,13 +354,15 @@ jobs:
           WantedBy=multi-user.target
           EOF
           done
-          $SCP "$INSTALLER" "$UNINSTALLER" "$BINARY" vm/csqtt.service vm/csqtt-47000.service vm/csqtt-47000-netns.service vm/csqtt-vm-probe.py tester@127.0.0.1:/home/tester/
+          $SCP "$INSTALLER" "$UNINSTALLER" "$BINARY" vm/real/client-tun-tests-arm64 vm/csqtt.service vm/csqtt-47000.service vm/csqtt-47000-netns.service vm/csqtt-vm-probe.py tester@127.0.0.1:/home/tester/
           $SSH 'set -eux
             sudo install -d -m 0755 /opt/lalune-package
             sudo install -m 0755 /home/tester/install-csqtt-lalune.sh /opt/lalune-package/install-csqtt-lalune.sh
             sudo install -m 0755 /home/tester/uninstall-csqtt-lalune.sh /opt/lalune-package/uninstall-csqtt-lalune.sh
             test -s /home/tester/csqtt-lalune-linux-arm64
             sudo install -m 0755 /home/tester/csqtt-lalune-linux-arm64 /opt/lalune-package/csqtt-lalune-linux-arm64
+            sudo install -m 0755 /home/tester/client-tun-tests-arm64 /usr/local/bin/client-tun-tests-arm64
+            /usr/local/bin/client-tun-tests-arm64 -test.v
             file /opt/lalune-package/csqtt-lalune-linux-arm64
             sudo install -m 0644 /home/tester/csqtt.service /etc/systemd/system/csqtt.service
             sudo install -m 0644 /home/tester/csqtt-47000.service /etc/systemd/system/csqtt-47000.service
