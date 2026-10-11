@@ -210,17 +210,56 @@ jobs:
               "e1bb0620daa26d1743f2c25af6bd9ade9901"
           )
           sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+          sock.bind(("127.0.0.1", 0))
           sock.settimeout(5)
           sock.sendto(fixture, ("127.0.0.1", 47000))
           try:
               response, peer = sock.recvfrom(65535)
           except socket.timeout:
-              raise SystemExit("valid encrypted CSQTT GETCONF fixture received no server response")
-          finally:
               sock.close()
+              raise SystemExit("valid encrypted CSQTT GETCONF fixture received no server response")
           if len(response) < 32:
+              sock.close()
               raise SystemExit(f"CSQTT response too short: {len(response)} bytes")
           print("CSQTT_AUTH_HANDSHAKE_RESPONSE", len(response), "bytes from", peer)
+
+          # Exercise the actual Linux TUN interface created by the running ARM64 daemon.
+          # The guest kernel routes this ICMP packet into csqtt-lalune0; the daemon must
+          # consume it and emit an encrypted UDP datagram back to this client endpoint.
+          # This covers the live process + kernel TUN + UDP return path, not a CaptureSink.
+          import subprocess
+          tun = subprocess.run(
+              ["ip", "-4", "addr", "show", "dev", "csqtt-lalune0"],
+              check=True, capture_output=True, text=True,
+          ).stdout
+          if "10.67.68.1/" not in tun:
+              sock.close()
+              raise SystemExit("live daemon TUN does not have expected 10.67.68.1 address")
+          route = subprocess.run(
+              ["ip", "-4", "route", "get", "10.67.68.42"],
+              check=True, capture_output=True, text=True,
+          ).stdout
+          if "dev csqtt-lalune0" not in route:
+              sock.close()
+              raise SystemExit(f"client tunnel address is not routed through live TUN: {route.strip()}")
+          ping = subprocess.Popen(
+              ["ping", "-n", "-c", "1", "-W", "1", "10.67.68.42"],
+              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+          )
+          try:
+              try:
+                  tun_response, tun_peer = sock.recvfrom(65535)
+              except socket.timeout:
+                  raise SystemExit(
+                      "live TUN packet did not produce an encrypted UDP return datagram; "
+                      "check whether the GETCONF fixture establishes an active tunnel session"
+                  )
+              if len(tun_response) < 32:
+                  raise SystemExit(f"live TUN return datagram too short: {len(tun_response)} bytes")
+              print("LIVE_TUN_ENCRYPTED_RETURN", len(tun_response), "bytes from", tun_peer)
+          finally:
+              ping.wait(timeout=3)
+              sock.close()
 
           # A malformed datagram must not stop the real server after handshake.
           sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
