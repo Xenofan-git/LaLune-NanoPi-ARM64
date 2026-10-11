@@ -199,40 +199,93 @@ s = s.replace(old_runner, new_runner, 1)
 start = s.index("func (t *LinuxTun) SetupRoutes")
 end = s.index("\n}\n\nfunc (t *LinuxTun) CleanupRoutes", start) + 2
 setup = '''func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) {
-\tt.mu.Lock()
-\tdefer t.mu.Unlock()
-\tt.app.core.AddLog(fmt.Sprintf("[TUN] Настройка TUN (IP: %s, DNS: %s)...", tunIP, tunDNS))
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.app.core.AddLog(fmt.Sprintf("[TUN] Настройка TUN (IP: %s, DNS: %s)...", tunIP, tunDNS))
 
-\tcmd := fmt.Sprintf("ip tuntap add dev csqtt0 mode tun && ip addr add %s/32 dev csqtt0 && ip link set csqtt0 up && ip link set csqtt0 mtu 1300", tunIP)
-\tt.app.runSudo(cmd)
-
-\tfor _, dns := range strings.Split(tunDNS, ",") {
-\t\tdns = strings.TrimSpace(dns)
-\t\tif dns != "" {
-\t\t\tt.app.runSudo(fmt.Sprintf("echo 'nameserver %s' >> /etc/resolv.conf", dns))
-\t\t}
-\t}
-
-\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")
-\tt.app.runSudo("ip route flush table 202 2>/dev/null || true")
-\tt.app.runSudo("ip route replace 192.168.4.0/24 dev eth0 table 202")
-\tt.app.runSudo("ip route replace 192.168.5.0/24 dev eth1 table 202")
-\tt.app.runSudo("ip route replace default dev csqtt0 table 202")
-\tt.app.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")
-
-\tt.app.core.AddLog("[TUN] TUN настроен успешно (policy table 202)")
+	ip := net.ParseIP(strings.TrimSpace(tunIP))
+	if ip == nil || ip.To4() == nil {
+		t.app.core.AddLog("[TUN] ОШИБКА: некорректный IPv4 TUN; настройка отменена")
+		return
+	}
+	var dnsServers []string
+	for _, raw := range strings.Split(tunDNS, ",") {
+		d := strings.TrimSpace(raw)
+		if d == "" { continue }
+		parsed := net.ParseIP(d)
+		if parsed == nil || parsed.To4() == nil {
+			t.app.core.AddLog(fmt.Sprintf("[TUN] ОШИБКА: некорректный DNS IPv4 %q; настройка отменена", d))
+			return
+		}
+		dnsServers = append(dnsServers, parsed.To4().String())
+	}
+	// Refuse to touch a non-empty table or occupied rule priority.
+	if err := t.app.runSudo("test -z \"$(ip -o route show table 202 2>/dev/null)\" && test -z \"$(ip -o rule show pref 22020 2>/dev/null)\""); err != nil {
+		t.app.core.AddLog(fmt.Sprintf("[TUN] ОШИБКА: table 202 или priority 22020 уже заняты; чужие записи сохранены: %v", err))
+		return
+	}
+	cmd := fmt.Sprintf("ip tuntap add dev csqtt0 mode tun && ip addr add %s/32 dev csqtt0 && ip link set csqtt0 up && ip link set csqtt0 mtu 1300", ip.To4().String())
+	if err := t.app.runSudo(cmd); err != nil {
+		t.app.core.AddLog(fmt.Sprintf("[TUN] ОШИБКА создания интерфейса: %v", err))
+		return
+	}
+	createdRoutes := []string{}
+	createdRule := false
+	rollback := func() {
+		if createdRule { _ = t.app.runSudo("ip rule del pref 22020 from 192.168.5.0/24 lookup 202") }
+		for i := len(createdRoutes)-1; i >= 0; i-- { _ = t.app.runSudo(createdRoutes[i]) }
+		_ = t.app.runSudo("resolvectl revert csqtt0")
+		_ = t.app.runSudo("ip tuntap del dev csqtt0 mode tun")
+	}
+	for _, pair := range []struct{ add, del string }{
+		{"ip route add 192.168.4.0/24 dev eth0 table 202", "ip route del 192.168.4.0/24 dev eth0 table 202"},
+		{"ip route add 192.168.5.0/24 dev eth1 table 202", "ip route del 192.168.5.0/24 dev eth1 table 202"},
+		{"ip route add default dev csqtt0 table 202", "ip route del default dev csqtt0 table 202"},
+	} {
+		if err := t.app.runSudo(pair.add); err != nil {
+			t.app.core.AddLog(fmt.Sprintf("[TUN] ОШИБКА %q: %v; откат", pair.add, err))
+			rollback()
+			return
+		}
+		createdRoutes = append(createdRoutes, pair.del)
+	}
+	if err := t.app.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202"); err != nil {
+		t.app.core.AddLog(fmt.Sprintf("[TUN] ОШИБКА policy rule: %v; откат", err))
+		rollback()
+		return
+	}
+	createdRule = true
+	if len(dnsServers) > 0 {
+		if err := t.app.runSudo("resolvectl dns csqtt0 " + strings.Join(dnsServers, " ")); err != nil {
+			t.app.core.AddLog(fmt.Sprintf("[TUN] DNS для csqtt0 недоступен через systemd-resolved; /etc/resolv.conf не изменялся: %v", err))
+		}
+	}
+	t.app.core.AddLog("[TUN] TUN настроен успешно (table 202; чужие маршруты и DNS сохранены)")
 }'''
 s = s[:start] + setup + s[end:]
 start = s.index("func (t *LinuxTun) CleanupRoutes")
 end = s.index("\n}\n\nfunc (t *LinuxTun) AddBypassRoute", start) + 2
 cleanup = '''func (t *LinuxTun) CleanupRoutes() {
-\tt.mu.Lock()
-\tdefer t.mu.Unlock()
-\tt.app.core.AddLog("[TUN] Удаление TUN...")
-\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")
-\tt.app.runSudo("ip route flush table 202 2>/dev/null || true")
-\tt.app.runSudo("ip tuntap del dev csqtt0 mode tun 2>/dev/null || true")
-\tt.app.core.AddLog("[TUN] TUN удалён")
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.app.core.AddLog("[TUN] Удаление TUN...")
+	for _, command := range []string{
+		"ip rule del pref 22020 from 192.168.5.0/24 lookup 202",
+		"ip route del default dev csqtt0 table 202",
+		"ip route del 192.168.5.0/24 dev eth1 table 202",
+		"ip route del 192.168.4.0/24 dev eth0 table 202",
+	} {
+		if err := t.app.runSudo(command); err != nil {
+			t.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось удалить запись %q: %v", command, err))
+		}
+	}
+	if err := t.app.runSudo("resolvectl revert csqtt0"); err != nil {
+		t.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось сбросить DNS csqtt0: %v", err))
+	}
+	if err := t.app.runSudo("ip tuntap del dev csqtt0 mode tun"); err != nil {
+		t.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось удалить csqtt0: %v", err))
+	}
+	t.app.core.AddLog("[TUN] TUN удалён; чужие маршруты и /etc/resolv.conf не изменялись")
 }'''
 s = s[:start] + cleanup + s[end:]
 LINUX.write_text(s)
