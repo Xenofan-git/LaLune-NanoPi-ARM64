@@ -30,6 +30,60 @@ if bridge_source.count(old_tun_interface) != 1:
 bridge_source = bridge_source.replace(old_tun_interface, new_tun_interface, 1)
 BRIDGE.write_text(bridge_source)
 
+
+# Make Bridge.StartTunnel fail closed when UDP or Linux TUN startup fails.
+bridge_source = BRIDGE.read_text()
+old_start_tunnel = """func (b *Bridge) StartTunnel(corePort int) {
+\tif b.TunRunning {
+\t\treturn
+\t}
+\tudpConn, err := net.Dial("udp", fmt.Sprintf("127.0.0.1:%d", corePort))
+\tif err != nil {
+\t\tb.Core.AddLog(fmt.Sprintf("[TUN] UDP ошибка: %v", err))
+\t\treturn
+\t}
+\tb.UdpConn = udpConn
+\tb.TunRunning = true
+\tb.Tun.Start(udpConn, &b.TunRunning)
+\tb.Core.AddLog("[TUN] Пакетный мост запущен")
+}"""
+new_start_tunnel = """type tunStarterWithError interface {
+\tStartWithError(udpConn net.Conn, running *bool) error
+}
+
+func (b *Bridge) StartTunnel(corePort int) bool {
+\tif b.TunRunning {
+\t\treturn true
+\t}
+\tudpConn, err := net.Dial("udp", fmt.Sprintf("127.0.0.1:%d", corePort))
+\tif err != nil {
+\t\tb.Core.AddLog(fmt.Sprintf("[TUN] UDP ошибка: %v", err))
+\t\treturn false
+\t}
+\tb.UdpConn = udpConn
+\tb.TunRunning = true
+\tif starter, ok := b.Tun.(tunStarterWithError); ok {
+\t\terr = starter.StartWithError(udpConn, &b.TunRunning)
+\t} else {
+\t\tb.Tun.Start(udpConn, &b.TunRunning)
+\t}
+\tif err != nil {
+\t\tb.TunRunning = false
+\t\t_ = udpConn.Close()
+\t\tb.UdpConn = nil
+\t\tb.Tun.Stop()
+\t\tb.Core.SetConnected(false)
+\t\tb.Core.AddLog(fmt.Sprintf("[TUN] Запуск пакетного моста отменён: %v", err))
+\t\treturn false
+\t}
+\tb.Core.AddLog("[TUN] Пакетный мост запущен")
+\treturn true
+}"""
+if old_start_tunnel not in bridge_source:
+    raise SystemExit("Bridge.StartTunnel source marker missing or ambiguous")
+bridge_source = bridge_source.replace(old_start_tunnel, new_start_tunnel, 1)
+BRIDGE.write_text(bridge_source)
+
 # New CSQTT core Auto VK protocol: stdin bootstrap replaces obsolete --token.
 bs = BRIDGE.read_text()
 bs = bs.replace('import (\n\t"fmt"', 'import (\n\t"encoding/base64"\n\t"encoding/json"\n\t"fmt"', 1)
@@ -107,17 +161,23 @@ func (t *LinuxTun) Stop()                     {}'''
 new='''func (t *LinuxTun) Setup() error { return nil }
 
 func (t *LinuxTun) Start(udpConn net.Conn, running *bool) {
+\tif err := t.StartWithError(udpConn, running); err != nil {
+\t\tt.app.core.AddLog(fmt.Sprintf("[TUN] Запуск TUN не выполнен: %v", err))
+\t}
+}
+
+func (t *LinuxTun) StartWithError(udpConn net.Conn, running *bool) error {
 \tt.mu.Lock()
 \tif t.tunFile != nil {
 \t\tt.mu.Unlock()
-\t\treturn
+\t\treturn nil
 \t}
 
 \tf, err := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
 \tif err != nil {
 \t\tt.mu.Unlock()
 \t\tt.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось открыть /dev/net/tun: %v", err))
-\t\treturn
+\t\treturn fmt.Errorf("open /dev/net/tun: %w", err)
 \t}
 
 \tifr, err := unix.NewIfreq("csqtt0")
@@ -125,14 +185,14 @@ func (t *LinuxTun) Start(udpConn net.Conn, running *bool) {
 \t\tf.Close()
 \t\tt.mu.Unlock()
 \t\tt.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось создать ifreq: %v", err))
-\t\treturn
+\t\treturn fmt.Errorf("create TUN ifreq: %w", err)
 \t}
 \tifr.SetUint16(unix.IFF_TUN | unix.IFF_NO_PI)
 \tif err := unix.IoctlIfreq(int(f.Fd()), unix.TUNSETIFF, ifr); err != nil {
 \t\tf.Close()
 \t\tt.mu.Unlock()
 \t\tt.app.core.AddLog(fmt.Sprintf("[TUN] TUNSETIFF csqtt0: %v", err))
-\t\treturn
+\t\treturn fmt.Errorf("TUNSETIFF csqtt0: %w", err)
 \t}
 
 \tt.tunFile = f
@@ -168,6 +228,7 @@ func (t *LinuxTun) Start(udpConn net.Conn, running *bool) {
 \t\t\t}
 \t\t}
 \t}()
+\treturn nil
 }
 
 func (t *LinuxTun) Stop() {
@@ -203,7 +264,13 @@ new_runner = """        if tun, ok := bridge.Tun.(*LinuxTun); ok {
                 bridge.Core.SetConnected(false)
                 return
             }
-            bridge.StartTunnel(coreListenPort)
+            if !bridge.StartTunnel(coreListenPort) {
+                bridge.Core.AddLog("[TUN] Подключение отменено: пакетный мост не запущен")
+                bridge.CleanupRoutes()
+                bridge.Core.SetConnected(false)
+                if cmd.Process != nil { _ = cmd.Process.Kill() }
+                return
+            }
         }"""
 if old_runner not in s:
     raise SystemExit("LinuxRunner TUN setup marker not found")
