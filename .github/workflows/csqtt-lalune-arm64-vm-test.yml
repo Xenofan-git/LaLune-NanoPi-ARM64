@@ -228,15 +228,14 @@ jobs:
           # checking interface counters or an arbitrary UDP response.
           def make_wire(payload, sequence):
               import struct
-              header = bytearray(24)
-              header[0] = 0xB0  # RTP v2, extension, padding
-              header[1] = 111
+              # Preserve the pinned GETCONF fixture's RTP header layout and CSQTT
+              # extension metadata. Only advance replay sequence and timestamp;
+              # different SSRC/extension fields are not a faithful client datagram.
+              header = bytearray.fromhex(
+                  "b06f77881122334410203040bede0002325566775199aa00"
+              )
               header[2:4] = struct.pack("!H", sequence & 0xffff)
-              header[4:8] = struct.pack("!I", 0x10203040 + sequence)
-              header[8:12] = struct.pack("!I", 0x11223344)
-              header[12:14] = b"\xbe\xde"
-              header[14:16] = b"\x00\x02"
-              header[16:24] = b"\x32\x01\x02\x03\x51\x00\x01\x00"
+              header[8:12] = struct.pack("!I", 0x10203040 + ((sequence - 0x7788) & 0xffffffff))
               nonce = bytes(header[8:12] + header[2:4] + b"\x00\x00" + header[4:8])
               return bytes(header) + ChaCha20Poly1305(key).encrypt(nonce, payload, bytes(header)) + b"\x01"
           
