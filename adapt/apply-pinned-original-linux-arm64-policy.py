@@ -239,8 +239,8 @@ setup = '''func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) error {
 		if createdRule { _ = t.app.runSudo("ip rule del pref 22020 from 192.168.5.0/24 lookup 202") }
 		for i := len(createdRoutes)-1; i >= 0; i-- { _ = t.app.runSudo(createdRoutes[i]) }
 		t.cleanupDirectRoutingLocked()
-		_ = t.app.runSudo("resolvectl revert csqtt0")
-		_ = t.app.runSudo("ip tuntap del dev csqtt0 mode tun")
+		if err := t.app.runSudo("resolvectl revert csqtt0"); err != nil { t.app.core.AddLog(fmt.Sprintf("[TUN] rollback DNS: %v", err)) }
+		if err := t.app.runSudo("ip tuntap del dev csqtt0 mode tun"); err != nil { t.app.core.AddLog(fmt.Sprintf("[TUN] rollback interface: %v", err)) }
 	}
 	for _, pair := range []struct{ add, del string }{
 		{"ip route add 192.168.4.0/24 dev eth0 table 202", "ip route del 192.168.4.0/24 dev eth0 table 202"},
