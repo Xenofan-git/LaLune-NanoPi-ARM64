@@ -108,21 +108,22 @@ dataplane_test = '''
                 self.end = self.start + len;
                 Ok(())
             }
-            pub fn prepend(&mut self, len: usize) -> &mut [u8] {
-                assert!(len <= self.start);
+            pub fn prepend(&mut self, len: usize) -> anyhow::Result<&mut [u8]> {
+                anyhow::ensure!(len <= self.start, "client packet headroom exhausted");
                 self.start -= len;
-                &mut self.storage[self.start..self.start + len]
+                Ok(&mut self.storage[self.start..self.start + len])
             }
-            pub fn extend_tail(&mut self, len: usize) -> &mut [u8] {
-                assert!(self.end + len <= PACKET_CAPACITY);
+            pub fn extend_tail(&mut self, len: usize) -> anyhow::Result<&mut [u8]> {
+                anyhow::ensure!(self.end + len <= PACKET_CAPACITY, "client packet tailroom exhausted");
                 let start = self.end;
                 self.end += len;
-                &mut self.storage[start..self.end]
+                Ok(&mut self.storage[start..self.end])
             }
-            pub fn set_range(&mut self, range: Range<usize>) {
-                assert!(range.start <= range.end && range.end <= PACKET_CAPACITY);
+            pub fn set_range(&mut self, range: Range<usize>) -> anyhow::Result<()> {
+                anyhow::ensure!(range.start <= range.end && range.end <= PACKET_CAPACITY, "invalid client packet range");
                 self.start = range.start;
                 self.end = range.end;
+                Ok(())
             }
             pub fn storage_mut(&mut self) -> &mut [u8] { &mut self.storage }
             pub fn as_slice(&self) -> &[u8] { &self.storage[self.start..self.end] }
@@ -212,7 +213,7 @@ dataplane_test = '''
         ).unwrap();
         let client_config = client_obfs_test::ObfsConfig::new(client_obfs_test::ObfsMode::Audio);
         let mut client_state = client_obfs_test::ObfsState::new();
-        let mut client_packet_buf = client_obfs_test::PacketBuf::new();
+        let mut client_packet_buf = client_packet_test::PacketBuf::new();
         client_packet_buf.read_area()[..client_packet.len()].copy_from_slice(&client_packet);
         client_packet_buf.set_read_len(client_packet.len()).unwrap();
         client_cipher.wrap(&mut client_packet_buf, &client_config, &mut client_state).unwrap();
