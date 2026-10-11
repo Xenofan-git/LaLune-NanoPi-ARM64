@@ -223,47 +223,47 @@ func TestLinuxTunDNSFailureRollsBackAndPreservesDirect(t *testing.T) {
 
 
 type failingStartTun struct {
-\tstartCalled bool
-\tstopCalled  bool
+	startCalled bool
+	stopCalled  bool
 }
 
 func (t *failingStartTun) Setup() error { return nil }
 func (t *failingStartTun) Start(net.Conn, *bool) { t.startCalled = true }
 func (t *failingStartTun) StartWithError(net.Conn, *bool) error {
-\treturn errors.New("injected TUNSETIFF failure")
+	return errors.New("injected TUNSETIFF failure")
 }
 func (t *failingStartTun) Stop() { t.stopCalled = true }
 func (t *failingStartTun) SetupRoutes(string, string) error { return nil }
 func (t *failingStartTun) CleanupRoutes() {}
 
 func TestBridgeStartTunnelFailsClosedOnTUNStartError(t *testing.T) {
-\tlistener, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
-\tif err != nil { t.Fatalf("listen UDP: %v", err) }
-\tdefer listener.Close()
+	listener, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil { t.Fatalf("listen UDP: %v", err) }
+	defer listener.Close()
 
-\ttun := &failingStartTun{}
-\tcore := libs.NewAppCore()
-\tcore.SetConnected(true)
-\tbridge := libs.NewBridge(core, tun, nil)
-\tif bridge.StartTunnel(listener.LocalAddr().(*net.UDPAddr).Port) {
-\t\tt.Fatal("StartTunnel unexpectedly reported success after injected TUN startup failure")
-\t}
-\tif bridge.TunRunning { t.Fatal("TunRunning remained true after failed startup") }
-\tif bridge.UdpConn != nil { t.Fatal("UDP connection was retained after failed startup") }
-\tif core.IsConnected() { t.Fatal("core remained connected after failed TUN startup") }
-\tif !tun.stopCalled { t.Fatal("TUN Stop was not called during rollback") }
-\tif tun.startCalled { t.Fatal("legacy non-error Start method used despite error-aware starter") }
+	tun := &failingStartTun{}
+	core := libs.NewAppCore()
+	core.SetConnected(true)
+	bridge := libs.NewBridge(core, tun, nil)
+	if bridge.StartTunnel(listener.LocalAddr().(*net.UDPAddr).Port) {
+		t.Fatal("StartTunnel unexpectedly reported success after injected TUN startup failure")
+	}
+	if bridge.TunRunning { t.Fatal("TunRunning remained true after failed startup") }
+	if bridge.UdpConn != nil { t.Fatal("UDP connection was retained after failed startup") }
+	if core.IsConnected() { t.Fatal("core remained connected after failed TUN startup") }
+	if !tun.stopCalled { t.Fatal("TUN Stop was not called during rollback") }
+	if tun.startCalled { t.Fatal("legacy non-error Start method used despite error-aware starter") }
 }
 
 func TestBridgeStartTunnelRejectsInvalidUDPPort(t *testing.T) {
-\ttun := &failingStartTun{}
-\tcore := libs.NewAppCore()
-\tcore.SetConnected(true)
-\tbridge := libs.NewBridge(core, tun, nil)
-\tif bridge.StartTunnel(70000) {
-\t\tt.Fatal("StartTunnel unexpectedly accepted invalid UDP port")
-\t}
-\tif bridge.TunRunning { t.Fatal("TunRunning set after UDP dial failure") }
-\tif bridge.UdpConn != nil { t.Fatal("UDP connection retained after UDP dial failure") }
-\tif tun.startCalled || tun.stopCalled { t.Fatal("TUN was touched after UDP dial failed") }
+	tun := &failingStartTun{}
+	core := libs.NewAppCore()
+	core.SetConnected(true)
+	bridge := libs.NewBridge(core, tun, nil)
+	if bridge.StartTunnel(70000) {
+		t.Fatal("StartTunnel unexpectedly accepted invalid UDP port")
+	}
+	if bridge.TunRunning { t.Fatal("TunRunning set after UDP dial failure") }
+	if bridge.UdpConn != nil { t.Fatal("UDP connection retained after UDP dial failure") }
+	if tun.startCalled || tun.stopCalled { t.Fatal("TUN was touched after UDP dial failed") }
 }
