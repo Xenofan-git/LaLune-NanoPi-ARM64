@@ -11,6 +11,37 @@ paths = {
     "protocol": root / "protocol.rs",
 }
 sources = {key: path.read_text() for key, path in paths.items()}
+
+# Compile the exact pinned client obfuscation and key-derivation implementation
+# into the server's isolated test binary. This lets the dataplane test exchange
+# real client-produced RTP/AEAD packets with the server engine, rather than using
+# the server's own encoder/decoder to impersonate the client.
+client_root = root.parent / "rust-client"
+client_wrap = (client_root / "wrap.rs").read_text()
+client_obfs = (client_root / "obfs.rs").read_text()
+if "pub fn derive_wrap_key(" not in client_wrap or "pub fn unwrap(" not in client_obfs or "pub fn wrap(" not in client_obfs:
+    raise SystemExit("pinned client wrap/obfs source lacks expected public API")
+client_wrap = client_wrap.replace("#[cfg(test)]\nmod tests {", "#[cfg(test)]\nmod tests {", 1)
+# Client's rand 0.10 API is aliased so the server's pinned rand 0.8 remains unchanged.
+client_obfs = client_obfs.replace("use crate::{\n    packet::{PACKET_CAPACITY, PacketBuf},\n    wrap::WRAP_KEY_LEN,\n};",
+                                  "use crate::packet::{PACKET_CAPACITY, PacketBuf};\nuse super::client_wrap_test::WRAP_KEY_LEN;")
+client_obfs = client_obfs.replace("rand::", "rand10::")
+import re as _re
+client_obfs = _re.sub(r"\n#\[cfg\(test\)\]\nmod tests \{.*\Z", "\n", client_obfs, flags=_re.S)
+if "crate::wrap::" in client_obfs or "rand::" in client_obfs:
+    raise SystemExit("client obfuscation test adapter has unresolved module/dependency names")
+(root / "client_wrap_test.rs").write_text(client_wrap)
+(root / "client_obfs_test.rs").write_text(client_obfs)
+
+cargo_path = root / "Cargo.toml"
+cargo = cargo_path.read_text()
+cargo_anchor = "[dependencies]\n"
+if cargo.count(cargo_anchor) != 1:
+    raise SystemExit("Cargo.toml: expected one dependencies section")
+for dependency in ['rand10 = { package = "rand", version = "0.10.2" }', 'hmac = "0.13.0"', 'sha1 = "0.11.0"']:
+    if dependency not in cargo:
+        cargo = cargo.replace(cargo_anchor, cargo_anchor + dependency + "\n", 1)
+cargo_path.write_text(cargo)
 replacements = [
     ("net", 'pub const TUN_IFACE: &str = "csqtt1";', 'pub const TUN_IFACE: &str = "csqtt-lalune0";', "net_setup TUN interface", 1),
     ("net", 'pub const TUN_ADDR: &str = "10.66.67.1";', 'pub const TUN_ADDR: &str = "10.67.68.1";', "net_setup TUN address", 1),
@@ -54,6 +85,13 @@ insertion = "\n    " + client_protocol_test_module.strip().replace("\n", "\n    
 sources["protocol"] = sources["protocol"][:match.end()] + insertion + sources["protocol"][match.end():]
 
 dataplane_test = '''
+    mod client_wrap_test {
+        include!("client_wrap_test.rs");
+    }
+    mod client_obfs_test {
+        include!("client_obfs_test.rs");
+    }
+
     struct CaptureSink {
         udp: Vec<Vec<u8>>,
         tun: Vec<Vec<u8>>,
@@ -124,18 +162,20 @@ dataplane_test = '''
         // Client -> server: the authenticated encrypted UDP payload must emerge
         // from the server's TUN sink as the identical IPv4 packet.
         let client_packet = ipv4_packet([10, 67, 68, 42], [192, 0, 2, 10], 0xa1);
-        let mut client_wire = {
-            let slot = engine.by_id.get(&session_id).copied().unwrap();
-            let session = engine.sessions.get_mut(slot).unwrap();
-            let pool = crate::packet::PacketPool::new(1);
-            let mut output = pool.try_acquire().unwrap();
-            let mut rng = StdRng::seed_from_u64(0x434c_4945_4e54);
-            wrap_legacy_into(session, &client_packet, &mut rng, &mut output, Instant::now(), false).unwrap();
-            output.as_slice().to_vec()
-        };
+        let client_pool = crate::packet::PacketPool::new(2);
+        let client_cipher = client_obfs_test::ObfsCipher::new(
+            client_wrap_test::derive_wrap_key("wire-password").unwrap()
+        ).unwrap();
+        let client_config = client_obfs_test::ObfsConfig::new(client_obfs_test::ObfsMode::Audio);
+        let mut client_state = client_obfs_test::ObfsState::new();
+        let mut client_packet_buf = client_pool.try_acquire().unwrap();
+        client_packet_buf.read_area()[..client_packet.len()].copy_from_slice(&client_packet);
+        client_packet_buf.set_read_len(client_packet.len()).unwrap();
+        client_cipher.wrap(&mut client_packet_buf, &client_config, &mut client_state).unwrap();
+        let mut client_wire = client_packet_buf.as_slice().to_vec();
         let mut sink = CaptureSink::new();
         engine.on_udp(peer, None, &mut client_wire, &mut sink);
-        assert_eq!(sink.tun, vec![client_packet], "client IPv4 packet must be delivered to server TUN");
+        assert_eq!(sink.tun, vec![client_packet], "real pinned client obfs packet must reach server TUN unchanged");
 
         // Server -> client: a packet addressed to the active tunnel IP must be
         // routed, encrypted with the established session, and recover unchanged.
@@ -144,15 +184,14 @@ dataplane_test = '''
         engine.on_tun(&mut server_input, &mut sink);
         engine.on_tun_batch_end(&mut sink);
         assert_eq!(sink.udp.len(), 1, "server TUN packet must produce an encrypted UDP datagram");
-        let mut server_wire = sink.udp.pop().unwrap();
-        let decoded = {
-            let slot = engine.by_id.get(&session_id).copied().unwrap();
-            let session = engine.sessions.get(slot).unwrap();
-            unwrap_legacy_in_place(&session.aes, &session.hmac, &session.chacha, &mut server_wire, Some(session.is_srtp), false)
-                .expect("server-to-client datagram must authenticate and decrypt")
-        };
-        let plain = decoded.range.get(&server_wire);
-        assert_eq!(flow_frame::payload(plain), server_packet.as_slice(), "client must recover identical IPv4 packet");
+        let server_wire = sink.udp.pop().unwrap();
+        let mut client_downlink = client_pool.try_acquire().unwrap();
+        client_downlink.read_area()[..server_wire.len()].copy_from_slice(&server_wire);
+        client_downlink.set_read_len(server_wire.len()).unwrap();
+        client_cipher.unwrap(&mut client_downlink, client_obfs_test::ObfsMode::Audio)
+            .expect("actual pinned client must authenticate and decrypt server datagram");
+        assert_eq!(flow_frame::payload(client_downlink.as_slice()), server_packet.as_slice(),
+            "actual pinned client must recover identical IPv4 packet");
     }
 '''
 
