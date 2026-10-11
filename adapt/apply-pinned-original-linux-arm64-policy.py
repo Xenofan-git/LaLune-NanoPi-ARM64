@@ -238,7 +238,6 @@ setup = '''func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) error {
 	rollback := func() {
 		if createdRule { _ = t.app.runSudo("ip rule del pref 22020 from 192.168.5.0/24 lookup 202") }
 		for i := len(createdRoutes)-1; i >= 0; i-- { _ = t.app.runSudo(createdRoutes[i]) }
-		t.cleanupDirectRoutingLocked()
 		if err := t.app.runSudo("resolvectl revert csqtt0"); err != nil { t.app.core.AddLog(fmt.Sprintf("[TUN] rollback DNS: %v", err)) }
 		if err := t.app.runSudo("ip tuntap del dev csqtt0 mode tun"); err != nil { t.app.core.AddLog(fmt.Sprintf("[TUN] rollback interface: %v", err)) }
 	}
@@ -591,7 +590,7 @@ linux_direct = "\n".join(_normalized_lines) + "\n"
 
 # Integrate direct-domain/IP bypass into the Linux adapter and settings UI.
 s = LINUX.read_text()
-marker = 'func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) {'
+marker = 'func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) error {'
 if s.count(marker) != 1:
     raise SystemExit('SetupRoutes marker missing or ambiguous')
 s = s.replace(marker, linux_direct + marker, 1)
