@@ -168,7 +168,7 @@ dataplane_test = '''
         ).unwrap();
         let client_config = client_obfs_test::ObfsConfig::new(client_obfs_test::ObfsMode::Audio);
         let mut client_state = client_obfs_test::ObfsState::new();
-        let mut client_packet_buf = client_pool.try_acquire().unwrap();
+        let mut client_packet_buf = client_obfs_test::PacketBuf::new();
         client_packet_buf.read_area()[..client_packet.len()].copy_from_slice(&client_packet);
         client_packet_buf.set_read_len(client_packet.len()).unwrap();
         client_cipher.wrap(&mut client_packet_buf, &client_config, &mut client_state).unwrap();
@@ -185,7 +185,7 @@ dataplane_test = '''
         engine.on_tun_batch_end(&mut sink);
         assert_eq!(sink.udp.len(), 1, "server TUN packet must produce an encrypted UDP datagram");
         let server_wire = sink.udp.pop().unwrap();
-        let mut client_downlink = client_pool.try_acquire().unwrap();
+        let mut client_downlink = client_obfs_test::PacketBuf::new();
         client_downlink.read_area()[..server_wire.len()].copy_from_slice(&server_wire);
         client_downlink.set_read_len(server_wire.len()).unwrap();
         client_cipher.unwrap(&mut client_downlink, client_obfs_test::ObfsMode::Audio)
