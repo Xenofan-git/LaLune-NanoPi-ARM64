@@ -74,8 +74,27 @@ func TestLinuxTunRejectsInvalidConfigBeforeMutation(t *testing.T) {
 	}
 }
 
+func isolateDirectFilesystem(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	oldNft, oldDnsmasq, oldMain := directNftPath, directDnsmasqPath, directDnsmasqMain
+	directNftPath = filepath.Join(dir, "lalune-direct.nft")
+	directDnsmasqPath = filepath.Join(dir, "dnsmasq.d", "lalune-direct.conf")
+	directDnsmasqMain = filepath.Join(dir, "dnsmasq.conf")
+	if err := os.MkdirAll(filepath.Dir(directDnsmasqPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(directDnsmasqMain, []byte("# isolated test config\\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		directNftPath, directDnsmasqPath, directDnsmasqMain = oldNft, oldDnsmasq, oldMain
+	})
+}
+
 func TestLinuxTunSuccessfulSetupBuildsIsolatedPolicy(t *testing.T) {
 	logPath := installTunCommandShims(t, "")
+	isolateDirectFilesystem(t)
 	app := tunTestApp()
 	if err := app.tun.SetupRoutes("192.0.2.10", "8.8.8.8,1.1.1.1"); err != nil {
 		t.Fatalf("valid TUN setup failed: %v", err)
