@@ -306,7 +306,8 @@ jobs:
               reply[ip_header_len + 2:ip_header_len + 4] = checksum(bytes(reply[ip_header_len:])).to_bytes(2, "big")
               reply[10:12] = b"\x00\x00"
               reply[10:12] = checksum(bytes(reply[:ip_header_len])).to_bytes(2, "big")
-              sock.sendto(make_wire(bytes(reply), 0x2345), ("127.0.0.1", 47000))
+              # The GETCONF fixture used RTP sequence 0x7788; continue the client replay window.
+          sock.sendto(make_wire(bytes(reply), 0x7789), ("127.0.0.1", 47000))
               try:
                   ping_output, _ = ping.communicate(timeout=8)
               except subprocess.TimeoutExpired:
