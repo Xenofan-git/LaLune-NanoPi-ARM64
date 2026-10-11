@@ -214,6 +214,12 @@ dataplane_test = '''
             let pool = crate::packet::PacketPool::new(1);
             let mut packet = pool.try_acquire().expect("client packet buffer");
             let mut rng = StdRng::seed_from_u64(0x4353_5154_545f_5550);
+            // GETCONF's inbound sequence is already recorded in the replay
+            // window. The server's outbound counter starts from that fixture
+            // sequence, so its first locally generated packet can be a replay
+            // when used to impersonate the client. Model the next client
+            // sequence instead of feeding the server's first sequence back.
+            session.output.count = session.output.count.wrapping_add(1);
             wrap_legacy_into(session, &client_packet, &mut rng, &mut packet, Instant::now(), false)
                 .expect("encode authenticated CSQTT client datagram");
             packet.as_slice().to_vec()
