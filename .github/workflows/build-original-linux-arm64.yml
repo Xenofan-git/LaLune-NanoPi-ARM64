@@ -33,6 +33,10 @@ jobs:
           grep -Fq 'ip route add default dev csqtt0 table 202' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -Fq 'ip route del default dev csqtt0 table 202' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -Fq 'resolvectl dns csqtt0' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) error' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'if err := tun.SetupRoutes(tunIP, tunDNS); err != nil {' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'return fmt.Errorf("configure csqtt0 DNS: %w", err)' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'rollback()' adapt/apply-pinned-original-linux-arm64-policy.py
       - name: Validate CSQTT panel route UI
         run: |
           set -euxo pipefail
