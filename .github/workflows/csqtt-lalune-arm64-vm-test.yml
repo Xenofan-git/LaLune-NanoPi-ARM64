@@ -184,7 +184,7 @@ jobs:
               sleep 1
             done
             sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-before-probe.log
-            python3 - <<'"'"'PY_CSQTT_VM_TEST'"'"'
+            python3 - <<PY_CSQTT_VM_TEST
           import socket
           import ssl
           import urllib.request
@@ -234,7 +234,7 @@ jobs:
               sock.close()
               raise SystemExit(f"invalid encrypted CSQTT RTP response: {len(response)} bytes")
           header = response[:24]
-          if header[0] & 0x10 == 0 or header[12:14] != b"\\xbe\\xde":
+          if header[0] & 0x10 == 0 or header[12:14] != b"\xbe\xde":
               sock.close()
               raise SystemExit("response does not contain the expected CSQTT RTP extension")
           if response[0] & 0x20:
@@ -256,7 +256,7 @@ jobs:
               salt=b"CSQTT-WRAP-v1",
               info=b"rtp-obfs/chacha20poly1305",
           ).derive(password)
-          nonce = header[8:12] + header[2:4] + b"\\x00\\x00" + header[4:8]
+          nonce = header[8:12] + header[2:4] + b"\x00\x00" + header[4:8]
           try:
               plaintext = ChaCha20Poly1305(key).decrypt(
                   nonce, response[24:tag_start] + response[tag_start:payload_end], header
@@ -318,14 +318,14 @@ jobs:
               header[2:4] = struct.pack("!H", sequence & 0xffff)
               header[4:8] = struct.pack("!I", 0x10203040 + sequence)
               header[8:12] = struct.pack("!I", 0x11223344)
-              header[12:14] = b"\\xbe\\xde"
-              header[14:16] = b"\\x00\\x02"
-              header[16:24] = b"\\x32\\x01\\x02\\x03\\x51\\x00\\x01\\x00"
-              nonce = bytes(header[8:12] + header[2:4] + b"\\x00\\x00" + header[4:8])
-              return bytes(header) + ChaCha20Poly1305(key).encrypt(nonce, payload, bytes(header)) + b"\\x01"
+              header[12:14] = b"\xbe\xde"
+              header[14:16] = b"\x00\x02"
+              header[16:24] = b"\x32\x01\x02\x03\x51\x00\x01\x00"
+              nonce = bytes(header[8:12] + header[2:4] + b"\x00\x00" + header[4:8])
+              return bytes(header) + ChaCha20Poly1305(key).encrypt(nonce, payload, bytes(header)) + b"\x01"
 
           def decrypt_wire(wire):
-              if len(wire) < 41 or wire[0] >> 6 != 2 or wire[12:14] != b"\\xbe\\xde":
+              if len(wire) < 41 or wire[0] >> 6 != 2 or wire[12:14] != b"\xbe\xde":
                   raise SystemExit(f"live dataplane returned invalid RTP packet: {len(wire)} bytes")
               end = len(wire)
               if wire[0] & 0x20:
@@ -333,7 +333,7 @@ jobs:
                   if padding < 1 or padding > end - 40:
                       raise SystemExit("invalid dataplane RTP padding")
                   end -= padding
-              nonce = wire[8:12] + wire[2:4] + b"\\x00\\x00" + wire[4:8]
+              nonce = wire[8:12] + wire[2:4] + b"\x00\x00" + wire[4:8]
               try:
                   return ChaCha20Poly1305(key).decrypt(nonce, wire[24:end], wire[:24])
               except Exception as exc:
@@ -341,7 +341,7 @@ jobs:
 
           def checksum(data):
               if len(data) & 1:
-                  data += b"\\x00"
+                  data += b"\x00"
               total = sum((data[i] << 8) + data[i + 1] for i in range(0, len(data), 2))
               while total >> 16:
                   total = (total & 0xffff) + (total >> 16)
@@ -366,9 +366,9 @@ jobs:
               reply = bytearray(packet)
               reply[12:16], reply[16:20] = packet[16:20], packet[12:16]
               reply[ip_header_len] = 0
-              reply[ip_header_len + 2:ip_header_len + 4] = b"\\x00\\x00"
+              reply[ip_header_len + 2:ip_header_len + 4] = b"\x00\x00"
               reply[ip_header_len + 2:ip_header_len + 4] = checksum(bytes(reply[ip_header_len:])).to_bytes(2, "big")
-              reply[10:12] = b"\\x00\\x00"
+              reply[10:12] = b"\x00\x00"
               reply[10:12] = checksum(bytes(reply[:ip_header_len])).to_bytes(2, "big")
               sock.sendto(make_wire(bytes(reply), 0x2345), ("127.0.0.1", 47000))
               try:
@@ -379,7 +379,7 @@ jobs:
                   raise SystemExit("kernel ping timed out waiting for the encrypted ICMP reply through CSQTT TUN")
               if ping.returncode != 0:
                   raise SystemExit(f"kernel did not receive the authenticated CSQTT ICMP reply: {ping_output}")
-              print("LIVE_TUN_BIDIRECTIONAL_IPV4_PASS", ping_output.strip().replace("\\n", " | "))
+              print("LIVE_TUN_BIDIRECTIONAL_IPV4_PASS", ping_output.strip().replace("\n", " | "))
           finally:
               if ping.poll() is None:
                   ping.kill()
