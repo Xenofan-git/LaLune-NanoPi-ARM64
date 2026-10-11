@@ -268,6 +268,12 @@ end = s.index("\n}\n\nfunc (t *LinuxTun) AddBypassRoute", start) + 2
 cleanup = '''func (t *LinuxTun) CleanupRoutes() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	// Do not remove matching-looking entries unless the complete CSQTT route
+	// signature is present. Setup refuses occupied tables/priorities.
+	if err := t.app.runSudo("ip rule show pref 22020 | grep -Fq 'from 192.168.5.0/24 lookup 202' && ip route show table 202 | grep -Fq 'default dev csqtt0'"); err != nil {
+		t.app.core.AddLog("[TUN] Очистка пропущена: правило/маршрут не подтверждают владение")
+		return
+	}
 	t.app.core.AddLog("[TUN] Удаление TUN...")
 	for _, command := range []string{
 		"ip rule del pref 22020 from 192.168.5.0/24 lookup 202",
