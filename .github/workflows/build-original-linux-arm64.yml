@@ -282,6 +282,15 @@ jobs:
           ! grep -Fq '"30001"' server-source/rust-server/proxy_route.rs
           ! grep -Fq '"1066"' server-source/rust-server/proxy_route.rs
           ! grep -Fq 'CSQTT_TPROXY' server-source/rust-server/proxy_route.rs
+      - name: Test pinned CSQTT client protocol suite
+        working-directory: server-source/rust-client
+        run: |
+          set -euxo pipefail
+          # Run the pinned 2.1.9 client tests on the Linux runner. This complements
+          # the server-side encrypted TUNCONF/client-parser roundtrip and exercises
+          # the actual client protocol, crypto, packet and TUN-adjacent modules.
+          rustup toolchain install 1.97.1 --profile minimal
+          cargo +1.97.1 test --locked
       - name: Build isolated CSQTT server for Linux ARM64
         working-directory: server-source/rust-server
         run: |
