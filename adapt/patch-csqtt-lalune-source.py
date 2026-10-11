@@ -243,6 +243,21 @@ dataplane_test = '''
 roundtrip_test = '''
     #[test]
     fn server_encrypted_tunconf_roundtrips_through_real_client_parser() {
+        // Exercise the exact pinned client GETCONF constructor and the server's
+        // parser against the same WIRE-3 identity fields used by this response.
+        let getconf = client_protocol::config_request(
+            "9000", "wire-device", "wire-password", 7, "ci-salt", 1, Some(1),
+        );
+        assert_eq!(
+            getconf,
+            "GETCONF:9000|wire-device|wire-password|7|ci-salt|1|1|CSQTT-WIRE-3"
+        );
+        assert_eq!(
+            parse_getconf_epoch(getconf.as_bytes()),
+            Some(("wire-device", 7, "ci-salt")),
+            "server epoch parser must accept the pinned client's real WIRE-3 request"
+        );
+
         let (mut engine, _events) = fixture_engine("wire-password");
         engine.handle_unknown_legacy(
             SocketAddr::from(([198, 51, 100, 20], 46000)),
@@ -271,12 +286,20 @@ roundtrip_test = '''
         .expect("session-authenticated TUNCONF must decrypt");
         let plaintext = decoded.range.get(&wire);
         assert_eq!(plaintext, expected);
-        assert_eq!(
-            client_protocol::parse_config_response(plaintext).unwrap(),
-            client_protocol::ConfigResponse::Config(
-                "TUNCONF:10.67.68.42:1.1.1.1,8.8.8.8:0:stream-v2".to_owned()
-            )
-        );
+        let parsed = client_protocol::parse_config_response(plaintext).unwrap();
+        let client_protocol::ConfigResponse::Config(config) = parsed else {
+            panic!("client must decode TUNCONF rather than NOCONF");
+        };
+        let fields = config.strip_prefix("TUNCONF:").expect("TUNCONF prefix")
+            .split(':').collect::<Vec<_>>();
+        assert_eq!(fields, ["10.67.68.42", "1.1.1.1,8.8.8.8", "0", "stream-v2"]);
+        let ip: std::net::Ipv4Addr = fields[0].parse().expect("valid assigned client IPv4");
+        assert_eq!(ip, std::net::Ipv4Addr::new(10, 67, 68, 42));
+        let dns = fields[1].split(',').collect::<Vec<_>>();
+        assert_eq!(dns, ["1.1.1.1", "8.8.8.8"]);
+        for server in &dns {
+            assert!(server.parse::<std::net::Ipv4Addr>().is_ok(), "invalid DNS IPv4: {server}");
+        }
     }
 '''
 test_anchor = '''
