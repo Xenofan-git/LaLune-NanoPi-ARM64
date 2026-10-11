@@ -24,7 +24,7 @@ BRIDGE = UPSTREAM / "Desktop/Libs/bridge.go"
 # runner can fail closed before starting the packet bridge.
 bridge_source = BRIDGE.read_text()
 old_tun_interface = '\tSetupRoutes(tunIP string, tunDNS string)'
-new_tun_interface = '\\tSetupRoutes(tunIP string, tunDNS string) error'
+new_tun_interface = '\tSetupRoutes(tunIP string, tunDNS string) error'
 if bridge_source.count(old_tun_interface) != 1:
     raise SystemExit("TunInterface SetupRoutes marker missing or ambiguous")
 bridge_source = bridge_source.replace(old_tun_interface, new_tun_interface, 1)
