@@ -23,8 +23,13 @@ if "pub fn derive_wrap_key(" not in client_wrap or "pub fn unwrap(" not in clien
     raise SystemExit("pinned client wrap/obfs source lacks expected public API")
 client_wrap = client_wrap.replace("#[cfg(test)]\nmod tests {", "#[cfg(test)]\nmod tests {", 1)
 # Client's rand 0.10 API is aliased so the server's pinned rand 0.8 remains unchanged.
-client_obfs = client_obfs.replace("use crate::{\n    packet::{PACKET_CAPACITY, PacketBuf},\n    wrap::WRAP_KEY_LEN,\n};",
-                                  "use crate::packet::{PACKET_CAPACITY, PacketBuf};\nuse super::client_wrap_test::WRAP_KEY_LEN;")
+client_obfs = _re.sub(
+    r"use crate::\\{\\s*packet::\\{PACKET_CAPACITY, PacketBuf\\},\\s*wrap::WRAP_KEY_LEN,\\s*\\};",
+    "use super::client_packet_test::{PacketBuf, PACKET_CAPACITY};\\nuse super::client_wrap_test::WRAP_KEY_LEN;",
+    client_obfs,
+)
+if "use super::client_packet_test::{PacketBuf, PACKET_CAPACITY};" not in client_obfs:
+    raise SystemExit("failed to adapt pinned client PacketBuf import")
 client_obfs = client_obfs.replace("rand::", "rand10::")
 import re as _re
 client_obfs = _re.sub(r"\n#\[cfg\(test\)\]\nmod tests \{.*\Z", "\n", client_obfs, flags=_re.S)
