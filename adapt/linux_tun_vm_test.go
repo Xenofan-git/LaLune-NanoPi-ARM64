@@ -27,7 +27,7 @@ func installTunCommandShims(t *testing.T, failContains string) string {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "commands.log")
 	sudo := "#!/bin/sh\nprintf 'SUDO %s\\n' \"$*\" >> \"" + logPath + "\"\n" +
-		"case \"$*\" in *\"${FAKE_SUDO_FAIL_CONTAINS:-__no_failure__}\"*) exit 17;; esac\nif [ \"$1\" = test ]; then shift; /usr/bin/test \"$@\"; exit $?; fi\nexit 0\n"
+		"if [ -n \"${FAKE_SUDO_FAIL_CONTAINS:-}\" ]; then case \"$*\" in *\"$FAKE_SUDO_FAIL_CONTAINS\"*) exit 17;; esac; fi\nif [ \"$1\" = test ]; then shift; /usr/bin/test \"$@\"; exit $?; fi\nexit 0\n"
 	ip := "#!/bin/sh\nprintf 'IP %s\\n' \"$*\" >> \"" + logPath + "\"\n" +
 		"case \"$*\" in\n" +
 		"  '-o route show table 202') [ -n \"${FAKE_IP_OCCUPIED_ROUTE:-}\" ] && echo \"$FAKE_IP_OCCUPIED_ROUTE\";;\n" +
