@@ -61,6 +61,7 @@ jobs:
             - iptables-persistent
             - systemd
             - openssh-server
+            - python3-cryptography
           EOF
           sed -i "s|KEY_PLACEHOLDER|$(cat vm/id_ed25519.pub)|" vm/user-data
           cat > vm/meta-data <<'EOF'
@@ -221,12 +222,71 @@ jobs:
           if len(response) < 32:
               sock.close()
               raise SystemExit(f"CSQTT response too short: {len(response)} bytes")
-          print("CSQTT_AUTH_HANDSHAKE_RESPONSE", len(response), "bytes from", peer)
 
-          # Exercise the actual Linux TUN interface created by the running ARM64 daemon.
-          # The guest kernel routes this ICMP packet into csqtt-lalune0; the daemon must
-          # consume it and emit an encrypted UDP datagram back to this client endpoint.
-          # This covers the live process + kernel TUN + UDP return path, not a CaptureSink.
+          # Authenticate and decrypt the response with the real client-side key
+          # derivation and RTP/ChaCha20-Poly1305 wire layout. A length-only check
+          # can pass on arbitrary or repeated ciphertext and is not protocol proof.
+          from cryptography.hazmat.primitives import hashes
+          from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+          from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+
+          if len(response) < 24 + 16 + 1 or response[0] >> 6 != 2:
+              sock.close()
+              raise SystemExit(f"invalid encrypted CSQTT RTP response: {len(response)} bytes")
+          header = response[:24]
+          if header[0] & 0x10 == 0 or header[12:14] != b"\\xbe\\xde":
+              sock.close()
+              raise SystemExit("response does not contain the expected CSQTT RTP extension")
+          if response[0] & 0x20:
+              padding = response[-1]
+              if padding < 1 or padding > len(response) - 24 - 16:
+                  sock.close()
+                  raise SystemExit("invalid CSQTT response padding")
+              payload_end = len(response) - padding
+          else:
+              payload_end = len(response)
+          tag_start = payload_end - 16
+          if tag_start < 24:
+              sock.close()
+              raise SystemExit("encrypted CSQTT response has no payload/tag")
+          password = b"wire-password"
+          key = HKDF(
+              algorithm=hashes.SHA256(),
+              length=32,
+              salt=b"CSQTT-WRAP-v1",
+              info=b"rtp-obfs/chacha20poly1305",
+          ).derive(password)
+          nonce = header[8:12] + header[2:4] + b"\\x00\\x00" + header[4:8]
+          try:
+              plaintext = ChaCha20Poly1305(key).decrypt(
+                  nonce, response[24:tag_start] + response[tag_start:payload_end], header
+              )
+          except Exception as exc:
+              sock.close()
+              raise SystemExit(f"live server response failed client AEAD authentication: {exc}")
+          if not plaintext.startswith((b"TUNCONF:", b"NOCONF", b"DENIED:")):
+              sock.close()
+              raise SystemExit(f"live server returned unexpected decrypted control payload: {plaintext[:80]!r}")
+          if plaintext.startswith(b"TUNCONF:"):
+              fields = plaintext.decode("utf-8").split(":")
+              if len(fields) < 3:
+                  sock.close()
+                  raise SystemExit(f"malformed live TUNCONF: {plaintext!r}")
+              import ipaddress
+              assigned = ipaddress.ip_address(fields[1])
+              dns = [ipaddress.ip_address(value) for value in fields[2].split(",")]
+              if assigned.version != 4 or not dns or any(value.version != 4 for value in dns):
+                  sock.close()
+                  raise SystemExit(f"invalid IPv4 TUNCONF values: {plaintext!r}")
+              print("LIVE_TUNCONF_DECRYPTED", assigned, "DNS", ",".join(map(str, dns)))
+          else:
+              sock.close()
+              raise SystemExit(f"live server did not return TUNCONF: {plaintext!r}")
+          print("CSQTT_AUTHENTICATED_RESPONSE", len(response), "bytes from", peer)
+
+          # Validate the real Linux TUN device and route independently. This only
+          # proves kernel interface/routing setup; packet return delivery requires
+          # a control-plane tunnel activation and is deliberately not inferred here.
           import subprocess
           tun = subprocess.run(
               ["ip", "-4", "addr", "show", "dev", "csqtt-lalune0"],
@@ -242,24 +302,7 @@ jobs:
           if "dev csqtt-lalune0" not in route:
               sock.close()
               raise SystemExit(f"client tunnel address is not routed through live TUN: {route.strip()}")
-          ping = subprocess.Popen(
-              ["ping", "-n", "-c", "1", "-W", "1", "10.67.68.42"],
-              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-          )
-          try:
-              try:
-                  tun_response, tun_peer = sock.recvfrom(65535)
-              except socket.timeout:
-                  raise SystemExit(
-                      "live TUN packet did not produce an encrypted UDP return datagram; "
-                      "check whether the GETCONF fixture establishes an active tunnel session"
-                  )
-              if len(tun_response) < 32:
-                  raise SystemExit(f"live TUN return datagram too short: {len(tun_response)} bytes")
-              print("LIVE_TUN_ENCRYPTED_RETURN", len(tun_response), "bytes from", tun_peer)
-          finally:
-              ping.wait(timeout=3)
-              sock.close()
+          sock.close()
 
           # A malformed datagram must not stop the real server after handshake.
           sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
