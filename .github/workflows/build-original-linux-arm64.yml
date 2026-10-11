@@ -25,6 +25,14 @@ jobs:
         run: |
           set -euxo pipefail
           test -f adapt/apply-pinned-original-linux-arm64-policy.py
+          # Client TUN must never flush a shared route table or mutate global resolver state.
+          ! grep -Fq 'ip route flush table 202' adapt/apply-pinned-original-linux-arm64-policy.py
+          ! grep -Fq '>> /etc/resolv.conf' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'ip -o route show table 202' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'ip -o rule show pref 22020' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'ip route add default dev csqtt0 table 202' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'ip route del default dev csqtt0 table 202' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'resolvectl dns csqtt0' adapt/apply-pinned-original-linux-arm64-policy.py
       - name: Validate CSQTT panel route UI
         run: |
           set -euxo pipefail
