@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"\n\n\t"golang.org/x/sys/unix"
+	"testing"\n\n	"golang.org/x/sys/unix"
 
 	libs "lalune-desktop/Libs"
 )
@@ -343,45 +343,45 @@ func TestBridgeStartTunnelReconnectLifecycle(t *testing.T) {
 // These lifecycle tests use injected file/ioctl operations; they never require
 // /dev/net/tun or mutate host networking.
 func TestLinuxTunOpenFailureIsReturned(t *testing.T) {
-\tapp := tunTestApp()
-\tapp.tun.tunOpen = func() (*os.File, error) { return nil, os.ErrPermission }
-\tleft, right := net.Pipe()
-\tdefer left.Close()
-\tdefer right.Close()
-\tif err := app.tun.StartWithError(left, new(bool)); err == nil || !strings.Contains(err.Error(), "open /dev/net/tun") {
-\t\tt.Fatalf("expected surfaced TUN open error, got %v", err)
-\t}
-\tif app.tun.tunFile != nil { t.Fatal("TUN file retained after open failure") }
+	app := tunTestApp()
+	app.tun.tunOpen = func() (*os.File, error) { return nil, os.ErrPermission }
+	left, right := net.Pipe()
+	defer left.Close()
+	defer right.Close()
+	if err := app.tun.StartWithError(left, new(bool)); err == nil || !strings.Contains(err.Error(), "open /dev/net/tun") {
+		t.Fatalf("expected surfaced TUN open error, got %v", err)
+	}
+	if app.tun.tunFile != nil { t.Fatal("TUN file retained after open failure") }
 }
 
 func TestLinuxTunSetIFFFailureClosesOpenedFile(t *testing.T) {
-\tapp := tunTestApp()
-\tf, err := os.CreateTemp(t.TempDir(), "fake-tun")
-\tif err != nil { t.Fatal(err) }
-\tapp.tun.tunOpen = func() (*os.File, error) { return f, nil }
-\tapp.tun.tunSetIFF = func(*os.File, *unix.Ifreq) error { return errors.New("injected TUNSETIFF failure") }
-\tleft, right := net.Pipe()
-\tdefer left.Close()
-\tdefer right.Close()
-\tif err := app.tun.StartWithError(left, new(bool)); err == nil || !strings.Contains(err.Error(), "TUNSETIFF") {
-\t\tt.Fatalf("expected surfaced TUNSETIFF error, got %v", err)
-\t}
-\tif _, err := f.Stat(); err == nil { t.Fatal("file remained open after TUNSETIFF failure") }
-\tif app.tun.tunFile != nil { t.Fatal("TUN file retained after TUNSETIFF failure") }
+	app := tunTestApp()
+	f, err := os.CreateTemp(t.TempDir(), "fake-tun")
+	if err != nil { t.Fatal(err) }
+	app.tun.tunOpen = func() (*os.File, error) { return f, nil }
+	app.tun.tunSetIFF = func(*os.File, *unix.Ifreq) error { return errors.New("injected TUNSETIFF failure") }
+	left, right := net.Pipe()
+	defer left.Close()
+	defer right.Close()
+	if err := app.tun.StartWithError(left, new(bool)); err == nil || !strings.Contains(err.Error(), "TUNSETIFF") {
+		t.Fatalf("expected surfaced TUNSETIFF error, got %v", err)
+	}
+	if _, err := f.Stat(); err == nil { t.Fatal("file remained open after TUNSETIFF failure") }
+	if app.tun.tunFile != nil { t.Fatal("TUN file retained after TUNSETIFF failure") }
 }
 
 func TestLinuxTunStopJoinsWorkersAndIsIdempotent(t *testing.T) {
-\tapp := tunTestApp()
-\tf, err := os.CreateTemp(t.TempDir(), "fake-tun")
-\tif err != nil { t.Fatal(err) }
-\tapp.tun.tunOpen = func() (*os.File, error) { return f, nil }
-\tapp.tun.tunSetIFF = func(*os.File, *unix.Ifreq) error { return nil }
-\tleft, right := net.Pipe()
-\tdefer right.Close()
-\tif err := app.tun.StartWithError(left, new(bool)); err != nil { t.Fatalf("start: %v", err) }
-\tapp.tun.Stop()
-\tif _, err := f.Stat(); err == nil { t.Fatal("TUN file remained open after Stop") }
-\tif app.tun.tunFile != nil || app.tun.udpConn != nil { t.Fatal("Stop retained resource references") }
-\tapp.tun.Stop()
-\tapp.tun.workers.Wait()
+	app := tunTestApp()
+	f, err := os.CreateTemp(t.TempDir(), "fake-tun")
+	if err != nil { t.Fatal(err) }
+	app.tun.tunOpen = func() (*os.File, error) { return f, nil }
+	app.tun.tunSetIFF = func(*os.File, *unix.Ifreq) error { return nil }
+	left, right := net.Pipe()
+	defer right.Close()
+	if err := app.tun.StartWithError(left, new(bool)); err != nil { t.Fatalf("start: %v", err) }
+	app.tun.Stop()
+	if _, err := f.Stat(); err == nil { t.Fatal("TUN file remained open after Stop") }
+	if app.tun.tunFile != nil || app.tun.udpConn != nil { t.Fatal("Stop retained resource references") }
+	app.tun.Stop()
+	app.tun.workers.Wait()
 }
