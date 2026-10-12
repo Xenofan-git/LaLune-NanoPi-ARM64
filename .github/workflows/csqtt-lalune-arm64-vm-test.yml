@@ -104,6 +104,11 @@ jobs:
           set -euo pipefail
           ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo bash -se' <<'DIRECT_TEST'
           set -euo pipefail
+          # cloud-init exposes SSH before its package phase is always finished.
+          if ! command -v nft >/dev/null 2>&1; then
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y nftables iproute2
+          fi
           cleanup() {
             ip rule del pref 22010 2>/dev/null || true
             ip rule del pref 22020 2>/dev/null || true
