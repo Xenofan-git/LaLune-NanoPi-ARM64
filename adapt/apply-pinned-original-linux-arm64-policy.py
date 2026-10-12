@@ -141,6 +141,12 @@ s=s.replace(
 \tapp          *App
 \tbypassRoutes []string
 \tmu           sync.Mutex
+\tlifecycleMu  sync.Mutex
+\ttunFile      *os.File
+\tudpConn      net.Conn
+\tworkers      sync.WaitGroup
+\ttunOpen      func() (*os.File, error)
+\ttunSetIFF    func(*os.File, *unix.Ifreq) error
 }''',
 '''type LinuxTun struct {
 \tapp          *App
@@ -167,64 +173,65 @@ func (t *LinuxTun) Start(udpConn net.Conn, running *bool) {
 }
 
 func (t *LinuxTun) StartWithError(udpConn net.Conn, running *bool) error {
+\tt.lifecycleMu.Lock()
+\tdefer t.lifecycleMu.Unlock()
+\t_ = running // Worker shutdown is driven by closing resources, not an unsynchronized bool.
 \tt.mu.Lock()
 \tif t.tunFile != nil {
 \t\tt.mu.Unlock()
 \t\treturn nil
 \t}
-
-\tf, err := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
+\topenTun, setIFF := t.tunOpen, t.tunSetIFF
+\tt.mu.Unlock()
+\tif openTun == nil {
+\t\topenTun = func() (*os.File, error) { return os.OpenFile("/dev/net/tun", os.O_RDWR, 0) }
+\t}
+\tf, err := openTun()
 \tif err != nil {
-\t\tt.mu.Unlock()
 \t\tt.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось открыть /dev/net/tun: %v", err))
 \t\treturn fmt.Errorf("open /dev/net/tun: %w", err)
 \t}
-
 \tifr, err := unix.NewIfreq("csqtt0")
 \tif err != nil {
-\t\tf.Close()
-\t\tt.mu.Unlock()
+\t\t_ = f.Close()
 \t\tt.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось создать ifreq: %v", err))
 \t\treturn fmt.Errorf("create TUN ifreq: %w", err)
 \t}
 \tifr.SetUint16(unix.IFF_TUN | unix.IFF_NO_PI)
-\tif err := unix.IoctlIfreq(int(f.Fd()), unix.TUNSETIFF, ifr); err != nil {
-\t\tf.Close()
-\t\tt.mu.Unlock()
+\tif setIFF == nil {
+\t\tsetIFF = func(file *os.File, request *unix.Ifreq) error {
+\t\t\treturn unix.IoctlIfreq(int(file.Fd()), unix.TUNSETIFF, request)
+\t\t}
+\t}
+\tif err := setIFF(f, ifr); err != nil {
+\t\t_ = f.Close()
 \t\tt.app.core.AddLog(fmt.Sprintf("[TUN] TUNSETIFF csqtt0: %v", err))
 \t\treturn fmt.Errorf("TUNSETIFF csqtt0: %w", err)
 \t}
-
-\tt.tunFile = f
+\tt.mu.Lock()
+\tt.tunFile, t.udpConn = f, udpConn
+\tt.workers.Add(2)
 \tt.mu.Unlock()
 \tt.app.core.AddLog("[TUN] Linux TUN↔UDP bridge запущен")
-
 \tgo func() {
+\t\tdefer t.workers.Done()
 \t\tbuf := make([]byte, 65535)
-\t\tfor *running {
-\t\t\tn, err := f.Read(buf)
-\t\t\tif err != nil {
-\t\t\t\treturn
-\t\t\t}
+\t\tfor {
+\t\t\tn, readErr := f.Read(buf)
+\t\t\tif readErr != nil { return }
 \t\t\tif n > 0 {
-\t\t\t\tif _, err := udpConn.Write(buf[:n]); err != nil {
-\t\t\t\t\treturn
-\t\t\t\t}
+\t\t\t\tif _, writeErr := udpConn.Write(buf[:n]); writeErr != nil { return }
 \t\t\t}
 \t\t}
 \t}()
-
 \tgo func() {
+\t\tdefer t.workers.Done()
 \t\tbuf := make([]byte, 65535)
-\t\tfor *running {
-\t\t\tn, err := udpConn.Read(buf)
-\t\t\tif err != nil {
-\t\t\t\treturn
-\t\t\t}
+\t\tfor {
+\t\t\tn, readErr := udpConn.Read(buf)
+\t\t\tif readErr != nil { return }
 \t\t\tif n > 0 {
-\t\t\t\tif _, err := f.Write(buf[:n]); err != nil {
-\t\t\t\t\treturn
-\t\t\t\t}
+\t\t\t\tif _, writeErr := f.Write(buf[:n]); writeErr != nil { return }
 \t\t\t}
 \t\t}
 \t}()
@@ -232,13 +239,16 @@ func (t *LinuxTun) StartWithError(udpConn net.Conn, running *bool) error {
 }
 
 func (t *LinuxTun) Stop() {
+\tt.lifecycleMu.Lock()
+\tdefer t.lifecycleMu.Unlock()
 \tt.mu.Lock()
-\tf := t.tunFile
-\tt.tunFile = nil
+\tf, conn := t.tunFile, t.udpConn
+\tt.tunFile, t.udpConn = nil, nil
 \tt.mu.Unlock()
-\tif f != nil {
-\t\t_ = f.Close()
-\t}
+\t// Close endpoints first to unblock reads, then join both workers.
+\tif f != nil { _ = f.Close() }
+\tif conn != nil { _ = conn.Close() }
+\tt.workers.Wait()
 }'''
 if old not in s:
     raise SystemExit("LinuxTun Start/Stop marker not found")
