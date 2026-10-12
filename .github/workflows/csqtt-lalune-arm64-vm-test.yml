@@ -514,21 +514,80 @@ jobs:
             sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-after-probe.log
             diff -u /tmp/csqtt-lalune-before-probe.log /tmp/csqtt-lalune-after-probe.log > /tmp/csqtt-lalune-probe-diff.log || true
 
-            # Recovery check: restart only the disposable CI service, then invoke a
-            # brand-new client probe process. Require authenticated TUNCONF and a
-            # successful packet round-trip again; an open port alone is not enough.
-            sudo systemctl restart csqtt-lalune.service
-            for attempt in $(seq 1 20); do
-              if sudo ss -H -lun 'sport = :47000' | grep -q . && sudo ss -H -ltn 'sport = :47002' | grep -q .; then break; fi
-              sleep 1
-            done
-            sudo ss -H -lun 'sport = :47000' | grep -q .
-            sudo ss -H -ltn 'sport = :47002' | grep -q .
-            python3 /home/tester/csqtt-vm-probe.py | tee /tmp/csqtt-lalune-reconnect-probe.log
-            grep -q '^LIVE_TUNCONF_DECRYPTED ' /tmp/csqtt-lalune-reconnect-probe.log
-            grep -q '^LIVE_TUN_BIDIRECTIONAL_IPV4_PASS ' /tmp/csqtt-lalune-reconnect-probe.log
+            # Same-process recovery check: keep one Python client process and one UDP
+            # socket alive while restarting only the disposable server. Authenticate
+            # and decrypt TUNCONF both before and after restart. This tests protocol
+            # re-establishment in a persistent client process, not the Go app supervisor.
+            cat > /home/tester/csqtt-same-process-recovery.py <<'PY_RECOVERY'
+            import socket, struct, subprocess, time
+            from cryptography.hazmat.primitives import hashes
+            from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+            from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+
+            fixture = bytes.fromhex(
+                "b06f77881122334410203040bede0002325566775199aa009e2a813c2df794"
+                "354293ade7b0b8ef4aa6297cf3cc8b0a372342fbd678c10260dc543f833826"
+                "2292992b12600eaa12d0d3155fa7179b62cd34ac41afb32db0ab7f6dced9"
+                "e1bb0620daa26d1743f2c25af6bd9ade9901"
+            )
+            password = b"wire-password"
+            key = HKDF(algorithm=hashes.SHA256(), length=32, salt=b"CSQTT-WRAP-v1",
+                       info=b"rtp-obfs/chacha20poly1305").derive(password)
+
+            def exchange(sock, phase):
+                sock.sendto(fixture, ("127.0.0.1", 47000))
+                deadline = time.monotonic() + 8
+                while time.monotonic() < deadline:
+                    try:
+                        response, peer = sock.recvfrom(65535)
+                    except socket.timeout:
+                        continue
+                    if len(response) < 41 or response[0] >> 6 != 2 or response[12:14] != b"\\xbe\\xde":
+                        continue
+                    header = response[:24]
+                    end = len(response)
+                    if response[0] & 0x20:
+                        padding = response[-1]
+                        if not 1 <= padding <= end - 40:
+                            continue
+                        end -= padding
+                    nonce = header[8:12] + header[2:4] + b"\\x00\\x00" + header[4:8]
+                    try:
+                        plain = ChaCha20Poly1305(key).decrypt(nonce, response[24:end], header)
+                    except Exception:
+                        continue
+                    if plain.startswith(b"TUNCONF:"):
+                        fields = plain.decode().split(":")
+                        if len(fields) >= 3:
+                            print("SAME_PROCESS_TUNCONF", phase, fields[1], fields[2], flush=True)
+                            return
+                raise SystemExit(f"no authenticated TUNCONF after {phase}")
+
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.bind(("127.0.0.1", 0))
+            sock.settimeout(0.5)
+            local = sock.getsockname()
+            exchange(sock, "before_restart")
+            subprocess.run(["sudo", "systemctl", "restart", "csqtt-lalune.service"], check=True)
+            for _ in range(20):
+                ready = subprocess.run(
+                    "sudo ss -H -lun 'sport = :47000' | grep -q .",
+                    shell=True
+                ).returncode == 0
+                if ready:
+                    break
+                time.sleep(0.5)
+            if sock.getsockname() != local:
+                raise SystemExit("client UDP socket identity changed during server restart")
+            exchange(sock, "after_restart")
+            print("CSQTT_SAME_PROCESS_PROTOCOL_RECOVERY_PASS", "local_udp", local, flush=True)
+            sock.close()
+            PY_RECOVERY
+            python3 /home/tester/csqtt-same-process-recovery.py | tee /tmp/csqtt-same-process-recovery.log
+            grep -q '^SAME_PROCESS_TUNCONF before_restart ' /tmp/csqtt-same-process-recovery.log
+            grep -q '^SAME_PROCESS_TUNCONF after_restart ' /tmp/csqtt-same-process-recovery.log
+            grep -q '^CSQTT_SAME_PROCESS_PROTOCOL_RECOVERY_PASS ' /tmp/csqtt-same-process-recovery.log
             sudo systemctl is-active --quiet csqtt-lalune.service
-            echo CSQTT_CLIENT_PROCESS_RESTART_RECOVERY_PASS
             # Installing the isolated service must not change the main/default route table.
             sudo ip -4 route show table main > /tmp/main-routes.after-install
             # The dedicated TUN subnet route is expected while the isolated service is running.
