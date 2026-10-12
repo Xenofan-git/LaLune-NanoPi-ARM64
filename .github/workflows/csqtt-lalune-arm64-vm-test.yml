@@ -29,6 +29,10 @@ jobs:
           test -s vm/real/server-assets/csqtt-lalune-linux-arm64
           test -x vm/real/server-assets/install-csqtt-lalune.sh
           test -x vm/real/server-assets/uninstall-csqtt-lalune.sh
+          test -s vm/real/client-linux-arm64
+          test "$(cat vm/real/CSQTT_CLIENT_VERSION)" = "2026.09.16.17.59"
+          sha256sum vm/real/client-linux-arm64
+          file vm/real/client-linux-arm64
           test -x vm/real/client-tun-tests-arm64
           file vm/real/server-assets/csqtt-lalune-linux-arm64
           sha256sum vm/real/server-assets/csqtt-lalune-linux-arm64
@@ -485,12 +489,26 @@ jobs:
           WantedBy=multi-user.target
           EOF
           done
+          $SCP vm/real/client-linux-arm64 tester@127.0.0.1:/home/tester/
           $SCP "$INSTALLER" "$UNINSTALLER" "$BINARY" vm/real/client-tun-tests-arm64 vm/csqtt.service vm/csqtt-47000.service vm/csqtt-47000-netns.service vm/csqtt-vm-probe.py vm/csqtt-same-process-recovery.py tester@127.0.0.1:/home/tester/
           $SSH 'set -eux
             sudo install -d -m 0755 /opt/lalune-package
             sudo install -m 0755 /home/tester/install-csqtt-lalune.sh /opt/lalune-package/install-csqtt-lalune.sh
             sudo install -m 0755 /home/tester/uninstall-csqtt-lalune.sh /opt/lalune-package/uninstall-csqtt-lalune.sh
             test -s /home/tester/csqtt-lalune-linux-arm64
+            # Exercise the exact runtime CSQTT core that the pinned LaLune
+            # release selector downloads. This is an executable/CLI smoke only;
+            # it does not claim an authenticated VK/TURN session or recovery.
+            sudo install -m 0755 /home/tester/client-linux-arm64 /usr/local/bin/csqtt-client
+            test "$(uname -m)" = aarch64
+            file /usr/local/bin/csqtt-client
+            set +e
+            /usr/local/bin/csqtt-client >/tmp/csqtt-client-argument-smoke.log 2>&1
+            client_status=$?
+            set -e
+            test "$client_status" -ne 0
+            grep -Fq 'Нужны -peer и хеши VK' /tmp/csqtt-client-argument-smoke.log
+            echo REAL_RUNTIME_CSQTT_CLIENT_ARM64_EXECUTABLE_PASS
             sudo install -m 0755 /home/tester/csqtt-lalune-linux-arm64 /opt/lalune-package/csqtt-lalune-linux-arm64
             sudo install -m 0755 /home/tester/client-tun-tests-arm64 /usr/local/bin/client-tun-tests-arm64
             /usr/local/bin/client-tun-tests-arm64 -test.v
@@ -589,7 +607,6 @@ jobs:
             # socket alive while restarting only the disposable server. Authenticate
             # and decrypt TUNCONF both before and after restart. This tests protocol
             # re-establishment in a persistent client process, not the Go app supervisor.
-            python3 /home/tester/csqtt-same-process-recovery.py | tee /tmp/csqtt-same-process-recovery.log
             python3 /home/tester/csqtt-same-process-recovery.py | tee /tmp/csqtt-same-process-recovery.log
             grep -q '^SAME_PROCESS_TUNCONF before_restart ' /tmp/csqtt-same-process-recovery.log
             grep -q '^SAME_PROCESS_TUNCONF after_restart ' /tmp/csqtt-same-process-recovery.log
