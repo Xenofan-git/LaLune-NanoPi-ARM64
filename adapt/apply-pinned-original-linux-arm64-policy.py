@@ -253,6 +253,9 @@ if old not in s:
     raise SystemExit("LinuxTun Start/Stop marker not found")
 s=s.replace(old,new,1)
 
+# Persist the TUN lifecycle edits before the next block reloads app_linux.go.
+LINUX.write_text(s)
+
 # Start the original Bridge TUN↔UDP packet bridge after Linux route setup.
 s = LINUX.read_text()
 # Prevent concurrent core workers sharing one Bridge/TUN state on NanoPi.
