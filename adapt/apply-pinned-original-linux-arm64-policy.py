@@ -20,6 +20,69 @@ replace_once(
 # DeployManager CLI calls this option --ssh-port. Keep the original UI/API
 # contract while fixing the actual CLI invocation.
 BRIDGE = UPSTREAM / "Desktop/Libs/bridge.go"
+# Propagate Linux TUN setup failures through the shared interface so the
+# runner can fail closed before starting the packet bridge.
+bridge_source = BRIDGE.read_text()
+old_tun_interface = '\tSetupRoutes(tunIP string, tunDNS string)'
+new_tun_interface = '\tSetupRoutes(tunIP string, tunDNS string) error'
+if bridge_source.count(old_tun_interface) != 1:
+    raise SystemExit("TunInterface SetupRoutes marker missing or ambiguous")
+bridge_source = bridge_source.replace(old_tun_interface, new_tun_interface, 1)
+BRIDGE.write_text(bridge_source)
+
+
+# Make Bridge.StartTunnel fail closed when UDP or Linux TUN startup fails.
+bridge_source = BRIDGE.read_text()
+old_start_tunnel = """func (b *Bridge) StartTunnel(corePort int) {
+\tif b.TunRunning {
+\t\treturn
+\t}
+\tudpConn, err := net.Dial("udp", fmt.Sprintf("127.0.0.1:%d", corePort))
+\tif err != nil {
+\t\tb.Core.AddLog(fmt.Sprintf("[TUN] UDP ошибка: %v", err))
+\t\treturn
+\t}
+\tb.UdpConn = udpConn
+\tb.TunRunning = true
+\tb.Tun.Start(udpConn, &b.TunRunning)
+\tb.Core.AddLog("[TUN] Пакетный мост запущен")
+}"""
+new_start_tunnel = """type tunStarterWithError interface {
+\tStartWithError(udpConn net.Conn, running *bool) error
+}
+
+func (b *Bridge) StartTunnel(corePort int) bool {
+\tif b.TunRunning {
+\t\treturn true
+\t}
+\tudpConn, err := net.Dial("udp", fmt.Sprintf("127.0.0.1:%d", corePort))
+\tif err != nil {
+\t\tb.Core.AddLog(fmt.Sprintf("[TUN] UDP ошибка: %v", err))
+\t\treturn false
+\t}
+\tb.UdpConn = udpConn
+\tb.TunRunning = true
+\tif starter, ok := b.Tun.(tunStarterWithError); ok {
+\t\terr = starter.StartWithError(udpConn, &b.TunRunning)
+\t} else {
+\t\tb.Tun.Start(udpConn, &b.TunRunning)
+\t}
+\tif err != nil {
+\t\tb.TunRunning = false
+\t\t_ = udpConn.Close()
+\t\tb.UdpConn = nil
+\t\tb.Tun.Stop()
+\t\tb.Core.SetConnected(false)
+\t\tb.Core.AddLog(fmt.Sprintf("[TUN] Запуск пакетного моста отменён: %v", err))
+\t\treturn false
+\t}
+\tb.Core.AddLog("[TUN] Пакетный мост запущен")
+\treturn true
+}"""
+if old_start_tunnel not in bridge_source:
+    raise SystemExit("Bridge.StartTunnel source marker missing or ambiguous")
+bridge_source = bridge_source.replace(old_start_tunnel, new_start_tunnel, 1)
+BRIDGE.write_text(bridge_source)
 
 # New CSQTT core Auto VK protocol: stdin bootstrap replaces obsolete --token.
 bs = BRIDGE.read_text()
@@ -73,18 +136,23 @@ LINUX.write_text(s)
 # NanoPi dataplane adaptation: the pinned original leaves LinuxTun.Start empty.
 # Keep the original UDP core protocol, but bridge Linux TUN packets to that UDP
 # socket using /dev/net/tun. This is intentionally the only dataplane deviation.
-s=s.replace(
-'''type LinuxTun struct {
-\tapp          *App
-\tbypassRoutes []string
-\tmu           sync.Mutex
-}''',
-'''type LinuxTun struct {
-\tapp          *App
-\tbypassRoutes []string
-\tmu           sync.Mutex
-\ttunFile      *os.File
-}''', 1)
+s = LINUX.read_text()
+# Upstream field alignment can vary; replace the Go struct independent of whitespace.
+import re
+struct_pattern = re.compile(r"type LinuxTun struct \{[^}]*\}", re.S)
+s, struct_count = struct_pattern.subn("""type LinuxTun struct {
+	app          *App
+	bypassRoutes []string
+	mu           sync.Mutex
+	lifecycleMu  sync.Mutex
+	tunFile      *os.File
+	udpConn      net.Conn
+	workers      sync.WaitGroup
+	tunOpen      func() (*os.File, error)
+	tunSetIFF    func(*os.File, *unix.Ifreq) error
+}""", s, count=1)
+if struct_count != 1:
+    raise SystemExit(f"LinuxTun struct marker missing or ambiguous: replaced {struct_count}")
 
 s=s.replace(
 '''import "lalune-desktop/Libs"''',
@@ -98,81 +166,95 @@ func (t *LinuxTun) Stop()                     {}'''
 new='''func (t *LinuxTun) Setup() error { return nil }
 
 func (t *LinuxTun) Start(udpConn net.Conn, running *bool) {
+\tif err := t.StartWithError(udpConn, running); err != nil {
+\t\tt.app.core.AddLog(fmt.Sprintf("[TUN] Запуск TUN не выполнен: %v", err))
+\t}
+}
+
+func (t *LinuxTun) StartWithError(udpConn net.Conn, running *bool) error {
+\tt.lifecycleMu.Lock()
+\tdefer t.lifecycleMu.Unlock()
+\t_ = running // Worker shutdown is driven by closing resources, not an unsynchronized bool.
 \tt.mu.Lock()
 \tif t.tunFile != nil {
 \t\tt.mu.Unlock()
-\t\treturn
+\t\treturn nil
 \t}
-
-\tf, err := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
+\topenTun, setIFF := t.tunOpen, t.tunSetIFF
+\tt.mu.Unlock()
+\tif openTun == nil {
+\t\topenTun = func() (*os.File, error) { return os.OpenFile("/dev/net/tun", os.O_RDWR, 0) }
+\t}
+\tf, err := openTun()
 \tif err != nil {
-\t\tt.mu.Unlock()
 \t\tt.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось открыть /dev/net/tun: %v", err))
-\t\treturn
+\t\treturn fmt.Errorf("open /dev/net/tun: %w", err)
 \t}
-
 \tifr, err := unix.NewIfreq("csqtt0")
 \tif err != nil {
-\t\tf.Close()
-\t\tt.mu.Unlock()
+\t\t_ = f.Close()
 \t\tt.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось создать ifreq: %v", err))
-\t\treturn
+\t\treturn fmt.Errorf("create TUN ifreq: %w", err)
 \t}
 \tifr.SetUint16(unix.IFF_TUN | unix.IFF_NO_PI)
-\tif err := unix.IoctlIfreq(int(f.Fd()), unix.TUNSETIFF, ifr); err != nil {
-\t\tf.Close()
-\t\tt.mu.Unlock()
-\t\tt.app.core.AddLog(fmt.Sprintf("[TUN] TUNSETIFF csqtt0: %v", err))
-\t\treturn
+\tif setIFF == nil {
+\t\tsetIFF = func(file *os.File, request *unix.Ifreq) error {
+\t\t\treturn unix.IoctlIfreq(int(file.Fd()), unix.TUNSETIFF, request)
+\t\t}
 \t}
-
-\tt.tunFile = f
+\tif err := setIFF(f, ifr); err != nil {
+\t\t_ = f.Close()
+\t\tt.app.core.AddLog(fmt.Sprintf("[TUN] TUNSETIFF csqtt0: %v", err))
+\t\treturn fmt.Errorf("TUNSETIFF csqtt0: %w", err)
+\t}
+\tt.mu.Lock()
+\tt.tunFile, t.udpConn = f, udpConn
+\tt.workers.Add(2)
 \tt.mu.Unlock()
 \tt.app.core.AddLog("[TUN] Linux TUN↔UDP bridge запущен")
-
 \tgo func() {
+\t\tdefer t.workers.Done()
 \t\tbuf := make([]byte, 65535)
-\t\tfor *running {
-\t\t\tn, err := f.Read(buf)
-\t\t\tif err != nil {
-\t\t\t\treturn
-\t\t\t}
+\t\tfor {
+\t\t\tn, readErr := f.Read(buf)
+\t\t\tif readErr != nil { return }
 \t\t\tif n > 0 {
-\t\t\t\tif _, err := udpConn.Write(buf[:n]); err != nil {
-\t\t\t\t\treturn
-\t\t\t\t}
+\t\t\t\tif _, writeErr := udpConn.Write(buf[:n]); writeErr != nil { return }
 \t\t\t}
 \t\t}
 \t}()
-
 \tgo func() {
+\t\tdefer t.workers.Done()
 \t\tbuf := make([]byte, 65535)
-\t\tfor *running {
-\t\t\tn, err := udpConn.Read(buf)
-\t\t\tif err != nil {
-\t\t\t\treturn
-\t\t\t}
+\t\tfor {
+\t\t\tn, readErr := udpConn.Read(buf)
+\t\t\tif readErr != nil { return }
 \t\t\tif n > 0 {
-\t\t\t\tif _, err := f.Write(buf[:n]); err != nil {
-\t\t\t\t\treturn
-\t\t\t\t}
+\t\t\t\tif _, writeErr := f.Write(buf[:n]); writeErr != nil { return }
 \t\t\t}
 \t\t}
 \t}()
+\treturn nil
 }
 
 func (t *LinuxTun) Stop() {
+\tt.lifecycleMu.Lock()
+\tdefer t.lifecycleMu.Unlock()
 \tt.mu.Lock()
-\tf := t.tunFile
-\tt.tunFile = nil
+\tf, conn := t.tunFile, t.udpConn
+\tt.tunFile, t.udpConn = nil, nil
 \tt.mu.Unlock()
-\tif f != nil {
-\t\t_ = f.Close()
-\t}
+\t// Close endpoints first to unblock reads, then join both workers.
+\tif f != nil { _ = f.Close() }
+\tif conn != nil { _ = conn.Close() }
+\tt.workers.Wait()
 }'''
 if old not in s:
     raise SystemExit("LinuxTun Start/Stop marker not found")
 s=s.replace(old,new,1)
+
+# Persist the TUN lifecycle edits before the next block reloads app_linux.go.
+LINUX.write_text(s)
 
 # Start the original Bridge TUN↔UDP packet bridge after Linux route setup.
 s = LINUX.read_text()
@@ -189,8 +271,18 @@ old_runner = """		if tun, ok := bridge.Tun.(*LinuxTun); ok {
 			tun.SetupRoutes(tunIP, tunDNS)
 		}"""
 new_runner = """        if tun, ok := bridge.Tun.(*LinuxTun); ok {
-            tun.SetupRoutes(tunIP, tunDNS)
-            bridge.StartTunnel(coreListenPort)
+            if err := tun.SetupRoutes(tunIP, tunDNS); err != nil {
+                bridge.Core.AddLog(fmt.Sprintf("[TUN] Подключение отменено: %v", err))
+                bridge.Core.SetConnected(false)
+                return
+            }
+            if !bridge.StartTunnel(coreListenPort) {
+                bridge.Core.AddLog("[TUN] Подключение отменено: пакетный мост не запущен")
+                bridge.CleanupRoutes()
+                bridge.Core.SetConnected(false)
+                if cmd.Process != nil { _ = cmd.Process.Kill() }
+                return
+            }
         }"""
 if old_runner not in s:
     raise SystemExit("LinuxRunner TUN setup marker not found")
@@ -198,41 +290,109 @@ s = s.replace(old_runner, new_runner, 1)
 
 start = s.index("func (t *LinuxTun) SetupRoutes")
 end = s.index("\n}\n\nfunc (t *LinuxTun) CleanupRoutes", start) + 2
-setup = '''func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) {
-\tt.mu.Lock()
-\tdefer t.mu.Unlock()
-\tt.app.core.AddLog(fmt.Sprintf("[TUN] Настройка TUN (IP: %s, DNS: %s)...", tunIP, tunDNS))
+setup = '''func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.app.core.AddLog(fmt.Sprintf("[TUN] Настройка TUN (IP: %s, DNS: %s)...", tunIP, tunDNS))
 
-\tcmd := fmt.Sprintf("ip tuntap add dev csqtt0 mode tun && ip addr add %s/32 dev csqtt0 && ip link set csqtt0 up && ip link set csqtt0 mtu 1300", tunIP)
-\tt.app.runSudo(cmd)
-
-\tfor _, dns := range strings.Split(tunDNS, ",") {
-\t\tdns = strings.TrimSpace(dns)
-\t\tif dns != "" {
-\t\t\tt.app.runSudo(fmt.Sprintf("echo 'nameserver %s' >> /etc/resolv.conf", dns))
-\t\t}
-\t}
-
-\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")
-\tt.app.runSudo("ip route flush table 202 2>/dev/null || true")
-\tt.app.runSudo("ip route replace 192.168.4.0/24 dev eth0 table 202")
-\tt.app.runSudo("ip route replace 192.168.5.0/24 dev eth1 table 202")
-\tt.app.runSudo("ip route replace default dev csqtt0 table 202")
-\tt.app.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")
-
-\tt.app.core.AddLog("[TUN] TUN настроен успешно (policy table 202)")
+	ip := net.ParseIP(strings.TrimSpace(tunIP))
+	if ip == nil || ip.To4() == nil {
+		t.app.core.AddLog("[TUN] ОШИБКА: некорректный IPv4 TUN; настройка отменена")
+		return fmt.Errorf("invalid TUN IPv4 address %q", tunIP)
+	}
+	var dnsServers []string
+	for _, raw := range strings.Split(tunDNS, ",") {
+		d := strings.TrimSpace(raw)
+		if d == "" { continue }
+		parsed := net.ParseIP(d)
+		if parsed == nil || parsed.To4() == nil {
+			t.app.core.AddLog(fmt.Sprintf("[TUN] ОШИБКА: некорректный DNS IPv4 %q; настройка отменена", d))
+			return fmt.Errorf("invalid TUN DNS IPv4 %q", d)
+		}
+		dnsServers = append(dnsServers, parsed.To4().String())
+	}
+	// Refuse to touch a non-empty table or occupied rule priority.
+	if err := t.app.runSudo("test -z \\"$(ip -o route show table 202 2>/dev/null)\\" && test -z \\"$(ip -o rule show pref 22020 2>/dev/null)\\""); err != nil {
+		t.app.core.AddLog(fmt.Sprintf("[TUN] ОШИБКА: table 202 или priority 22020 уже заняты; чужие записи сохранены: %v", err))
+		return fmt.Errorf("TUN routing table 202 or rule priority 22020 is already occupied: %w", err)
+	}
+	cmd := fmt.Sprintf("ip tuntap add dev csqtt0 mode tun && ip addr add %s/32 dev csqtt0 && ip link set csqtt0 up && ip link set csqtt0 mtu 1300", ip.To4().String())
+	if err := t.app.runSudo(cmd); err != nil {
+		t.app.core.AddLog(fmt.Sprintf("[TUN] ОШИБКА создания интерфейса: %v", err))
+		return fmt.Errorf("create csqtt0: %w", err)
+	}
+	createdRoutes := []string{}
+	createdRule := false
+	rollback := func() {
+		if createdRule { _ = t.app.runSudo("ip rule del pref 22020 from 192.168.5.0/24 lookup 202") }
+		for i := len(createdRoutes)-1; i >= 0; i-- { _ = t.app.runSudo(createdRoutes[i]) }
+		if err := t.app.runSudo("resolvectl revert csqtt0"); err != nil { t.app.core.AddLog(fmt.Sprintf("[TUN] rollback DNS: %v", err)) }
+		if err := t.app.runSudo("ip tuntap del dev csqtt0 mode tun"); err != nil { t.app.core.AddLog(fmt.Sprintf("[TUN] rollback interface: %v", err)) }
+	}
+	for _, pair := range []struct{ add, del string }{
+		{"ip route add 192.168.4.0/24 dev eth0 table 202", "ip route del 192.168.4.0/24 dev eth0 table 202"},
+		{"ip route add 192.168.5.0/24 dev eth1 table 202", "ip route del 192.168.5.0/24 dev eth1 table 202"},
+		{"ip route add default dev csqtt0 table 202", "ip route del default dev csqtt0 table 202"},
+	} {
+		if err := t.app.runSudo(pair.add); err != nil {
+			t.app.core.AddLog(fmt.Sprintf("[TUN] ОШИБКА %q: %v; откат", pair.add, err))
+			rollback()
+			return fmt.Errorf("add TUN route %q: %w", pair.add, err)
+		}
+		createdRoutes = append(createdRoutes, pair.del)
+	}
+	if err := t.app.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202"); err != nil {
+		t.app.core.AddLog(fmt.Sprintf("[TUN] ОШИБКА policy rule: %v; откат", err))
+		rollback()
+		return fmt.Errorf("add TUN policy rule: %w", err)
+	}
+	createdRule = true
+	if len(dnsServers) > 0 {
+		if err := t.app.runSudo("resolvectl dns csqtt0 " + strings.Join(dnsServers, " ")); err != nil {
+			t.app.core.AddLog(fmt.Sprintf("[TUN] DNS для csqtt0 недоступен через systemd-resolved; /etc/resolv.conf не изменялся: %v; откат", err))
+            rollback()
+            return fmt.Errorf("configure csqtt0 DNS: %w", err)
+		}
+	}
+	if err := t.applyDirectRoutingLocked(); err != nil {
+		t.app.core.AddLog(fmt.Sprintf("[DIRECT] Ошибка применения: %v; откат TUN", err))
+        rollback()
+        return fmt.Errorf("apply Direct routing: %w", err)
+	}
+	t.app.core.AddLog("[TUN] TUN настроен успешно (table 202; чужие маршруты и DNS сохранены)")
+    return nil
 }'''
 s = s[:start] + setup + s[end:]
 start = s.index("func (t *LinuxTun) CleanupRoutes")
 end = s.index("\n}\n\nfunc (t *LinuxTun) AddBypassRoute", start) + 2
 cleanup = '''func (t *LinuxTun) CleanupRoutes() {
-\tt.mu.Lock()
-\tdefer t.mu.Unlock()
-\tt.app.core.AddLog("[TUN] Удаление TUN...")
-\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")
-\tt.app.runSudo("ip route flush table 202 2>/dev/null || true")
-\tt.app.runSudo("ip tuntap del dev csqtt0 mode tun 2>/dev/null || true")
-\tt.app.core.AddLog("[TUN] TUN удалён")
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	// Do not remove matching-looking entries unless the complete CSQTT route
+	// signature is present. Setup refuses occupied tables/priorities.
+	if err := t.app.runSudo("ip rule show pref 22020 | grep -Fq 'from 192.168.5.0/24 lookup 202' && ip route show table 202 | grep -Fq 'default dev csqtt0'"); err != nil {
+		t.app.core.AddLog("[TUN] Очистка пропущена: правило/маршрут не подтверждают владение")
+		return
+	}
+	t.cleanupDirectRoutingLocked()
+	t.app.core.AddLog("[TUN] Удаление TUN...")
+	for _, command := range []string{
+		"ip rule del pref 22020 from 192.168.5.0/24 lookup 202",
+		"ip route del default dev csqtt0 table 202",
+		"ip route del 192.168.5.0/24 dev eth1 table 202",
+		"ip route del 192.168.4.0/24 dev eth0 table 202",
+	} {
+		if err := t.app.runSudo(command); err != nil {
+			t.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось удалить запись %q: %v", command, err))
+		}
+	}
+	if err := t.app.runSudo("resolvectl revert csqtt0"); err != nil {
+		t.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось сбросить DNS csqtt0: %v", err))
+	}
+	if err := t.app.runSudo("ip tuntap del dev csqtt0 mode tun"); err != nil {
+		t.app.core.AddLog(fmt.Sprintf("[TUN] Не удалось удалить csqtt0: %v", err))
+	}
+	t.app.core.AddLog("[TUN] TUN удалён; чужие маршруты и /etc/resolv.conf не изменялись")
 }'''
 s = s[:start] + cleanup + s[end:]
 LINUX.write_text(s)
@@ -284,8 +444,53 @@ replace_once(
 linux_direct = r'''
 const directMark = "0x4c4c"
 const directRulePref = "22010"
-const directNftPath = "/run/lalune-direct.nft"
-const directDnsmasqPath = "/etc/dnsmasq.d/lalune-direct.conf"
+
+// Paths are variables so tests can isolate Direct's filesystem effects in a tempdir.
+var directNftPath = "/run/lalune-direct.nft"
+var directDnsmasqPath = "/etc/dnsmasq.d/lalune-direct.conf"
+var directDnsmasqMain = "/etc/dnsmasq.conf"
+const directDnsmasqInclude = "conf-file=/etc/dnsmasq.d/lalune-direct.conf"
+
+func writeDirectFileAtomic(path string, data []byte, mode os.FileMode) error {
+	tmp := path + ".lalune-tmp"
+	if err := os.WriteFile(tmp, data, mode); err != nil { return err }
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func ensureDirectDnsmasqInclude() error {
+	data, err := os.ReadFile(directDnsmasqMain)
+	if err != nil { return fmt.Errorf("чтение %s: %w", directDnsmasqMain, err) }
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == directDnsmasqInclude { return nil }
+	}
+	content := strings.TrimRight(string(data), "\n") + "\n" + directDnsmasqInclude + "\n"
+	if err := writeDirectFileAtomic(directDnsmasqMain, []byte(content), 0644); err != nil {
+		return fmt.Errorf("обновление %s: %w", directDnsmasqMain, err)
+	}
+	return nil
+}
+
+func removeDirectDnsmasqInclude() (bool, error) {
+	data, err := os.ReadFile(directDnsmasqMain)
+	if err != nil { return false, fmt.Errorf("чтение %s: %w", directDnsmasqMain, err) }
+	lines := strings.Split(string(data), "\n")
+	out := make([]string, 0, len(lines))
+	changed := false
+	for _, line := range lines {
+		if strings.TrimSpace(line) == directDnsmasqInclude { changed = true; continue }
+		out = append(out, line)
+	}
+	if !changed { return false, nil }
+	content := strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
+	if err := writeDirectFileAtomic(directDnsmasqMain, []byte(content), 0644); err != nil {
+		return false, fmt.Errorf("обновление %s: %w", directDnsmasqMain, err)
+	}
+	return true, nil
+}
 
 func splitDirectList(raw string) []string {
 \treturn strings.FieldsFunc(raw, func(r rune) bool {
@@ -294,15 +499,11 @@ func splitDirectList(raw string) []string {
 }
 
 func validDirectDomain(s string) bool {
-\tif s == "" || strings.ContainsAny(s, "/#:=<>\"'\\\\") {
+\tif s == "" || strings.ContainsAny(s, "/#:=<>\\"'\\\\") {
 \t\treturn false
 \t}
-\tif strings.HasPrefix(s, "*.") {
-\t\ts = strings.TrimPrefix(s, "*.")
-\t}
-\treturn strings.Contains(s, ".") && regexp.MustCompile("^[A-Za-z0-9._*-]+$").MatchString(s)
+\treturn regexp.MustCompile("(?i)^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[.])+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$").MatchString(s)
 }
-
 func normalizeDirectIPs(raw string) ([]string, error) {
 \tvar out []string
 \tfor _, token := range splitDirectList(raw) {
@@ -320,47 +521,78 @@ func normalizeDirectIPs(raw string) ([]string, error) {
 \t\tif err != nil || n.IP.To4() == nil {
 \t\t\treturn nil, fmt.Errorf("некорректный IPv4/CIDR: %s", token)
 \t\t}
+\t\tones, _ := n.Mask.Size()
+\t\tif ones == 0 {
+\t\t\treturn nil, fmt.Errorf("CIDR по умолчанию запрещён для Direct: %s", token)
+\t\t}
 \t\tout = append(out, n.String())
 \t}
 \treturn out, nil
 }
 
+func prepareDirectPlan(domainsRaw, ipsRaw string) ([]string, []string, bool, error) {
+\tdomains := splitDirectList(domainsRaw)
+\tips, err := normalizeDirectIPs(ipsRaw)
+\tif err != nil { return nil, nil, false, err }
+\tfor _, domain := range domains {
+\t\tif !validDirectDomain(domain) {
+\t\t\treturn nil, nil, false, fmt.Errorf("некорректный домен Direct: %s", domain)
+\t\t}
+\t}
+\treturn domains, ips, len(domains) > 0, nil
+}
+
 func (t *LinuxTun) cleanupDirectRoutingLocked() {
 \tt.app.runSudo("ip rule del pref " + directRulePref + " 2>/dev/null || true")
 \tt.app.runSudo("nft delete table inet lalune_direct 2>/dev/null || true")
+\tincludeRemoved, includeErr := removeDirectDnsmasqInclude()
+\tconfigRemoved := false
 \tif _, err := os.Stat(directDnsmasqPath); err == nil {
 \t\t_ = os.Remove(directDnsmasqPath)
-\t\t_ = t.app.runSudo("systemctl restart dnsmasq")
+\t\tconfigRemoved = true
+\t}
+\tif includeErr != nil {
+\t\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Не удалось убрать dnsmasq include: %v", includeErr))
+\t} else if includeRemoved || configRemoved {
+\t\tif err := t.app.runSudo("systemctl restart dnsmasq"); err != nil {
+\t\t\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Не удалось перезапустить dnsmasq после очистки: %v", err))
+\t\t}
 \t}
 \t_ = os.Remove(directNftPath)
 }
 
-func (t *LinuxTun) applyDirectRoutingLocked() error {
-\tsettings := t.app.core.GetSettings()
-\tdomains := splitDirectList(settings.DirectDomains)
-\tips, err := normalizeDirectIPs(settings.DirectIPs)
-\tif err != nil {
-\t\treturn err
-\t}
-
-\tfor _, d := range domains {
-\t\tif !validDirectDomain(d) {
-\t\t\treturn fmt.Errorf("некорректный домен Direct: %s", d)
+func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
+\t// Once live state starts changing, any subsequent error must leave Direct
+\t// fully disabled rather than partially applied. TUN/CSQTT itself is untouched.
+\tmutating := false
+\tdefer func() {
+\t\tif retErr != nil && mutating {
+\t\t\tt.cleanupDirectRoutingLocked()
+\t\t\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Частичное применение отменено; Direct очищен: %v", retErr))
 \t\t}
-\t}
+\t}()
+\tsettings := t.app.core.GetSettings()
+\tdomains, ips, needsDnsmasq, err := prepareDirectPlan(settings.DirectDomains, settings.DirectIPs)
+\tif err != nil { return err }
 
+\tmutating = true
 \tt.app.runSudo("ip rule del pref " + directRulePref + " 2>/dev/null || true")
 \tt.app.runSudo("nft delete table inet lalune_direct 2>/dev/null || true")
+\tincludeRemoved, includeErr := removeDirectDnsmasqInclude()
+\tif includeErr != nil { return includeErr }
 \thadDnsmasq := false
 \tif _, err := os.Stat(directDnsmasqPath); err == nil {
 \t\thadDnsmasq = true
-\t\t_ = os.Remove(directDnsmasqPath)
+\t\tif err := os.Remove(directDnsmasqPath); err != nil {
+\t\t\treturn fmt.Errorf("удаление Direct dnsmasq-конфига: %w", err)
+\t\t}
 \t}
+\tdnsmasqChanged := includeRemoved || hadDnsmasq
 \t_ = os.Remove(directNftPath)
 
 \tif len(domains) == 0 && len(ips) == 0 {
-\t\tif hadDnsmasq {
-\t\t\t_ = t.app.runSudo("systemctl restart dnsmasq")
+\t\tif dnsmasqChanged {
+\t\t\tif err := t.app.runSudo("systemctl restart dnsmasq"); err != nil { return fmt.Errorf("перезапуск dnsmasq после очистки Direct: %w", err) }
 \t\t}
 \t\treturn nil
 \t}
@@ -379,14 +611,17 @@ func (t *LinuxTun) applyDirectRoutingLocked() error {
 \tnft.WriteString("  }\n")
 \tnft.WriteString("}\n")
 
-\tif err := os.WriteFile(directNftPath, []byte(nft.String()), 0600); err != nil {
-\t\treturn fmt.Errorf("запись nft-конфига: %w", err)
+\tif err := writeDirectFileAtomic(directNftPath, []byte(nft.String()), 0600); err != nil {
+\t\treturn fmt.Errorf("атомарная запись nft-конфига: %w", err)
+\t}
+\tif err := t.app.runSudo("nft -c -f " + directNftPath); err != nil {
+\t\treturn fmt.Errorf("проверка nft direct policy: %w", err)
 \t}
 \tif err := t.app.runSudo("nft -f " + directNftPath); err != nil {
 \t\treturn fmt.Errorf("nft direct policy: %w", err)
 \t}
 
-\tif len(domains) > 0 {
+\tif needsDnsmasq {
 \t\tline := "nftset=/"
 \t\tfor i, d := range domains {
 \t\t\tif i > 0 {
@@ -395,11 +630,18 @@ func (t *LinuxTun) applyDirectRoutingLocked() error {
 \t\t\tline += d
 \t\t}
 \t\tline += "/4#inet#lalune_direct#direct4\n"
-\t\tif err := os.WriteFile(directDnsmasqPath, []byte(line), 0644); err != nil {
-\t\t\treturn fmt.Errorf("запись dnsmasq direct-конфига: %w", err)
+\t\tif err := writeDirectFileAtomic(directDnsmasqPath, []byte(line), 0644); err != nil {
+\t\t\treturn fmt.Errorf("атомарная запись dnsmasq direct-конфига: %w", err)
 \t\t}
+\t\tif err := ensureDirectDnsmasqInclude(); err != nil {
+\t\t\t_ = os.Remove(directDnsmasqPath)
+\t\t\treturn err
+\t\t}
+\t\tdnsmasqChanged = true
+\t}
+\tif dnsmasqChanged {
 \t\tif err := t.app.runSudo("systemctl restart dnsmasq"); err != nil {
-\t\t\treturn fmt.Errorf("перезапуск dnsmasq: %w", err)
+\t\t\treturn fmt.Errorf("перезапуск dnsmasq после изменения Direct: %w", err)
 \t\t}
 \t}
 
@@ -438,22 +680,13 @@ linux_direct = "\n".join(_normalized_lines) + "\n"
 
 # Integrate direct-domain/IP bypass into the Linux adapter and settings UI.
 s = LINUX.read_text()
-marker = 'func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) {'
+marker = 'func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) error {'
 if s.count(marker) != 1:
     raise SystemExit('SetupRoutes marker missing or ambiguous')
 s = s.replace(marker, linux_direct + marker, 1)
 
-setup_old = '\tt.app.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")\n\n\tt.app.core.AddLog("[TUN] TUN настроен успешно (policy table 202)")'
-setup_new = '\tt.app.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")\n\n\tif err := t.applyDirectRoutingLocked(); err != nil {\n\t\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Ошибка применения: %v", err))\n\t}\n\tt.app.core.AddLog("[TUN] TUN настроен успешно (policy table 202)")'
-if s.count(setup_old) != 1:
-    raise SystemExit('SetupRoutes body marker missing or ambiguous')
-s = s.replace(setup_old, setup_new, 1)
-
-cleanup_old = '\tt.app.core.AddLog("[TUN] Удаление TUN...")\n\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")'
-cleanup_new = '\tt.app.core.AddLog("[TUN] Удаление TUN...")\n\tt.cleanupDirectRoutingLocked()\n\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")'
-if s.count(cleanup_old) != 1:
-    raise SystemExit('CleanupRoutes marker missing or ambiguous')
-s = s.replace(cleanup_old, cleanup_new, 1)
+# SetupRoutes and CleanupRoutes above are complete ownership-safe implementations.
+# Legacy text replacements removed: their old markers intentionally no longer exist.
 LINUX.write_text(s)
 
 # Add direct routing preferences to the persisted settings model.
@@ -520,4 +753,151 @@ replace_once(
 	return true
 }'''
 )
+
+# The upstream token-fetcher release is Linux x64 only. Bundle a native
+# linux-arm64 build and let Playwright use Debian's system Chromium on NanoPi.
+VTOKEN = UPSTREAM / "Desktop/Libs/vktoken.go"
+replace_once(
+    VTOKEN,
+    'VKTokenFetcherArchive = "LaLuneTokenFetcher_%s.zip"',
+    'VKTokenFetcherArchive = "LaLuneTokenFetcher_%s.zip"\n\tVKTokenFetcherARM64Archive = "LaLuneTokenFetcher_Linux_ARM64.zip"',
+)
+replace_once(
+    VTOKEN,
+    '// EnsureVKTokenFetcher — скачивает и устанавливает LaLuneTokenFetcher.',
+    '''func (a *AppCore) bundledVKTokenFetcherArchive() string {
+    candidates := []string{}
+    if exe, err := os.Executable(); err == nil {
+        candidates = append(candidates, filepath.Join(filepath.Dir(exe), "server-assets", VKTokenFetcherARM64Archive))
+    }
+    candidates = append(candidates, filepath.Join("/usr/local/lib/lalune/server-assets", VKTokenFetcherARM64Archive))
+    for _, candidate := range candidates {
+        if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() && info.Size() > 0 {
+            return candidate
+        }
+    }
+    return ""
+}
+
+// EnsureVKTokenFetcher — скачивает и устанавливает LaLuneTokenFetcher.'''
+)
+replace_once(
+    VTOKEN,
+    'if !DownloadFile(url, zipPath) {',
+    '''if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
+        bundled := a.bundledVKTokenFetcherArchive()
+        if bundled == "" {
+            return false, fmt.Errorf("для NanoPi ARM64 не найден bundled LaLuneTokenFetcher_Linux_ARM64.zip")
+        }
+        data, err := os.ReadFile(bundled)
+        if err != nil {
+            return false, fmt.Errorf("не удалось прочитать ARM64 token fetcher: %w", err)
+        }
+        if err := os.WriteFile(zipPath, data, 0600); err != nil {
+            return false, fmt.Errorf("не удалось подготовить ARM64 token fetcher: %w", err)
+        }
+        archiveName = VKTokenFetcherARM64Archive
+        a.AddLog(fmt.Sprintf("[VK] Использую локальный ARM64 token fetcher: %s", bundled))
+    } else if !DownloadFile(url, zipPath) {'''
+)
+
+
+replace_once(
+    VTOKEN,
+    '"strings"',
+    '"strings"\n\t"net/url"'
+)
+replace_once(
+    VTOKEN,
+    'func (a *AppCore) HasVKToken() bool {',
+    '''func (a *AppCore) SaveVKTokenInput(value string) error {
+    value = strings.TrimSpace(value)
+    token := value
+    if strings.Contains(value, "://") {
+        parsed, err := url.Parse(value)
+        if err != nil { return fmt.Errorf("некорректная ссылка OAuth: %w", err) }
+        token = parsed.Query().Get("access_token")
+        if token == "" && parsed.Fragment != "" {
+            fragment, err := url.ParseQuery(parsed.Fragment)
+            if err != nil { return fmt.Errorf("не удалось разобрать фрагмент OAuth: %w", err) }
+            token = fragment.Get("access_token")
+        }
+    } else if strings.Contains(value, "access_token=") {
+        fragment := strings.TrimPrefix(value, "#")
+        parsed, err := url.ParseQuery(fragment)
+        if err == nil { token = parsed.Get("access_token") }
+    }
+    token = strings.TrimSpace(token)
+    if len(token) < 20 || strings.ContainsAny(token, " \\t\\r\\n") {
+        return fmt.Errorf("не найден корректный access_token; вставьте URL после успешного входа VK или сам токен")
+    }
+    if err := os.MkdirAll(a.appDir, 0700); err != nil {
+        return fmt.Errorf("не удалось создать каталог токена: %w", err)
+    }
+    data, err := json.MarshalIndent(VKTokenJSON{Token: token, SavedAt: time.Now()}, "", "  ")
+    if err != nil { return fmt.Errorf("не удалось сериализовать VK токен: %w", err) }
+    if err := os.WriteFile(a.vkTokenFile(), data, 0600); err != nil {
+        return fmt.Errorf("не удалось сохранить VK токен: %w", err)
+    }
+    if err := os.Chmod(a.vkTokenFile(), 0600); err != nil {
+        return fmt.Errorf("не удалось ограничить права VK токена: %w", err)
+    }
+    return nil
+}
+
+func (a *AppCore) HasVKToken() bool {'''
+)
+
+FETCHER = UPSTREAM / "Core/LaLuneTokenFetcher/Playwright/PlaywrightTokenFetcher.cs"
+replace_once(
+    FETCHER,
+    '                    Headless = false,',
+    '                    Headless = OperatingSystem.IsLinux(),\n                    ExecutablePath = ResolveChromiumExecutable(),'
+)
+replace_once(
+    FETCHER,
+    '    private static bool IsBrowserMissing(PlaywrightException ex)',
+    '''    private static string? ResolveChromiumExecutable()
+    {
+        if (!OperatingSystem.IsLinux() ||
+            System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture != System.Runtime.InteropServices.Architecture.Arm64)
+        {
+            return null;
+        }
+
+        var configured = Environment.GetEnvironmentVariable("PLAYWRIGHT_CHROMIUM_EXECUTABLE");
+        if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
+        {
+            return configured;
+        }
+
+        foreach (var candidate in new[] { "/usr/bin/chromium", "/usr/bin/chromium-browser" })
+        {
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new ChromiumMissingException(
+            "Для VK-авторизации на NanoPi ARM64 нужен системный Chromium. Установите пакет chromium.");
+    }
+
+    private static bool IsBrowserMissing(PlaywrightException ex)'''
+)
+
 print('Direct domain/IP bypass and explicit selection clearing adaptations applied')
+
+# Guard the final generated Linux source, after every later adaptation has run.
+# Earlier checks only proved the patch script executed; they did not prove the
+# exact file copied into the Go module retained the lifecycle implementation.
+final_linux = LINUX.read_text()
+for required in (
+    "tunOpen      func() (*os.File, error)",
+    "tunSetIFF    func(*os.File, *unix.Ifreq) error",
+    "func (t *LinuxTun) StartWithError(udpConn net.Conn, running *bool) error",
+    "func (t *LinuxTun) Stop()",
+):
+    if required not in final_linux:
+        raise SystemExit(f"final generated app_linux.go missing TUN lifecycle marker: {required}")
+print("Verified final app_linux.go contains TUN lifecycle fields and methods")

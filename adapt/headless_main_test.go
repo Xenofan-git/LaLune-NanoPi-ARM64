@@ -3,7 +3,9 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
@@ -77,6 +79,102 @@ func TestCaptchaRequestIsActive(t *testing.T) {
 			if got := captchaRequestIsActive(tt.mode, tt.url, now); got != tt.want {
 				t.Fatalf("captchaRequestIsActive() = %v, want %v", got, tt.want)
 			}
+		})
+	}
+}
+
+func TestDirectDomainValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		domain string
+		want bool
+	}{
+		{name: "base domain", domain: "example.com", want: true},
+		{name: "subdomain", domain: "api.example.com", want: true},
+		{name: "reject wildcard syntax", domain: "*.example.com", want: false},
+		{name: "reject URL", domain: "https://example.com", want: false},
+		{name: "reject path", domain: "example.com/path", want: false},
+		{name: "reject empty label", domain: "example..com", want: false},
+		{name: "reject leading hyphen", domain: "-bad.example", want: false},
+		{name: "reject blank", domain: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := validDirectDomain(tt.domain); got != tt.want {
+				t.Fatalf("validDirectDomain(%q) = %v, want %v", tt.domain, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeDirectIPs(t *testing.T) {
+	got, err := normalizeDirectIPs("192.0.2.1\n192.0.2.0/24")
+	if err != nil {
+		t.Fatalf("normalizeDirectIPs(valid values): %v", err)
+	}
+	if len(got) != 2 || got[0] != "192.0.2.1" || got[1] != "192.0.2.0/24" {
+		t.Fatalf("unexpected normalized IPs: %#v", got)
+	}
+	if _, err := normalizeDirectIPs("2001:db8::1"); err == nil {
+		t.Fatal("expected IPv6 to be rejected while Direct supports IPv4 only")
+	}
+	if _, err := normalizeDirectIPs("192.0.2.999"); err == nil {
+		t.Fatal("expected malformed IPv4 to be rejected")
+	}
+	if _, err := normalizeDirectIPs("0.0.0.0/0"); err == nil {
+		t.Fatal("expected default route CIDR to be rejected for Direct")
+	}
+}
+
+
+func TestVersionEndpointReportsBuildProvenance(t *testing.T) {
+	old := []string{buildCommit, buildRunID, buildRunNumber, buildDate, buildBranch, buildUpstreamCommit}
+	buildCommit, buildRunID, buildRunNumber, buildDate = "commit-test", "run-test", "42", "2026-10-09T00:00:00Z"
+	buildBranch, buildUpstreamCommit = "feature/csqtt-direct-route-tab", "e4a6d08b63aef6025bf8ad8f77da660ea552e04b"
+	defer func() {
+		buildCommit, buildRunID, buildRunNumber, buildDate = old[0], old[1], old[2], old[3]
+		buildBranch, buildUpstreamCommit = old[4], old[5]
+	}()
+	r := httptest.NewRequest("GET", "/version", nil)
+	w := httptest.NewRecorder()
+	apiHandler(nil).ServeHTTP(w, r)
+	if w.Code != 200 { t.Fatalf("/version status = %d, want 200", w.Code) }
+	var got map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil { t.Fatalf("invalid /version JSON: %v", err) }
+	want := map[string]string{
+		"backend": "original-go", "core": "csqtt-server/2.1.9", "ui": "0.6.0",
+		"commit": "commit-test", "buildRun": "run-test", "buildNumber": "42",
+		"buildDate": "2026-10-09T00:00:00Z", "buildBranch": "feature/csqtt-direct-route-tab",
+		"upstreamCommit": "e4a6d08b63aef6025bf8ad8f77da660ea552e04b",
+	}
+	for key, wantValue := range want {
+		if got[key] != wantValue { t.Errorf("/version[%q] = %#v, want %q", key, got[key], wantValue) }
+	}
+}
+
+func TestDirectPlanTransitions(t *testing.T) {
+	tests := []struct {
+		name, domains, ips string
+		wantDomains, wantIPs []string
+		wantDNS, wantEnabled bool
+		wantErr bool
+	}{
+		{name: "domains and IPs", domains: "example.com, api.example.com", ips: "192.0.2.1,192.0.2.0/24", wantDomains: []string{"example.com", "api.example.com"}, wantIPs: []string{"192.0.2.1", "192.0.2.0/24"}, wantDNS: true, wantEnabled: true},
+		{name: "IP only after domains", ips: "192.0.2.1", wantIPs: []string{"192.0.2.1"}, wantEnabled: true},
+		{name: "domains only after IPs", domains: "example.com", wantDomains: []string{"example.com"}, wantDNS: true, wantEnabled: true},
+		{name: "empty after domains and IPs", wantEnabled: false},
+		{name: "reject bad domain without plan", domains: "https://example.com", wantErr: true},
+		{name: "reject bad IP without plan", ips: "192.0.2.999", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			domains, ips, needsDNS, err := prepareDirectPlan(tt.domains, tt.ips)
+			if (err != nil) != tt.wantErr { t.Fatalf("prepareDirectPlan error = %v, wantErr %v", err, tt.wantErr) }
+			if tt.wantErr { return }
+			if !slices.Equal(domains, tt.wantDomains) { t.Errorf("domains = %#v, want %#v", domains, tt.wantDomains) }
+			if !slices.Equal(ips, tt.wantIPs) { t.Errorf("ips = %#v, want %#v", ips, tt.wantIPs) }
+			if needsDNS != tt.wantDNS { t.Errorf("needsDNS = %v, want %v", needsDNS, tt.wantDNS) }
+			if (len(domains)+len(ips) > 0) != tt.wantEnabled { t.Errorf("enabled = %v, want %v", len(domains)+len(ips)>0, tt.wantEnabled) }
 		})
 	}
 }

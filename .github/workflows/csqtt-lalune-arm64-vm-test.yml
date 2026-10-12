@@ -1,0 +1,537 @@
+name: CSQTT LaLune ARM64 system VM lifecycle test
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  arm64-system-vm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download actual ARM64 build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lalune-original-linux-arm64
+          path: vm/artifact
+
+      - name: Extract actual isolated server and installer
+        run: |
+          set -euxo pipefail
+          test -s vm/artifact/lalune-original-linux-arm64.tar.gz
+          mkdir -p vm/real
+          tar -xzf vm/artifact/lalune-original-linux-arm64.tar.gz -C vm/real
+          test -s vm/real/server-assets/csqtt-lalune-linux-arm64
+          test -x vm/real/server-assets/install-csqtt-lalune.sh
+          test -x vm/real/server-assets/uninstall-csqtt-lalune.sh
+          test -x vm/real/client-tun-tests-arm64
+          file vm/real/server-assets/csqtt-lalune-linux-arm64
+          sha256sum vm/real/server-assets/csqtt-lalune-linux-arm64
+
+      - name: Install QEMU system emulator and cloud-init image tools
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-arm qemu-efi-aarch64 cloud-image-utils openssh-client
+
+      - name: Prepare isolated Debian ARM64 guest
+        run: |
+          set -euxo pipefail
+          mkdir -p vm
+          curl -fL --retry 3 https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-arm64.qcow2 -o vm/guest.qcow2
+          ssh-keygen -q -t ed25519 -N '' -f vm/id_ed25519
+          cat > vm/user-data <<'EOF'
+          #cloud-config
+          users:
+            - name: tester
+              groups: [sudo]
+              shell: /bin/bash
+              sudo: ALL=(ALL) NOPASSWD:ALL
+              ssh_authorized_keys:
+                - KEY_PLACEHOLDER
+          ssh_pwauth: false
+          package_update: true
+          packages:
+            - iproute2
+            - iptables
+            - iptables-persistent
+            - nftables
+            - systemd
+            - openssh-server
+            - python3-cryptography
+          EOF
+          sed -i "s|KEY_PLACEHOLDER|$(cat vm/id_ed25519.pub)|" vm/user-data
+          cat > vm/meta-data <<'EOF'
+          instance-id: lalune-isolation-test
+          local-hostname: lalune-arm64-test
+          EOF
+          cloud-localds vm/seed.iso vm/user-data vm/meta-data
+          qemu-img resize vm/guest.qcow2 8G
+
+      - name: Boot real ARM64 Linux guest
+        run: |
+          set -euxo pipefail
+          test -f /usr/share/AAVMF/AAVMF_CODE.fd
+          cp /usr/share/AAVMF/AAVMF_CODE.fd vm/firmware-code.fd
+          cp /usr/share/AAVMF/AAVMF_VARS.fd vm/firmware-vars.fd
+          qemu-system-aarch64 \
+            -machine virt -cpu max -m 3072 -smp 2 -accel tcg \
+            -drive if=pflash,format=raw,readonly=on,file=vm/firmware-code.fd \
+            -drive if=pflash,format=raw,file=vm/firmware-vars.fd \
+            -drive if=none,file=vm/guest.qcow2,format=qcow2,id=hd0 \
+            -device virtio-blk-device,drive=hd0 \
+            -drive file=vm/seed.iso,if=none,format=raw,id=seed \
+            -device virtio-blk-device,drive=seed \
+            -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 \
+            -device virtio-net-pci,netdev=net0 \
+            -display none -monitor none -daemonize -pidfile vm/qemu.pid -serial file:vm/serial.log
+          for attempt in $(seq 1 90); do
+            if ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=3 tester@127.0.0.1 'uname -m' 2>/dev/null | grep -qx aarch64; then
+              exit 0
+            fi
+            sleep 5
+          done
+          cat vm/serial.log
+          exit 1
+
+      - name: Test Direct routing policy with real Linux kernel routes
+        run: |
+          set -euo pipefail
+          ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo bash -se' <<'DIRECT_TEST'
+          set -euo pipefail
+          # SSH can come up while cloud-init is still installing packages.
+          # Wait for cloud-init and then poll for nftables; do not race apt locks.
+          cloud-init status --wait || true
+          for attempt in $(seq 1 60); do
+            command -v nft >/dev/null 2>&1 && break
+            sleep 2
+          done
+          command -v nft >/dev/null
+          cleanup() {
+            ip rule del pref 22010 2>/dev/null || true
+            ip rule del pref 22020 2>/dev/null || true
+            ip route del default dev direct-test0 2>/dev/null || true
+            ip route del default dev csqtt-test0 table 202 2>/dev/null || true
+            ip link del direct-test0 2>/dev/null || true
+            ip link del csqtt-test0 2>/dev/null || true
+            nft delete table inet lalune_direct_test 2>/dev/null || true
+          }
+          cleanup
+          trap cleanup EXIT
+          ip link add direct-test0 type dummy
+          ip link add csqtt-test0 type dummy
+          ip link set direct-test0 up
+          ip link set csqtt-test0 up
+          # Route lookups with iif model forwarded traffic, which requires IPv4 forwarding.
+          sysctl -w net.ipv4.ip_forward=1
+          # Give the simulated client subnet a connected route so Linux accepts
+          # route lookups sourced from a client address in that subnet.
+          ip addr add 192.168.5.1/24 dev csqtt-test0
+          ip route add default dev direct-test0
+          ip route add default dev csqtt-test0 table 202
+          ip rule add pref 22010 fwmark 0x4c4c/0xffff lookup main
+          ip rule add pref 22020 from 192.168.5.0/24 lookup 202
+          nft -f - <<'NFT'
+          table inet lalune_direct_test {
+            set direct4 { type ipv4_addr; flags interval; elements = { 203.0.113.10 } }
+            chain prerouting {
+              type filter hook prerouting priority -150; policy accept;
+              ip saddr 192.168.5.0/24 ip daddr @direct4 meta mark set 0x4c4c
+            }
+          }
+          NFT
+          # Model forwarded packets entering from the client-side TUN. Without
+          # iif, Linux treats the supplied source as locally originated and may
+          # reject a source address that is not assigned to this guest.
+          direct="$(ip -4 route get 203.0.113.10 from 192.168.5.2 iif csqtt-test0 mark 0x4c4c)"
+          tunneled="$(ip -4 route get 203.0.113.10 from 192.168.5.2 iif csqtt-test0)"
+          printf 'DIRECT_MARK_ROUTE %s\n' "$direct"
+          printf 'UNMARKED_TUNNEL_ROUTE %s\n' "$tunneled"
+          grep -q 'dev direct-test0' <<<"$direct"
+          grep -q 'dev csqtt-test0 table 202' <<<"$tunneled"
+          nft list table inet lalune_direct_test | grep -q '203.0.113.10'
+          echo DIRECT_KERNEL_POLICY_ROUTE_PASS
+          DIRECT_TEST
+
+      - name: Prepare standalone CSQTT VM protocol probe
+        run: |
+          set -euxo pipefail
+          cat > vm/csqtt-vm-probe.py <<'PY_PROBE_FILE'
+          import socket
+          import ssl
+          import urllib.request
+          from urllib.error import HTTPError, URLError
+          
+          # The test server intentionally uses a self-signed certificate. Disable
+          # verification only for this loopback CI probe.
+          context = ssl._create_unverified_context()
+          try:
+              with urllib.request.urlopen("https://127.0.0.1:47002/", timeout=5, context=context) as response:
+                  print("WEB_HTTPS_STATUS", response.status)
+          except HTTPError as exc:
+              print("WEB_HTTPS_STATUS", exc.code)
+          except (URLError, TimeoutError, OSError) as exc:
+              raise SystemExit(f"web listener did not return HTTPS: {exc}")
+          
+          # Real server-side authentication smoke: send the pinned upstream
+          # encrypted GETCONF fixture for password wire-password and require the
+          # server to return an encrypted protocol response, not merely accept UDP.
+          fixture = bytes.fromhex(
+              "b06f77881122334410203040bede0002325566775199aa009e2a813c2df794"
+              "354293ade7b0b8ef4aa6297cf3cc8b0a372342fbd678c10260dc543f833826"
+              "2292992b12600eaa12d0d3155fa7179b62cd34ac41afb32db0ab7f6dced9"
+              "e1bb0620daa26d1743f2c25af6bd9ade9901"
+          )
+          sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+          sock.bind(("127.0.0.1", 0))
+          sock.settimeout(5)
+          sock.sendto(fixture, ("127.0.0.1", 47000))
+          try:
+              response, peer = sock.recvfrom(65535)
+          except socket.timeout:
+              sock.close()
+              raise SystemExit("valid encrypted CSQTT GETCONF fixture received no server response")
+          if len(response) < 32:
+              sock.close()
+              raise SystemExit(f"CSQTT response too short: {len(response)} bytes")
+          
+          # Authenticate and decrypt the response with the real client-side key
+          # derivation and RTP/ChaCha20-Poly1305 wire layout. A length-only check
+          # can pass on arbitrary or repeated ciphertext and is not protocol proof.
+          from cryptography.hazmat.primitives import hashes
+          from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+          from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+          
+          if len(response) < 24 + 16 + 1 or response[0] >> 6 != 2:
+              sock.close()
+              raise SystemExit(f"invalid encrypted CSQTT RTP response: {len(response)} bytes")
+          header = response[:24]
+          if header[0] & 0x10 == 0 or header[12:14] != b"\xbe\xde":
+              sock.close()
+              raise SystemExit("response does not contain the expected CSQTT RTP extension")
+          if response[0] & 0x20:
+              padding = response[-1]
+              if padding < 1 or padding > len(response) - 24 - 16:
+                  sock.close()
+                  raise SystemExit("invalid CSQTT response padding")
+              payload_end = len(response) - padding
+          else:
+              payload_end = len(response)
+          tag_start = payload_end - 16
+          if tag_start < 24:
+              sock.close()
+              raise SystemExit("encrypted CSQTT response has no payload/tag")
+          password = b"wire-password"
+          key = HKDF(
+              algorithm=hashes.SHA256(),
+              length=32,
+              salt=b"CSQTT-WRAP-v1",
+              info=b"rtp-obfs/chacha20poly1305",
+          ).derive(password)
+          nonce = header[8:12] + header[2:4] + b"\x00\x00" + header[4:8]
+          try:
+              plaintext = ChaCha20Poly1305(key).decrypt(
+                  nonce, response[24:tag_start] + response[tag_start:payload_end], header
+              )
+          except Exception as exc:
+              sock.close()
+              raise SystemExit(f"live server response failed client AEAD authentication: {exc}")
+          if not plaintext.startswith((b"TUNCONF:", b"NOCONF", b"DENIED:")):
+              sock.close()
+              raise SystemExit(f"live server returned unexpected decrypted control payload: {plaintext[:80]!r}")
+          if plaintext.startswith(b"TUNCONF:"):
+              fields = plaintext.decode("utf-8").split(":")
+              if len(fields) < 3:
+                  sock.close()
+                  raise SystemExit(f"malformed live TUNCONF: {plaintext!r}")
+              import ipaddress
+              assigned = ipaddress.ip_address(fields[1])
+              dns = [ipaddress.ip_address(value) for value in fields[2].split(",")]
+              if assigned.version != 4 or not dns or any(value.version != 4 for value in dns):
+                  sock.close()
+                  raise SystemExit(f"invalid IPv4 TUNCONF values: {plaintext!r}")
+              print("LIVE_TUNCONF_DECRYPTED", assigned, "DNS", ",".join(map(str, dns)))
+          else:
+              sock.close()
+              raise SystemExit(f"live server did not return TUNCONF: {plaintext!r}")
+          print("CSQTT_AUTHENTICATED_RESPONSE", len(response), "bytes from", peer)
+          
+          # Validate the real Linux TUN device and route independently. This only
+          # proves kernel interface/routing setup; packet return delivery requires
+          # a control-plane tunnel activation and is deliberately not inferred here.
+          import subprocess
+          tun = subprocess.run(
+              ["ip", "-4", "addr", "show", "dev", "csqtt-lalune0"],
+              check=True, capture_output=True, text=True,
+          ).stdout
+          if "10.67.68.1/" not in tun:
+              sock.close()
+              raise SystemExit("live daemon TUN does not have expected 10.67.68.1 address")
+          route = subprocess.run(
+              ["ip", "-4", "route", "get", "10.67.68.42"],
+              check=True, capture_output=True, text=True,
+          ).stdout
+          if "dev csqtt-lalune0" not in route:
+              sock.close()
+              raise SystemExit(f"client tunnel address is not routed through live TUN: {route.strip()}")
+          
+          # Real bidirectional dataplane probe through the live ARM64 process.
+          # Linux sends an ICMP echo request into the actual TUN; the CSQTT server
+          # must encrypt it back to this authenticated UDP peer. We decode that
+          # packet with the client wire key, synthesize an ICMP echo reply, encrypt
+          # it using the same client wire format, and require the kernel ping to
+          # receive that reply through the server's TUN. This is stronger than
+          # checking interface counters or an arbitrary UDP response.
+          def make_wire(payload, sequence):
+              import struct
+              # Preserve the pinned GETCONF fixture's RTP header layout and CSQTT
+              # extension metadata. Only advance replay sequence and timestamp;
+              # different SSRC/extension fields are not a faithful client datagram.
+              header = bytearray.fromhex(
+                  "b06f77881122334410203040bede0002325566775199aa00"
+              )
+              header[2:4] = struct.pack("!H", sequence & 0xffff)
+              header[8:12] = struct.pack("!I", 0x10203040 + ((sequence - 0x7788) & 0xffffffff))
+              nonce = bytes(header[8:12] + header[2:4] + b"\x00\x00" + header[4:8])
+              return bytes(header) + ChaCha20Poly1305(key).encrypt(nonce, payload, bytes(header)) + b"\x01"
+          
+          def decrypt_wire(wire):
+              if len(wire) < 41 or wire[0] >> 6 != 2 or wire[12:14] != b"\xbe\xde":
+                  raise SystemExit(f"live dataplane returned invalid RTP packet: {len(wire)} bytes")
+              end = len(wire)
+              if wire[0] & 0x20:
+                  padding = wire[-1]
+                  if padding < 1 or padding > end - 40:
+                      raise SystemExit("invalid dataplane RTP padding")
+                  end -= padding
+              nonce = wire[8:12] + wire[2:4] + b"\x00\x00" + wire[4:8]
+              try:
+                  return ChaCha20Poly1305(key).decrypt(nonce, wire[24:end], wire[:24])
+              except Exception as exc:
+                  raise SystemExit(f"live dataplane packet failed client AEAD authentication: {exc}")
+          
+          def checksum(data):
+              if len(data) & 1:
+                  data += b"\x00"
+              total = sum((data[i] << 8) + data[i + 1] for i in range(0, len(data), 2))
+              while total >> 16:
+                  total = (total & 0xffff) + (total >> 16)
+              return (~total) & 0xffff
+          
+          import subprocess
+          ping = subprocess.Popen(
+              ["ping", "-n", "-I", "csqtt-lalune0", "-c", "1", "-W", "6", "10.67.68.2"],
+              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+          )
+          try:
+              # A GETCONF exchange can leave another authenticated control packet
+              # queued on this UDP socket. Ignore control payloads and wait for the
+              # actual IPv4 ICMP request generated by the kernel ping.
+              import time
+              deadline = time.monotonic() + 8
+              packet = None
+              while time.monotonic() < deadline:
+                  sock.settimeout(max(0.1, deadline - time.monotonic()))
+                  try:
+                      packet_wire, peer = sock.recvfrom(65535)
+                  except socket.timeout:
+                      break
+                  candidate = decrypt_wire(packet_wire)
+                  if candidate.startswith((b"TUNCONF:", b"NOCONF", b"DENIED:")):
+                      print("LIVE_CONTROL_PACKET_IGNORED", candidate[:40])
+                      continue
+                  if len(candidate) < 28 or candidate[0] >> 4 != 4 or candidate[9] != 1:
+                      print("LIVE_NON_ICMP_PACKET_IGNORED", candidate[:32])
+                      continue
+                  candidate_header_len = (candidate[0] & 0x0f) * 4
+                  if len(candidate) <= candidate_header_len or candidate[candidate_header_len] != 8:
+                      print("LIVE_NON_ECHO_REQUEST_IGNORED", candidate[:32])
+                      continue
+                  packet = candidate
+                  break
+              if packet is None:
+                  raise SystemExit("no authenticated IPv4 ICMP echo request arrived from the live server TUN")
+              ip_header_len = (packet[0] & 0x0f) * 4
+              print("LIVE_TUN_DOWNLINK_IPV4_DECRYPTED", len(packet), "bytes", packet[12:16], "->", packet[16:20])
+          
+              reply = bytearray(packet)
+              reply[12:16], reply[16:20] = packet[16:20], packet[12:16]
+              reply[ip_header_len] = 0
+              reply[ip_header_len + 2:ip_header_len + 4] = b"\x00\x00"
+              reply[ip_header_len + 2:ip_header_len + 4] = checksum(bytes(reply[ip_header_len:])).to_bytes(2, "big")
+              reply[10:12] = b"\x00\x00"
+              reply[10:12] = checksum(bytes(reply[:ip_header_len])).to_bytes(2, "big")
+              # The GETCONF fixture used RTP sequence 0x7788; continue the client replay window.
+              sock.sendto(make_wire(bytes(reply), 0x7789), ("127.0.0.1", 47000))
+              try:
+                  ping_output, _ = ping.communicate(timeout=8)
+              except subprocess.TimeoutExpired:
+                  ping.kill()
+                  ping_output, _ = ping.communicate()
+                  raise SystemExit("kernel ping timed out waiting for the encrypted ICMP reply through CSQTT TUN")
+              if ping.returncode != 0:
+                  raise SystemExit(f"kernel did not receive the authenticated CSQTT ICMP reply: {ping_output}")
+              print("LIVE_TUN_BIDIRECTIONAL_IPV4_PASS", ping_output.strip().replace("\n", " | "))
+          finally:
+              if ping.poll() is None:
+                  ping.kill()
+                  ping.wait()
+              sock.close()
+          
+          # A malformed datagram must not stop the real server after handshake.
+          sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+          sock.sendto(b"CSQTT_LALUNE_INVALID_SMOKE_PROBE", ("127.0.0.1", 47000))
+          sock.close()
+          print("UDP_INVALID_PROBE_SENT")
+          PY_PROBE_FILE
+          python3 -m py_compile vm/csqtt-vm-probe.py
+
+      - name: Test installer isolation and lifecycle in ARM64 system guest
+        run: |
+          set -euxo pipefail
+          SSH="ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1"
+          SCP="scp -i vm/id_ed25519 -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          echo "Using the real ARM64 CSQTT server from this workflow's build artifact"
+          INSTALLER=vm/real/server-assets/install-csqtt-lalune.sh
+          UNINSTALLER=vm/real/server-assets/uninstall-csqtt-lalune.sh
+          BINARY=vm/real/server-assets/csqtt-lalune-linux-arm64
+          test -s "$BINARY"
+          for unit in csqtt.service csqtt-47000.service csqtt-47000-netns.service; do
+            cat > "vm/$unit" <<EOF
+          [Unit]
+          Description=Disposable pre-existing production-like $unit
+          After=network.target
+          [Service]
+          Type=simple
+          ExecStart=/bin/sleep infinity
+          Restart=on-failure
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          done
+          $SCP "$INSTALLER" "$UNINSTALLER" "$BINARY" vm/real/client-tun-tests-arm64 vm/csqtt.service vm/csqtt-47000.service vm/csqtt-47000-netns.service vm/csqtt-vm-probe.py tester@127.0.0.1:/home/tester/
+          $SSH 'set -eux
+            sudo install -d -m 0755 /opt/lalune-package
+            sudo install -m 0755 /home/tester/install-csqtt-lalune.sh /opt/lalune-package/install-csqtt-lalune.sh
+            sudo install -m 0755 /home/tester/uninstall-csqtt-lalune.sh /opt/lalune-package/uninstall-csqtt-lalune.sh
+            test -s /home/tester/csqtt-lalune-linux-arm64
+            sudo install -m 0755 /home/tester/csqtt-lalune-linux-arm64 /opt/lalune-package/csqtt-lalune-linux-arm64
+            sudo install -m 0755 /home/tester/client-tun-tests-arm64 /usr/local/bin/client-tun-tests-arm64
+            /usr/local/bin/client-tun-tests-arm64 -test.v
+            file /opt/lalune-package/csqtt-lalune-linux-arm64
+            sudo install -m 0644 /home/tester/csqtt.service /etc/systemd/system/csqtt.service
+            sudo install -m 0644 /home/tester/csqtt-47000.service /etc/systemd/system/csqtt-47000.service
+            sudo install -m 0644 /home/tester/csqtt-47000-netns.service /etc/systemd/system/csqtt-47000-netns.service
+            sudo systemctl daemon-reload
+            sudo systemctl enable --now csqtt.service
+            sudo systemctl enable --now csqtt-47000.service
+            sudo systemctl enable --now csqtt-47000-netns.service
+            sudo systemctl is-active --quiet csqtt.service
+            sudo systemctl is-active --quiet csqtt-47000.service
+            sudo systemctl is-active --quiet csqtt-47000-netns.service
+            # Seed explicitly foreign resources, not just whatever defaults happen
+            # to exist in the guest. LaLune must preserve them through install AND removal.
+            sudo ip route add blackhole 198.18.77.0/24 table 42424
+            sudo ip rule add priority 42424 to 198.18.77.0/24 lookup 42424
+            sudo iptables -I OUTPUT 1 -d 198.18.77.0/24 -m comment --comment FOREIGN_TEST_RULE_KEEP -j ACCEPT
+            sudo sha256sum /etc/systemd/system/csqtt.service /etc/systemd/system/csqtt-47000.service /etc/systemd/system/csqtt-47000-netns.service > /tmp/production-units.before
+            sudo systemctl show -p ActiveState -p SubState csqtt.service csqtt-47000.service csqtt-47000-netns.service > /tmp/production-states.before
+            sudo ip -4 route show table main > /tmp/main-routes.before
+            sudo ip -4 route show table 42424 > /tmp/foreign-routes.before
+            sudo ip -4 rule show > /tmp/ip-rules.before
+            sudo iptables-save | sed "/^# Generated by iptables-save/d; /^# Completed on /d; s/\\[[0-9:]*\\]/[COUNTERS]/g" > /tmp/iptables.before
+            grep -Fq "blackhole 198.18.77.0/24" /tmp/foreign-routes.before
+            grep -Eq "^42424:.*to 198\\.18\\.77\\.0/24.*lookup 42424$" /tmp/ip-rules.before
+            grep -Fq 'FOREIGN_TEST_RULE_KEEP' /tmp/iptables.before
+            sudo /opt/lalune-package/install-csqtt-lalune.sh
+            sudo systemctl is-active --quiet csqtt-lalune.service
+            sudo systemctl is-active --quiet csqtt.service
+            sudo systemctl is-active --quiet csqtt-47000.service
+            sudo systemctl is-active --quiet csqtt-47000-netns.service
+            sudo systemctl show -p ActiveState -p SubState csqtt.service csqtt-47000.service csqtt-47000-netns.service > /tmp/production-states.after-install
+            diff -u /tmp/production-states.before /tmp/production-states.after-install
+            sudo ip -4 route show table 42424 > /tmp/foreign-routes.after-install
+            diff -u /tmp/foreign-routes.before /tmp/foreign-routes.after-install
+            # The packaged service must bind only its dedicated ports.
+            for attempt in $(seq 1 20); do
+              if sudo ss -H -lun 'sport = :47000' | grep -q . && sudo ss -H -ltn 'sport = :47002' | grep -q .; then break; fi
+              sleep 1
+            done
+            sudo ss -H -lun 'sport = :47000' | grep -q .
+            sudo ss -H -ltn 'sport = :47002' | grep -q .
+            # Configure a disposable, deterministic protocol credential in this VM only.
+            # The fixture is the upstream CSQTT-WIRE-2 encrypted GETCONF test packet
+            # for password wire-password/device wire-device, not a production secret.
+            sudo mkdir -p /etc/systemd/system/csqtt-lalune.service.d
+            sudo tee /etc/systemd/system/csqtt-lalune.service.d/ci-protocol-test.conf >/dev/null <<'EOF'
+          [Service]
+          ExecStart=
+          ExecStart=/usr/local/bin/csqtt-lalune --listen 0.0.0.0:47000 --web-port 47002 --config-dir /etc/csqtt-lalune --password wire-password --device-id wire-device
+          EOF
+            sudo systemctl daemon-reload
+            sudo systemctl restart csqtt-lalune.service
+            for attempt in $(seq 1 20); do
+              if sudo ss -H -lun 'sport = :47000' | grep -q . && sudo ss -H -ltn 'sport = :47002' | grep -q .; then break; fi
+              sleep 1
+            done
+            sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-before-probe.log
+            python3 /home/tester/csqtt-vm-probe.py
+            sudo systemctl is-active --quiet csqtt-lalune.service
+            sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-after-probe.log
+            sudo systemctl is-active --quiet csqtt-lalune.service
+            sleep 1
+            sudo systemctl is-active --quiet csqtt-lalune.service
+            sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-after-probe.log
+            diff -u /tmp/csqtt-lalune-before-probe.log /tmp/csqtt-lalune-after-probe.log > /tmp/csqtt-lalune-probe-diff.log || true
+            # Installing the isolated service must not change the main/default route table.
+            sudo ip -4 route show table main > /tmp/main-routes.after-install
+            # The dedicated TUN subnet route is expected while the isolated service is running.
+            grep -Fq "10.67.68.0/24 dev csqtt-lalune0" /tmp/main-routes.after-install
+            grep -vF "10.67.68.0/24 dev csqtt-lalune0" /tmp/main-routes.after-install > /tmp/main-routes.unrelated-after-install
+            sudo diff -u /tmp/main-routes.before /tmp/main-routes.unrelated-after-install
+            # Every pre-existing policy rule and firewall rule must survive installation.
+            sudo ip -4 rule show > /tmp/ip-rules.after-install
+            sudo iptables-save | sed "/^# Generated by iptables-save/d; /^# Completed on /d; s/\\[[0-9:]*\\]/[COUNTERS]/g" > /tmp/iptables.after-install
+            while IFS= read -r rule; do grep -Fqx -- "$rule" /tmp/ip-rules.after-install; done < /tmp/ip-rules.before
+            while IFS= read -r rule; do grep -Fqx -- "$rule" /tmp/iptables.after-install; done < /tmp/iptables.before
+            sudo sha256sum -c /tmp/production-units.before
+            sudo /opt/lalune-package/uninstall-csqtt-lalune.sh
+            ! sudo systemctl is-active --quiet csqtt-lalune.service
+            sudo systemctl is-active --quiet csqtt.service
+            sudo systemctl is-active --quiet csqtt-47000.service
+            sudo systemctl is-active --quiet csqtt-47000-netns.service
+            sudo sha256sum -c /tmp/production-units.before
+            sudo systemctl show -p ActiveState -p SubState csqtt.service csqtt-47000.service csqtt-47000-netns.service > /tmp/production-states.after-uninstall
+            diff -u /tmp/production-states.before /tmp/production-states.after-uninstall
+            sudo ip -4 route show table 42424 > /tmp/foreign-routes.after-uninstall
+            diff -u /tmp/foreign-routes.before /tmp/foreign-routes.after-uninstall
+            sudo ip -4 route show table main > /tmp/main-routes.after-uninstall
+            sudo diff -u /tmp/main-routes.before /tmp/main-routes.after-uninstall
+            sudo ip -4 rule show > /tmp/ip-rules.after-uninstall
+            sudo iptables-save | sed "/^# Generated by iptables-save/d; /^# Completed on /d; s/\\[[0-9:]*\\]/[COUNTERS]/g" > /tmp/iptables.after-uninstall
+            while IFS= read -r rule; do grep -Fqx -- "$rule" /tmp/ip-rules.after-uninstall; done < /tmp/ip-rules.before
+            while IFS= read -r rule; do grep -Fqx -- "$rule" /tmp/iptables.after-uninstall; done < /tmp/iptables.before
+            sudo test -f /etc/csqtt-lalune/.managed-by-lalune
+            sudo grep -Fxq CSQTT-LALUNE-MANAGED-V1 /etc/csqtt-lalune/.managed-by-lalune
+            echo ARM64_SYSTEM_VM_LIFECYCLE_PASS'
+          
+      - name: Upload guest diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lalune-arm64-system-vm-diagnostics
+          path: |
+            vm/serial.log
+            vm/user-data
+            vm/meta-data
+          if-no-files-found: ignore
+
+      - name: Stop QEMU guest
+        if: always()
+        run: |
+          if [ -f vm/qemu.pid ]; then kill "$(cat vm/qemu.pid)" || true; fi
