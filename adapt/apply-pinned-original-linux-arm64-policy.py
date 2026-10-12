@@ -137,24 +137,22 @@ LINUX.write_text(s)
 # Keep the original UDP core protocol, but bridge Linux TUN packets to that UDP
 # socket using /dev/net/tun. This is intentionally the only dataplane deviation.
 s = LINUX.read_text()
-s = s.replace(
-'''type LinuxTun struct {
-\tapp          *App
-\tbypassRoutes []string
-\tmu           sync.Mutex
-\ttunFile      *os.File
-}''',
-'''type LinuxTun struct {
-\tapp          *App
-\tbypassRoutes []string
-\tmu           sync.Mutex
-\tlifecycleMu  sync.Mutex
-\ttunFile      *os.File
-\tudpConn      net.Conn
-\tworkers      sync.WaitGroup
-\ttunOpen      func() (*os.File, error)
-\ttunSetIFF    func(*os.File, *unix.Ifreq) error
-}''', 1)
+# Upstream field alignment can vary; replace the Go struct independent of whitespace.
+import re
+struct_pattern = re.compile(r"type LinuxTun struct \{[^}]*\}", re.S)
+s, struct_count = struct_pattern.subn("""type LinuxTun struct {
+	app          *App
+	bypassRoutes []string
+	mu           sync.Mutex
+	lifecycleMu  sync.Mutex
+	tunFile      *os.File
+	udpConn      net.Conn
+	workers      sync.WaitGroup
+	tunOpen      func() (*os.File, error)
+	tunSetIFF    func(*os.File, *unix.Ifreq) error
+}""", s, count=1)
+if struct_count != 1:
+    raise SystemExit(f"LinuxTun struct marker missing or ambiguous: replaced {struct_count}")
 
 s=s.replace(
 '''import "lalune-desktop/Libs"''',
