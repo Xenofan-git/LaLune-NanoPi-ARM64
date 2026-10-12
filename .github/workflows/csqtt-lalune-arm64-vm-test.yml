@@ -143,8 +143,11 @@ jobs:
             }
           }
           NFT
-          direct="$(ip -4 route get 203.0.113.10 from 192.168.5.2 mark 0x4c4c)"
-          tunneled="$(ip -4 route get 203.0.113.10 from 192.168.5.2)"
+          # Model forwarded packets entering from the client-side TUN. Without
+          # iif, Linux treats the supplied source as locally originated and may
+          # reject a source address that is not assigned to this guest.
+          direct="$(ip -4 route get 203.0.113.10 from 192.168.5.2 iif csqtt-test0 mark 0x4c4c)"
+          tunneled="$(ip -4 route get 203.0.113.10 from 192.168.5.2 iif csqtt-test0)"
           printf 'DIRECT_MARK_ROUTE %s\n' "$direct"
           printf 'UNMARKED_TUNNEL_ROUTE %s\n' "$tunneled"
           grep -q 'dev direct-test0' <<<"$direct"
