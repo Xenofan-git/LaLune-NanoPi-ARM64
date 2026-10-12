@@ -267,3 +267,74 @@ func TestBridgeStartTunnelRejectsInvalidUDPPort(t *testing.T) {
 	if bridge.UdpConn != nil { t.Fatal("UDP connection retained after UDP dial failure") }
 	if tun.startCalled || tun.stopCalled { t.Fatal("TUN was touched after UDP dial failed") }
 }
+
+type successfulStartTun struct {
+	starts int
+	stops  int
+}
+
+func (t *successfulStartTun) Setup() error { return nil }
+func (t *successfulStartTun) Start(net.Conn, *bool) {}
+func (t *successfulStartTun) StartWithError(net.Conn, *bool) error {
+	t.starts++
+	return nil
+}
+func (t *successfulStartTun) Stop() { t.stops++ }
+func (t *successfulStartTun) SetupRoutes(string, string) error { return nil }
+func (t *successfulStartTun) CleanupRoutes() {}
+
+func TestBridgeStartTunnelReconnectLifecycle(t *testing.T) {
+	listener, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatalf("listen UDP: %v", err)
+	}
+	defer listener.Close()
+	port := listener.LocalAddr().(*net.UDPAddr).Port
+
+	tun := &successfulStartTun{}
+	core := libs.NewAppCore()
+	bridge := libs.NewBridge(core, tun, nil)
+
+	if !bridge.StartTunnel(port) {
+		t.Fatal("first StartTunnel unexpectedly failed")
+	}
+	firstConn := bridge.UdpConn
+	if firstConn == nil || !bridge.TunRunning {
+		t.Fatal("first start did not retain active UDP connection/running state")
+	}
+	if !bridge.StartTunnel(port) {
+		t.Fatal("repeated StartTunnel while running should be idempotent")
+	}
+	if tun.starts != 1 {
+		t.Fatalf("repeated start initialized TUN %d times; want 1", tun.starts)
+	}
+	if bridge.UdpConn != firstConn {
+		t.Fatal("repeated start replaced the active UDP connection")
+	}
+
+	bridge.StopTunnel()
+	if bridge.TunRunning || bridge.UdpConn != nil || bridge.TunSetupDone {
+		t.Fatal("StopTunnel did not clear running/connection/setup state")
+	}
+	if tun.stops != 1 {
+		t.Fatalf("StopTunnel called TUN Stop %d times; want 1", tun.stops)
+	}
+	if _, err := firstConn.Write([]byte("after-close")); err == nil {
+		t.Fatal("UDP connection remained writable after StopTunnel")
+	}
+
+	if !bridge.StartTunnel(port) {
+		t.Fatal("StartTunnel failed after disconnect")
+	}
+	secondConn := bridge.UdpConn
+	if secondConn == nil || secondConn == firstConn {
+		t.Fatal("reconnect did not create a fresh UDP connection")
+	}
+	if tun.starts != 2 {
+		t.Fatalf("reconnect initialized TUN %d times total; want 2", tun.starts)
+	}
+	bridge.StopTunnel()
+	if bridge.TunRunning || bridge.UdpConn != nil || tun.stops != 2 {
+		t.Fatal("second disconnect did not release tunnel state")
+	}
+}
