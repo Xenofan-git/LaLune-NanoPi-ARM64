@@ -480,6 +480,9 @@ jobs:
               sleep 1
             done
             sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-before-probe.log
+            # First independent probe process completed an authenticated server exchange
+            # and bidirectional TUN packet test. Now force a server process restart and
+            # launch a fresh OS process with a fresh UDP socket to verify recovery.
             python3 /home/tester/csqtt-vm-probe.py
             sudo systemctl is-active --quiet csqtt-lalune.service
             sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-after-probe.log
@@ -488,6 +491,22 @@ jobs:
             sudo systemctl is-active --quiet csqtt-lalune.service
             sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-after-probe.log
             diff -u /tmp/csqtt-lalune-before-probe.log /tmp/csqtt-lalune-after-probe.log > /tmp/csqtt-lalune-probe-diff.log || true
+
+            # Recovery check: restart only the disposable CI service, then invoke a
+            # brand-new client probe process. Require authenticated TUNCONF and a
+            # successful packet round-trip again; an open port alone is not enough.
+            sudo systemctl restart csqtt-lalune.service
+            for attempt in $(seq 1 20); do
+              if sudo ss -H -lun 'sport = :47000' | grep -q . && sudo ss -H -ltn 'sport = :47002' | grep -q .; then break; fi
+              sleep 1
+            done
+            sudo ss -H -lun 'sport = :47000' | grep -q .
+            sudo ss -H -ltn 'sport = :47002' | grep -q .
+            python3 /home/tester/csqtt-vm-probe.py | tee /tmp/csqtt-lalune-reconnect-probe.log
+            grep -q '^LIVE_TUNCONF_DECRYPTED ' /tmp/csqtt-lalune-reconnect-probe.log
+            grep -q '^LIVE_TUN_BIDIRECTIONAL_IPV4_PASS ' /tmp/csqtt-lalune-reconnect-probe.log
+            sudo systemctl is-active --quiet csqtt-lalune.service
+            echo CSQTT_CLIENT_PROCESS_RESTART_RECOVERY_PASS
             # Installing the isolated service must not change the main/default route table.
             sudo ip -4 route show table main > /tmp/main-routes.after-install
             # The dedicated TUN subnet route is expected while the isolated service is running.
