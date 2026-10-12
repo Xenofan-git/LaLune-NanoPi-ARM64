@@ -418,7 +418,7 @@ jobs:
                       response, peer = sock.recvfrom(65535)
                   except socket.timeout:
                       continue
-                  if len(response) < 41 or response[0] >> 6 != 2 or response[12:14] != b"\\xbe\\xde":
+                  if len(response) < 41 or response[0] >> 6 != 2 or response[12:14] != b"\xbe\xde":
                       continue
                   header = response[:24]
                   end = len(response)
@@ -427,7 +427,7 @@ jobs:
                       if not 1 <= padding <= end - 40:
                           continue
                       end -= padding
-                  nonce = header[8:12] + header[2:4] + b"\\x00\\x00" + header[4:8]
+                  nonce = header[8:12] + header[2:4] + b"\x00\x00" + header[4:8]
                   try:
                       plain = ChaCha20Poly1305(key).decrypt(nonce, response[24:end], header)
                   except Exception:
