@@ -390,44 +390,44 @@ jobs:
           print("UDP_INVALID_PROBE_SENT")
           PY_PROBE_FILE
           cat > vm/csqtt-same-socket-recovery.py <<'PY_SAME_SOCKET'
-import socket, subprocess, time
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
-fixture = bytes.fromhex(
-    "b06f77881122334410203040bede0002325566775199aa009e2a813c2df794"
-    "354293ade7b0b8ef4aa6297cf3cc8b0a372342fbd678c10260dc543f833826"
-    "2292992b12600eaa12d0d3155fa7179b62cd34ac41afb32db0ab7f6dced9"
-    "e1bb0620daa26d1743f2c25af6bd9ade9901"
-)
-key = HKDF(algorithm=hashes.SHA256(), length=32, salt=b"CSQTT-WRAP-v1", info=b"rtp-obfs/chacha20poly1305").derive(b"wire-password")
-def exchange(sock, phase):
-    sock.sendto(fixture, ("127.0.0.1", 47000))
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        sock.settimeout(max(.1, deadline-time.monotonic()))
-        wire, peer = sock.recvfrom(65535)
-        if len(wire) < 41 or wire[0] >> 6 != 2 or wire[12:14] != b"\\xbe\\xde": continue
-        end = len(wire) - (wire[-1] if wire[0] & 0x20 else 0)
-        if end < 40: continue
-        nonce = wire[8:12] + wire[2:4] + b"\\x00\\x00" + wire[4:8]
-        try: payload = ChaCha20Poly1305(key).decrypt(nonce, wire[24:end], wire[:24])
-        except Exception: continue
-        if payload.startswith(b"TUNCONF:"):
-            print(phase, payload.decode(), "socket", sock.getsockname(), "peer", peer)
-            return
-    raise SystemExit(f"{phase}: no authenticated TUNCONF on retained UDP socket")
-s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-s.bind(("127.0.0.1", 0)); s.settimeout(5)
-original = s.getsockname()
-exchange(s, "SAME_SOCKET_INITIAL_TUNCONF")
-subprocess.run(["sudo", "systemctl", "restart", "csqtt-lalune.service"], check=True)
-time.sleep(1)
-if s.getsockname() != original: raise SystemExit("UDP local endpoint changed across restart")
-exchange(s, "SAME_SOCKET_RECOVERED_TUNCONF")
-print("CSQTT_SAME_UDP_SOCKET_RECOVERY_PASS")
-s.close()
-PY_SAME_SOCKET
+          import socket, subprocess, time
+          from cryptography.hazmat.primitives import hashes
+          from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+          from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+          fixture = bytes.fromhex(
+              "b06f77881122334410203040bede0002325566775199aa009e2a813c2df794"
+              "354293ade7b0b8ef4aa6297cf3cc8b0a372342fbd678c10260dc543f833826"
+              "2292992b12600eaa12d0d3155fa7179b62cd34ac41afb32db0ab7f6dced9"
+              "e1bb0620daa26d1743f2c25af6bd9ade9901"
+          )
+          key = HKDF(algorithm=hashes.SHA256(), length=32, salt=b"CSQTT-WRAP-v1", info=b"rtp-obfs/chacha20poly1305").derive(b"wire-password")
+          def exchange(sock, phase):
+              sock.sendto(fixture, ("127.0.0.1", 47000))
+              deadline = time.monotonic() + 10
+              while time.monotonic() < deadline:
+                  sock.settimeout(max(.1, deadline-time.monotonic()))
+                  wire, peer = sock.recvfrom(65535)
+                  if len(wire) < 41 or wire[0] >> 6 != 2 or wire[12:14] != b"\\xbe\\xde": continue
+                  end = len(wire) - (wire[-1] if wire[0] & 0x20 else 0)
+                  if end < 40: continue
+                  nonce = wire[8:12] + wire[2:4] + b"\\x00\\x00" + wire[4:8]
+                  try: payload = ChaCha20Poly1305(key).decrypt(nonce, wire[24:end], wire[:24])
+                  except Exception: continue
+                  if payload.startswith(b"TUNCONF:"):
+                      print(phase, payload.decode(), "socket", sock.getsockname(), "peer", peer)
+                      return
+              raise SystemExit(f"{phase}: no authenticated TUNCONF on retained UDP socket")
+          s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+          s.bind(("127.0.0.1", 0)); s.settimeout(5)
+          original = s.getsockname()
+          exchange(s, "SAME_SOCKET_INITIAL_TUNCONF")
+          subprocess.run(["sudo", "systemctl", "restart", "csqtt-lalune.service"], check=True)
+          time.sleep(1)
+          if s.getsockname() != original: raise SystemExit("UDP local endpoint changed across restart")
+          exchange(s, "SAME_SOCKET_RECOVERED_TUNCONF")
+          print("CSQTT_SAME_UDP_SOCKET_RECOVERY_PASS")
+          s.close()
+          PY_SAME_SOCKET
           python3 -m py_compile vm/csqtt-vm-probe.py
 
       - name: Test installer isolation and lifecycle in ARM64 system guest
