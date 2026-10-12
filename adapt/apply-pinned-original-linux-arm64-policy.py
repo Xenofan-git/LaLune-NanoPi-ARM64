@@ -884,3 +884,17 @@ replace_once(
 )
 
 print('Direct domain/IP bypass and explicit selection clearing adaptations applied')
+
+# Guard the final generated Linux source, after every later adaptation has run.
+# Earlier checks only proved the patch script executed; they did not prove the
+# exact file copied into the Go module retained the lifecycle implementation.
+final_linux = LINUX.read_text()
+for required in (
+    "tunOpen      func() (*os.File, error)",
+    "tunSetIFF    func(*os.File, *unix.Ifreq) error",
+    "func (t *LinuxTun) StartWithError(udpConn net.Conn, running *bool) error",
+    "func (t *LinuxTun) Stop()",
+):
+    if required not in final_linux:
+        raise SystemExit(f"final generated app_linux.go missing TUN lifecycle marker: {required}")
+print("Verified final app_linux.go contains TUN lifecycle fields and methods")
