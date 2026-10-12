@@ -127,6 +127,8 @@ jobs:
           ip link add csqtt-test0 type dummy
           ip link set direct-test0 up
           ip link set csqtt-test0 up
+          # Route lookups with iif model forwarded traffic, which requires IPv4 forwarding.
+          sysctl -w net.ipv4.ip_forward=1
           # Give the simulated client subnet a connected route so Linux accepts
           # route lookups sourced from a client address in that subnet.
           ip addr add 192.168.5.1/24 dev csqtt-test0
