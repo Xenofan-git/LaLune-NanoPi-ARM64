@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"
+	"testing"\n\n\t"golang.org/x/sys/unix"
 
 	libs "lalune-desktop/Libs"
 )
@@ -337,4 +337,51 @@ func TestBridgeStartTunnelReconnectLifecycle(t *testing.T) {
 	if bridge.TunRunning || bridge.UdpConn != nil || tun.stops != 2 {
 		t.Fatal("second disconnect did not release tunnel state")
 	}
+}
+
+
+// These lifecycle tests use injected file/ioctl operations; they never require
+// /dev/net/tun or mutate host networking.
+func TestLinuxTunOpenFailureIsReturned(t *testing.T) {
+\tapp := tunTestApp()
+\tapp.tun.tunOpen = func() (*os.File, error) { return nil, os.ErrPermission }
+\tleft, right := net.Pipe()
+\tdefer left.Close()
+\tdefer right.Close()
+\tif err := app.tun.StartWithError(left, new(bool)); err == nil || !strings.Contains(err.Error(), "open /dev/net/tun") {
+\t\tt.Fatalf("expected surfaced TUN open error, got %v", err)
+\t}
+\tif app.tun.tunFile != nil { t.Fatal("TUN file retained after open failure") }
+}
+
+func TestLinuxTunSetIFFFailureClosesOpenedFile(t *testing.T) {
+\tapp := tunTestApp()
+\tf, err := os.CreateTemp(t.TempDir(), "fake-tun")
+\tif err != nil { t.Fatal(err) }
+\tapp.tun.tunOpen = func() (*os.File, error) { return f, nil }
+\tapp.tun.tunSetIFF = func(*os.File, *unix.Ifreq) error { return errors.New("injected TUNSETIFF failure") }
+\tleft, right := net.Pipe()
+\tdefer left.Close()
+\tdefer right.Close()
+\tif err := app.tun.StartWithError(left, new(bool)); err == nil || !strings.Contains(err.Error(), "TUNSETIFF") {
+\t\tt.Fatalf("expected surfaced TUNSETIFF error, got %v", err)
+\t}
+\tif _, err := f.Stat(); err == nil { t.Fatal("file remained open after TUNSETIFF failure") }
+\tif app.tun.tunFile != nil { t.Fatal("TUN file retained after TUNSETIFF failure") }
+}
+
+func TestLinuxTunStopJoinsWorkersAndIsIdempotent(t *testing.T) {
+\tapp := tunTestApp()
+\tf, err := os.CreateTemp(t.TempDir(), "fake-tun")
+\tif err != nil { t.Fatal(err) }
+\tapp.tun.tunOpen = func() (*os.File, error) { return f, nil }
+\tapp.tun.tunSetIFF = func(*os.File, *unix.Ifreq) error { return nil }
+\tleft, right := net.Pipe()
+\tdefer right.Close()
+\tif err := app.tun.StartWithError(left, new(bool)); err != nil { t.Fatalf("start: %v", err) }
+\tapp.tun.Stop()
+\tif _, err := f.Stat(); err == nil { t.Fatal("TUN file remained open after Stop") }
+\tif app.tun.tunFile != nil || app.tun.udpConn != nil { t.Fatal("Stop retained resource references") }
+\tapp.tun.Stop()
+\tapp.tun.workers.Wait()
 }
