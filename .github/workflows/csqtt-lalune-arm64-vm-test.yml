@@ -507,7 +507,7 @@ jobs:
             client_status=$?
             set -e
             test "$client_status" -ne 0
-            grep -Fq -- 'Нужны -peer и хеши VK' /tmp/csqtt-client-argument-smoke.log
+            grep -Fq -- "Нужны -peer и хеши VK" /tmp/csqtt-client-argument-smoke.log
             echo REAL_RUNTIME_CSQTT_CLIENT_ARM64_EXECUTABLE_PASS
             sudo install -m 0755 /home/tester/csqtt-lalune-linux-arm64 /opt/lalune-package/csqtt-lalune-linux-arm64
             sudo install -m 0755 /home/tester/client-tun-tests-arm64 /usr/local/bin/client-tun-tests-arm64
