@@ -71,3 +71,33 @@ Pinned references used for comparison:
 - Add a two-ended test that sends a valid IPv4 packet through an authenticated session and observes the same packet at the intended peer TUN/UDP endpoint.
 - Verify route-rule/firewall cleanup by comparing exact pre-existing entries before and after start/stop, including an adversarial rule with a similar but non-identical comment. Text grep checks alone are not sufficient.
 - Keep the deployment gate closed until these tests pass. Do not run the package on NanoPi as part of this audit.
+
+
+## Latest verified CI attempt (2026-10-12; run #443, commit `e26317c6b3c4a238435b8835f5b1004bf601c88b`)
+
+This section supersedes the older "Current CI status and next end-to-end gate" claims above where they conflict. The earlier sections are retained as historical notes describing the state at the time they were written.
+
+- Workflow: [CI run #443](https://github.com/Xenofan-git/LaLune-NanoPi-ARM64/actions/runs/38232218662).
+- The ARM64 VM job was rerun. The latest-attempt job ID is `114764732312` and completed with conclusion `success`; the build job `114764733592` also completed with conclusion `success`.
+- The VM booted a Debian 13 ARM64 guest under QEMU and tested the actual packaged ARM64 server/installer artifact in that disposable guest.
+- Direct routing policy lookup passed in the guest: marked traffic selected `direct-test0`; unmarked traffic selected `csqtt-test0` in table 202. The test uses dummy interfaces and test routes, not the production network.
+- The live isolated server's encrypted response was authenticated/decrypted by the test client as `TUNCONF`, assigning `10.67.68.2` and DNS `77.88.8.8,77.88.8.1`.
+- The TUN dataplane test decrypted a downlink IPv4 packet and reported `LIVE_TUN_BIDIRECTIONAL_IPV4_PASS`; the guest ping reported 1 transmitted, 1 received, 0% packet loss.
+- Installer lifecycle/isolation in the ARM64 guest passed (`ARM64_SYSTEM_VM_LIFECYCLE_PASS`). Relevant client TUN failure/rollback Go tests also passed in this run.
+- The job log timestamps for these checks are 2026-10-12 10:25–10:29 UTC. This is evidence from the rerun, not merely the earlier attempt.
+
+### What this proves — and what it does not
+
+**Now demonstrated in isolated CI:** ARM64 artifact build; real ARM64 Linux VM boot; Direct policy route selection using test devices/routes; authenticated/decrypted TUNCONF response from the isolated server; bidirectional IPv4 packet delivery through the test TUN dataplane; and installer lifecycle checks in a disposable guest.
+
+**Still not demonstrated:**
+
+1. A complete independent stock LaLune Rust client session running as a separate client process and completing the full handshake/configuration exchange against the packaged server. The patcher includes selected pinned client protocol/wrap/obfuscation code in the server test binary, and the VM probe authenticates/decrypts the server response; this is not the same as a full independent stock-client runtime test.
+2. Reconnect/recovery after a real session or transport disconnect, including confirming that stale server/client state and routes are cleaned up and recreated safely.
+3. Adversarial runtime cleanup coverage for every firewall/rule ownership case, especially a foreign rule with a similar-but-not-identical comment. Existing installer harness and VM preservation checks provide useful coverage but do not establish every possible host-state collision.
+4. Applying the CSQTT panel's Direct-tab settings through the backend to the live LaLune routing policy and proving traffic behavior. The panel/UI persistence test is not proof of this integration.
+5. Any production behavior on NanoPi. No production deployment, service, route, firewall, DNS, or network setting was changed by these tests.
+
+### Gate decision
+
+Deployment remains **BLOCKED / NOT AUTHORIZED**. Do not run the installer or uninstaller on NanoPi and do not merge/deploy solely on the strength of CI #443. Next tests should prioritize: (a) an independent client-process end-to-end exchange, (b) disconnect/reconnect recovery, and (c) adversarial ownership/cleanup preservation tests. After those, verify the Direct-tab backend-to-policy integration and review the resulting evidence before reconsidering the gate.
