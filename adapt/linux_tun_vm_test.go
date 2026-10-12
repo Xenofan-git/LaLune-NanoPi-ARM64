@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"\n\n	"golang.org/x/sys/unix"
+	"testing"
+
+	"golang.org/x/sys/unix"
 
 	libs "lalune-desktop/Libs"
 )
