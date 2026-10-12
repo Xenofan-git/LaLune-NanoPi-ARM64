@@ -97,8 +97,7 @@ jobs:
             sleep 5
           done
           cat vm/serial.log
-          exit 1      - name: Test Direct routing policy with real Linux kernel routes
-        run: |
+          exit 1      - name: Test Direct routing policy with real Linux kernel routes        run: |
           set -euo pipefail
           ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo bash -se' <<'DIRECT_TEST'
           set -euo pipefail
@@ -197,8 +196,7 @@ jobs:
           if len(response) < 32:
               sock.close()              raise SystemExit(f"CSQTT response too short: {len(response)} bytes")
                     # Authenticate and decrypt the response with the real client-side key
-          # derivation and RTP/ChaCha20-Poly1305 wire layout. A length-only check
-          # can pass on arbitrary or repeated ciphertext and is not protocol proof.
+          # derivation and RTP/ChaCha20-Poly1305 wire layout. A length-only check          # can pass on arbitrary or repeated ciphertext and is not protocol proof.
           from cryptography.hazmat.primitives import hashes
           from cryptography.hazmat.primitives.kdf.hkdf import HKDF
           from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
@@ -297,8 +295,7 @@ jobs:
           
           def decrypt_wire(wire):              if len(wire) < 41 or wire[0] >> 6 != 2 or wire[12:14] != b"\xbe\xde":
                   raise SystemExit(f"live dataplane returned invalid RTP packet: {len(wire)} bytes")
-              end = len(wire)
-              if wire[0] & 0x20:
+              end = len(wire)              if wire[0] & 0x20:
                   padding = wire[-1]
                   if padding < 1 or padding > end - 40:
                       raise SystemExit("invalid dataplane RTP padding")
@@ -370,53 +367,51 @@ jobs:
                   raise SystemExit("kernel ping timed out waiting for the encrypted ICMP reply through CSQTT TUN")
               if ping.returncode != 0:
                   raise SystemExit(f"kernel did not receive the authenticated CSQTT ICMP reply: {ping_output}")
-              print("LIVE_TUN_BIDIRECTIONAL_IPV4_PASS", ping_output.strip().replace("\n", " | "))
-            # Fault injection: restart only the disposable CI server while this
-            # Python client process and its already-bound UDP socket remain alive.
-            # Re-register with the same socket and authenticate the new TUNCONF.
-            # This proves same-process/same-transport recovery at the protocol level;
-            # it does not claim to be the stock Rust client's worker loop.
-            import subprocess
-            subprocess.run(["sudo", "systemctl", "restart", "csqtt-lalune.service"], check=True)
-            deadline = time.monotonic() + 20
-            while time.monotonic() < deadline:
-                ready = subprocess.run(
-                    ["sudo", "ss", "-H", "-lun", "sport = :47000"],
-                    capture_output=True, text=True,
-                )
-                if ready.returncode == 0 and ready.stdout.strip():
-                    break
-                time.sleep(0.25)
-            else:
-                raise SystemExit("server UDP listener did not recover after injected restart")          sock.settimeout(5)
-            sock.sendto(fixture, ("127.0.0.1", 47000))
-            try:
-                recovered_wire, recovered_peer = sock.recvfrom(65535)
-            except socket.timeout:
-                raise SystemExit("same client socket did not receive a response after server restart")
-            if len(recovered_wire) < 41 or recovered_wire[0] >> 6 != 2:
-                raise SystemExit("recovered server response is not a valid CSQTT RTP packet")
-            recovered_header = recovered_wire[:24]
-            recovered_end = len(recovered_wire)
-            if recovered_wire[0] & 0x20:
-                recovered_padding = recovered_wire[-1]
-                if recovered_padding < 1 or recovered_padding > recovered_end - 40:
-                    raise SystemExit("invalid recovered CSQTT RTP padding")
-                recovered_end -= recovered_padding
-            recovered_nonce = recovered_header[8:12] + recovered_header[2:4] + b"\x00\x00" + recovered_header[4:8]
-            try:
-                recovered_plaintext = ChaCha20Poly1305(key).decrypt(
-                    recovered_nonce, recovered_wire[24:recovered_end], recovered_header
-                )
-            except Exception as exc:
-                raise SystemExit(f"post-restart response failed client AEAD authentication: {exc}")
-            if not recovered_plaintext.startswith(b"TUNCONF:"):
-                raise SystemExit(f"same-socket re-registration did not return TUNCONF: {recovered_plaintext[:80]!r}")
-            recovered_fields = recovered_plaintext.decode("utf-8").split(":")
-            if len(recovered_fields) < 3 or recovered_fields[1] != "10.67.68.2":
-                raise SystemExit(f"unexpected recovered TUNCONF: {recovered_plaintext!r}")
-            print("SAME_PROCESS_SAME_SOCKET_REREGISTRATION_PASS", recovered_fields[1], "peer", recovered_peer)
-
+              print("LIVE_TUN_BIDIRECTIONAL_IPV4_PASS", ping_output.strip().replace("\\n", " | "))
+              # Fault injection: restart only the disposable CI server while this
+              # Python client process and its already-bound UDP socket remain alive.
+              # Re-register with the same socket and authenticate the new TUNCONF.
+              # This exercises same-process protocol recovery, not the stock Rust worker loop.
+              subprocess.run(["sudo", "systemctl", "restart", "csqtt-lalune.service"], check=True)
+              deadline = time.monotonic() + 20
+              while time.monotonic() < deadline:
+                  ready = subprocess.run(
+                      ["sudo", "ss", "-H", "-lun", "sport = :47000"],
+                      capture_output=True, text=True,
+                  )
+                  if ready.returncode == 0 and ready.stdout.strip():
+                      break
+                  time.sleep(0.25)
+              else:
+                  raise SystemExit("server UDP listener did not recover after injected restart")
+              sock.settimeout(5)
+              sock.sendto(fixture, ("127.0.0.1", 47000))
+              try:
+                  recovered_wire, recovered_peer = sock.recvfrom(65535)
+              except socket.timeout:
+                  raise SystemExit("same client socket did not receive a response after server restart")
+              if len(recovered_wire) < 41 or recovered_wire[0] >> 6 != 2:
+                  raise SystemExit("recovered server response is not a valid CSQTT RTP packet")
+              recovered_header = recovered_wire[:24]
+              recovered_end = len(recovered_wire)
+              if recovered_wire[0] & 0x20:
+                  recovered_padding = recovered_wire[-1]
+                  if recovered_padding < 1 or recovered_padding > recovered_end - 40:
+                      raise SystemExit("invalid recovered CSQTT RTP padding")
+                  recovered_end -= recovered_padding
+              recovered_nonce = recovered_header[8:12] + recovered_header[2:4] + b"\\x00\\x00" + recovered_header[4:8]
+              try:
+                  recovered_plaintext = ChaCha20Poly1305(key).decrypt(
+                      recovered_nonce, recovered_wire[24:recovered_end], recovered_header
+                  )
+              except Exception as exc:
+                  raise SystemExit(f"post-restart response failed client AEAD authentication: {exc}")
+              if not recovered_plaintext.startswith(b"TUNCONF:"):
+                  raise SystemExit(f"same-socket re-registration did not return TUNCONF: {recovered_plaintext[:80]!r}")
+              recovered_fields = recovered_plaintext.decode("utf-8").split(":")
+              if len(recovered_fields) < 3 or recovered_fields[1] != "10.67.68.2":
+                  raise SystemExit(f"unexpected recovered TUNCONF: {recovered_plaintext!r}")
+              print("SAME_PROCESS_SAME_SOCKET_REREGISTRATION_PASS", recovered_fields[1], "peer", recovered_peer)
           finally:
               if ping.poll() is None:
                   ping.kill()
@@ -497,8 +492,7 @@ jobs:
             sudo ip -4 route show table 470010 > /tmp/near-miss-routes.before
             sudo ip -4 rule show > /tmp/all-ip-rules.before
             grep -Fq "blackhole 198.18.78.0/24" /tmp/near-miss-routes.before
-            grep -Eq "^470010:.*to 198\\.18\\.78\\.0/24.*lookup 470010$" /tmp/all-ip-rules.before
-            grep -Eq "^470011:.*fwmark 0x67410/0xffff lookup 470010$" /tmp/all-ip-rules.before
+            grep -Eq "^470010:.*to 198\\.18\\.78\\.0/24.*lookup 470010$" /tmp/all-ip-rules.before            grep -Eq "^470011:.*fwmark 0x67410/0xffff lookup 470010$" /tmp/all-ip-rules.before
             grep -Fq 'CSQTT_LALUNE-FOREIGN_RULE_KEEP' /tmp/iptables.before
             grep -Fq 'CSQTT_LALUNEISH_FOREIGN_KEEP' /tmp/iptables.before
             sudo /opt/lalune-package/install-csqtt-lalune.sh
