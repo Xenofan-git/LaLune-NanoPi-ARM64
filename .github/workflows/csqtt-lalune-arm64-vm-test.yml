@@ -102,8 +102,7 @@ jobs:
       - name: Test Direct routing policy with real Linux kernel routes
         run: |
           set -euo pipefail
-          SSH="ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1"
-          "$SSH" 'sudo bash -se' <<'DIRECT_TEST'
+          ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo bash -se' <<'DIRECT_TEST'
           set -euo pipefail
           cleanup() {
             ip rule del pref 22010 2>/dev/null || true
