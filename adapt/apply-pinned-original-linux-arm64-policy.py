@@ -136,7 +136,14 @@ LINUX.write_text(s)
 # NanoPi dataplane adaptation: the pinned original leaves LinuxTun.Start empty.
 # Keep the original UDP core protocol, but bridge Linux TUN packets to that UDP
 # socket using /dev/net/tun. This is intentionally the only dataplane deviation.
-s=s.replace(
+s = LINUX.read_text()
+s = s.replace(
+'''type LinuxTun struct {
+\tapp          *App
+\tbypassRoutes []string
+\tmu           sync.Mutex
+\ttunFile      *os.File
+}''',
 '''type LinuxTun struct {
 \tapp          *App
 \tbypassRoutes []string
@@ -147,12 +154,6 @@ s=s.replace(
 \tworkers      sync.WaitGroup
 \ttunOpen      func() (*os.File, error)
 \ttunSetIFF    func(*os.File, *unix.Ifreq) error
-}''',
-'''type LinuxTun struct {
-\tapp          *App
-\tbypassRoutes []string
-\tmu           sync.Mutex
-\ttunFile      *os.File
 }''', 1)
 
 s=s.replace(
