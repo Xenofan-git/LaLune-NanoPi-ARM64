@@ -460,7 +460,6 @@ jobs:
           sock.close()
           PY_RECOVERY
           
-          PY_RECOVERY
           python3 -m py_compile vm/csqtt-same-process-recovery.py
 
       - name: Test installer isolation and lifecycle in ARM64 system guest
