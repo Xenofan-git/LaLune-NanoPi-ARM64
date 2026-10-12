@@ -127,6 +127,9 @@ jobs:
           ip link add csqtt-test0 type dummy
           ip link set direct-test0 up
           ip link set csqtt-test0 up
+          # Give the simulated client subnet a connected route so Linux accepts
+          # route lookups sourced from a client address in that subnet.
+          ip addr add 192.168.5.1/24 dev csqtt-test0
           ip route add default dev direct-test0
           ip route add default dev csqtt-test0 table 202
           ip rule add pref 22010 fwmark 0x4c4c/0xffff lookup main
