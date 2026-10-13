@@ -1,5 +1,5 @@
 name: Build pinned original LaLune Linux ARM64
-# CI trigger verification: test/csqtt-client-reconnect-vm
+# CI trigger verification: test/csqtt-client-reconnect-vm (inherited VK secret)
 # pinned-reference: Endlad2/LaLune @ e4a6d08
 
 on:
