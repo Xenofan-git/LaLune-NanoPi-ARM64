@@ -1,4 +1,4 @@
-name: CSQTT process recovery E2E prerequisites (not recovery proof)
+name: CSQTT real client process recovery E2E (fixture work in progress)
 
 on:
   push:
