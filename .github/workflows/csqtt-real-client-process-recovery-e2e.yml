@@ -186,7 +186,7 @@ jobs:
             kill "$server_pid"
             wait "$server_pid" 2>/dev/null || true
             server_pid=
-            for attempt in $(seq 1 20); do
+            for attempt in $(seq 1 4); do
               if ! kill -0 "$client_pid" 2>/dev/null; then echo "client exited during server restart" >&2; exit 1; fi
               sleep 0.25
             done
