@@ -146,6 +146,7 @@ jobs:
               ip netns del "$server_ns" 2>/dev/null || true
             }
             trap cleanup EXIT
+            mkdir -p /run/netns
             ip netns add "$server_ns"
             ip netns add "$client_ns"
             ip link add csqtt-veth-s type veth peer name csqtt-veth-c
