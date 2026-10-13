@@ -182,7 +182,7 @@ jobs:
             fi
             client_pid_before=$client_pid
             before_count=$(grep -Fc -- "-> TUNCONF" "$server_log")
-            client_tunconf_before=$(grep -Fc "[КЛИЕНТ] Tunnel IP:" "$client_log")
+            client_tunconf_before=$(grep -Fc "CSQTT_TEST_TUNCONF_RECEIVED" "$client_log")
             test "$before_count" -gt 0
             test "$client_tunconf_before" -gt 0
             kill "$server_pid"
@@ -201,14 +201,15 @@ jobs:
             for attempt in $(seq 1 80); do
               if ! kill -0 "$client_pid" 2>/dev/null; then cat "$client_log" >&2; echo "client exited after server restart" >&2; exit 1; fi
               after_count=$(grep -Fc -- "-> TUNCONF" "$server_log" || true)
-              client_tunconf_after=$(grep -Fc "[КЛИЕНТ] Tunnel IP:" "$client_log" || true)
+              client_tunconf_after=$(grep -Fc "CSQTT_TEST_TUNCONF_RECEIVED" "$client_log" || true)
               # Server-side receipt of GETCONF alone is insufficient: require
-              # the same real client process to parse a fresh TUNCONF too.
+              # the same real client process to receive a fresh TUNCONF. The
+              # CI-only marker is emitted before normal identical-config dedupe.
               if [ "$after_count" -gt "$before_count" ] && [ "$client_tunconf_after" -gt "$client_tunconf_before" ]; then recovered=1; break; fi
               sleep 1
             done
             if [ "$recovered" -ne 1 ]; then
-              echo "same Rust client process did not complete a new GETCONF/TUNCONF exchange after server restart" >&2
+              echo "same Rust client process did not receive a fresh TUNCONF after server restart" >&2
               echo "--- client log ---" >&2; tail -n 120 "$client_log" >&2
               echo "--- server log ---" >&2; tail -n 120 "$server_log" >&2
               echo "--- TURN log ---" >&2; tail -n 80 "$turn_log" >&2
