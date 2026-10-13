@@ -163,7 +163,7 @@ jobs:
             export CSQTT_TEST_TURN_USERNAME=ci-e2e-user
             export CSQTT_TEST_TURN_PASSWORD=ci-e2e-turn-password
             export CSQTT_TEST_TURN_SERVER=10.200.0.1
-            export CSQTT_TEST_PEER_IDLE_TIMEOUT_MS=5000
+            export CSQTT_TEST_PEER_IDLE_TIMEOUT_MS=15000
             ip netns exec "$server_ns" turnserver -n --listening-ip=10.200.0.1 --relay-ip=10.200.0.1 \
               --listening-port=3478 --min-port=49160 --max-port=49200 \
               --realm=ci.test --user=ci-e2e-user:ci-e2e-turn-password \
@@ -232,8 +232,13 @@ jobs:
             client_tunconf_before=$(grep -Fc "CSQTT_TEST_TUNCONF_PARSED" "$client_log")
             test "$before_count" -gt 0
             test "$client_tunconf_before" -gt 0
-            kill "$server_pid"
-            wait "$server_pid" 2>/dev/null || true
+            old_server_pid=$server_pid
+            kill "$old_server_pid"
+            wait "$old_server_pid" 2>/dev/null || true
+            if kill -0 "$old_server_pid" 2>/dev/null; then
+              echo "old test server PID survived termination; refusing to call this a server restart" >&2
+              exit 1
+            fi
             server_pid=
             for attempt in $(seq 1 4); do
               if ! kill -0 "$client_pid" 2>/dev/null; then echo "client exited during server restart" >&2; exit 1; fi
@@ -244,6 +249,18 @@ jobs:
               --device-id ci-e2e-device --web-pass ci-e2e-web-password \
               >>"$server_log" 2>&1 &
             server_pid=$!
+            server_restarted=0
+            for attempt in $(seq 1 40); do
+              ready_count=$(grep -Fc "RTP AEAD: 10.200.0.1:46000" "$server_log" || true)
+              if [ "$ready_count" -ge 2 ]; then server_restarted=1; break; fi
+              if ! kill -0 "$server_pid" 2>/dev/null; then tail -n 100 "$server_log" >&2; echo "replacement server exited before readiness" >&2; exit 1; fi
+              sleep 0.5
+            done
+            if [ "$server_restarted" -ne 1 ]; then
+              tail -n 100 "$server_log" >&2
+              echo "replacement server did not announce readiness" >&2
+              exit 1
+            fi
             recovered=0
             for attempt in $(seq 1 80); do
               if ! kill -0 "$client_pid" 2>/dev/null; then cat "$client_log" >&2; echo "client exited after server restart" >&2; exit 1; fi
@@ -254,6 +271,7 @@ jobs:
             done
             if [ "$recovered" -ne 1 ]; then
               echo "same Rust client process did not receive a fresh TUNCONF after server restart" >&2
+              echo "TUNCONF_COUNTS server_before=$before_count server_after=$after_count client_before=$client_tunconf_before client_after=$client_tunconf_after" >&2
               tail -n 120 "$client_log" "$server_log" "$turn_log" "$bridge_log" >&2
               exit 1
             fi
