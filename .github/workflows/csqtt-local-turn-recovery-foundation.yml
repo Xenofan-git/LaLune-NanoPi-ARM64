@@ -25,23 +25,25 @@ jobs:
           git -C upstream-csqtt-core checkout --detach 3eafb7ee868f5f2690edf3b0326153813f88eb5f
           test "$(git -C upstream-csqtt-core rev-parse HEAD)" = "3eafb7ee868f5f2690edf3b0326153813f88eb5f"
           python3 scripts/ci/patch-csqtt-local-turn-auth.py
-      - name: Run only local TURN integration tests relevant to session survival
+      - name: List tests and run focused local TURN integration tests
         working-directory: upstream-csqtt-core/rust-client
         env:
           CARGO_TERM_COLOR: never
+        shell: bash
         run: |
           set -euo pipefail
-          # These are local, non-ignored tests in the real Rust TURN implementation.
-          # The separately-hosted WSL hot-DNS test is intentionally excluded.
-          # This is still not a full process-level server-restart recovery test.
-          cargo test --locked --bin client turn_integration_tests::authenticated_flow_survives_pool_deficit_and_keeps_channel_data_zero_copy -- --nocapture
-          cargo test --locked --bin client turn_integration_tests::tcp_turn_transport_allocates_without_udp_fallback -- --nocapture
-          echo CSQTT_LOCAL_TURN_SESSION_FOUNDATION_PASS
+          cargo test --locked --bin client -- --list > /tmp/csqtt-test-list.txt
+          grep -F 'authenticated_flow_survives_pool_deficit_and_keeps_channel_data_zero_copy' /tmp/csqtt-test-list.txt
+          grep -F 'tcp_turn_transport_allocates_without_udp_fallback' /tmp/csqtt-test-list.txt
+          cargo test --locked --bin client authenticated_flow_survives_pool_deficit_and_keeps_channel_data_zero_copy -- --nocapture
+          cargo test --locked --bin client tcp_turn_transport_allocates_without_udp_fallback -- --nocapture
+          grep -E 'test result: ok\. [1-9][0-9]* passed' /tmp/csqtt-test-results.txt >/dev/null 2>&1 && echo "Results captured" || true
       - name: Explicitly record missing acceptance gate
         run: |
           {
             echo "## Scope"
             echo "- Pinned Rust TURN/session integration tests only."
+            echo "- Test listing is checked before execution, and substring filters are used."
             echo "- No VK secret or token is used or printed."
             echo "- No production device, VPS, router, firewall, DNS, or tunnel is touched."
             echo "- This does not claim that the stock Rust client process survives a server restart."
