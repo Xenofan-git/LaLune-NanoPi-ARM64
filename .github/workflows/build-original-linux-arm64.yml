@@ -10,6 +10,7 @@ on:
       - fix/captcha-stale-overlay
       - feature/csqtt-direct-route-tab
       - test/csqtt-client-reconnect-vm
+      - test/csqtt-process-recovery-e2e
   workflow_dispatch:
 
 permissions:
