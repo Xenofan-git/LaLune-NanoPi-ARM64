@@ -53,44 +53,54 @@ jobs:
           config="$RUNNER_TEMP/csqtt-e2e-config"
           log="$RUNNER_TEMP/csqtt-server-startup.log"
           mkdir -p "$config"
-          # The namespace supervisor owns the child server and always reaps it.
-          # A bounded timeout prevents a cleanup regression from hanging the job.
-          sudo timeout --signal=TERM --kill-after=3s 25s unshare --net --fork --mount-proc bash -euc '
+          # Keep server diagnostics separate from the namespace supervisor.
+          # Do not redirect the supervisor to "$log": it reads that file while
+          # waiting for readiness, which otherwise makes failures opaque.
+          # The timeout bounds the entire namespace lifetime.
+          if sudo timeout --signal=TERM --kill-after=3s 25s unshare --net --fork --mount-proc bash -euc '
+            server_log="$3"
             ip link set lo up
             "$1" --listen 127.0.0.1:46000 --web-port 0 \
               --config-dir "$2" --password ci-e2e-password \
-              --device-id ci-e2e-device --web-pass ci-e2e-web-password &
+              --device-id ci-e2e-device --web-pass ci-e2e-web-password \
+              >"$server_log" 2>&1 &
             server_pid=$!
             cleanup() {
               kill "$server_pid" 2>/dev/null || true
               wait "$server_pid" 2>/dev/null || true
             }
-            trap cleanup EXIT TERM INT
+            trap cleanup EXIT
             ready=0
             for attempt in $(seq 1 40); do
-              if grep -Fq "RTP AEAD: 127.0.0.1:46000" "$3"; then
+              if grep -Fq "RTP AEAD: 127.0.0.1:46000" "$server_log"; then
                 ready=1
                 break
               fi
               if ! kill -0 "$server_pid" 2>/dev/null; then
-                cat "$3"
+                cat "$server_log" >&2 || true
                 echo "isolated CSQTT server exited before becoming ready" >&2
                 exit 1
               fi
               sleep 0.5
             done
             if [ "$ready" -ne 1 ]; then
-              cat "$3"
+              cat "$server_log" >&2 || true
               echo "isolated CSQTT server did not report its UDP listener" >&2
               exit 1
             fi
-            grep -F "RTP AEAD: 127.0.0.1:46000" "$3"
+            grep -F "RTP AEAD: 127.0.0.1:46000" "$server_log"
             echo "PASS: real CSQTT server process started in a private network namespace."
             cleanup
-            trap - EXIT TERM INT
-          ' _ "$server" "$config" "$log" >"$log" 2>&1
-          grep -F 'PASS: real CSQTT server process started in a private network namespace.' "$log"
-          echo "PASS: isolated server namespace exited and cleanup completed."
+            trap - EXIT
+          ' _ "$server" "$config" "$log"; then
+            echo "PASS: isolated server namespace exited and cleanup completed."
+          else
+            rc=$?
+            echo "FAIL: isolated server namespace command exited with code $rc." >&2
+            echo "--- CSQTT server startup log (separate from supervisor output) ---" >&2
+            if [ -s "$log" ]; then cat "$log" >&2; else echo "(server log is empty)" >&2; fi
+            exit "$rc"
+          fi
 
       - name: Verify process-level test prerequisites (not the recovery E2E)
         shell: bash
