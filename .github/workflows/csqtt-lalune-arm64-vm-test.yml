@@ -105,8 +105,47 @@ jobs:
           cat vm/serial.log
           exit 1
 
-      - name: Defer external VK hash validation until VM workflow is stable
-        run: echo "VK_HASH_VALIDATION_DEFERRED_TO_FOLLOWUP"
+      - name: Validate VK call hash with the pinned real ARM64 client
+        env:
+          VK_CALL_HASH: ${{ secrets.VK_CALL_HASH }}
+        run: |
+          set -euo pipefail
+          test -n "${VK_CALL_HASH:-}" || { echo "VK_CALL_HASH repository secret is missing" >&2; exit 1; }
+          SSH=(ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1)
+          SCP=(scp -i vm/id_ed25519 -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+          "${SCP[@]}" vm/real/client-linux-arm64 tester@127.0.0.1:/home/tester/client-linux-arm64
+          printf '%s' "$VK_CALL_HASH" | "${SSH[@]}" 'umask 077; cat > /home/tester/.vk-call-hash'
+          unset VK_CALL_HASH
+          "${SSH[@]}" 'set -euo pipefail
+            trap "rm -f /home/tester/.vk-call-hash" EXIT
+            chmod 0755 /home/tester/client-linux-arm64
+            HASH="$(cat /home/tester/.vk-call-hash)"
+            test -n "$HASH"
+            set +e
+            /home/tester/client-linux-arm64 --vk "$HASH" --validate-vk-hashes > /tmp/vk-hash-validation.jsonl 2>/tmp/vk-hash-validation.stderr
+            rc=$?
+            set -e
+            python3 - <<"PY"
+import json
+from pathlib import Path
+rows = []
+for line in Path("/tmp/vk-hash-validation.jsonl").read_text(errors="replace").splitlines():
+    if line.startswith("HASH_CHECK:"):
+        try:
+            rows.append(json.loads(line[len("HASH_CHECK:"):]))
+        except Exception:
+            pass
+if not rows:
+    print("VK_HASH_VALIDATION_NO_RESULT")
+    raise SystemExit(1)
+statuses = [str(row.get("status", "unknown")) for row in rows]
+print("VK_HASH_VALIDATION_STATUSES", ",".join(statuses))
+if not any(row.get("status") == "valid" for row in rows):
+    raise SystemExit(1)
+PY
+            test "$rc" -eq 0
+            echo REAL_ARM64_CLIENT_VK_HASH_VALIDATION_PASS
+          '
 
       - name: Test Direct routing policy with real Linux kernel routes
         run: |
