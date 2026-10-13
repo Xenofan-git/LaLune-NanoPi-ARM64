@@ -22,8 +22,8 @@ jobs:
         run: |
           set -euo pipefail
           git clone https://github.com/Endlad2/csqtt-core.git upstream-csqtt-core
-          git -C upstream-csqtt-core checkout --detach 3eafb7ee868f5f2690edf3b0326153813f88eb5
-          test "$(git -C upstream-csqtt-core rev-parse HEAD)" = "3eafb7ee868f5f2690edf3b0326153813f88eb5"
+          git -C upstream-csqtt-core checkout --detach 3eafb7ee868f5f2690edf3b0326153813f88eb5f
+          test "$(git -C upstream-csqtt-core rev-parse HEAD)" = "3eafb7ee868f5f2690edf3b0326153813f88eb5f"
           python3 scripts/ci/patch-csqtt-local-turn-auth.py
       - name: Run only local TURN integration tests relevant to session survival
         working-directory: upstream-csqtt-core/rust-client
