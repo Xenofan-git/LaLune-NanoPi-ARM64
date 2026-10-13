@@ -2,6 +2,10 @@ name: CSQTT LaLune ARM64 system VM lifecycle test
 
 on:
   workflow_call:
+    secrets:
+      VK_CALL_HASH:
+        description: VK call hash used only by the disposable ARM64 validation VM
+        required: false
 
 permissions:
   contents: read
