@@ -167,11 +167,11 @@ jobs:
               >"$client_log" 2>&1 &
             client_pid=$!
             for attempt in $(seq 1 60); do
-              if grep -Fq "[КЛИЕНТ] Tunnel IP:" "$client_log" && grep -Fq "-> TUNCONF" "$server_log"; then break; fi
+              if grep -Fq "[КЛИЕНТ] Tunnel IP:" "$client_log" && grep -Fq -- "-> TUNCONF" "$server_log"; then break; fi
               if ! kill -0 "$client_pid" 2>/dev/null; then cat "$client_log" >&2; echo "real Rust client exited before TUNCONF" >&2; exit 1; fi
               sleep 1
             done
-            if ! grep -Fq "[КЛИЕНТ] Tunnel IP:" "$client_log" || ! grep -Fq "-> TUNCONF" "$server_log"; then
+            if ! grep -Fq "[КЛИЕНТ] Tunnel IP:" "$client_log" || ! grep -Fq -- "-> TUNCONF" "$server_log"; then
               echo "client did not complete authenticated TUNCONF before restart" >&2
               echo "--- client log ---" >&2; tail -n 100 "$client_log" >&2
               echo "--- server log ---" >&2; tail -n 100 "$server_log" >&2
@@ -179,7 +179,7 @@ jobs:
               exit 1
             fi
             client_pid_before=$client_pid
-            before_count=$(grep -Fc "-> TUNCONF" "$server_log")
+            before_count=$(grep -Fc -- "-> TUNCONF" "$server_log")
             test "$before_count" -gt 0
             kill "$server_pid"
             wait "$server_pid" 2>/dev/null || true
@@ -196,7 +196,7 @@ jobs:
             recovered=0
             for attempt in $(seq 1 80); do
               if ! kill -0 "$client_pid" 2>/dev/null; then cat "$client_log" >&2; echo "client exited after server restart" >&2; exit 1; fi
-              after_count=$(grep -Fc "-> TUNCONF" "$server_log" || true)
+              after_count=$(grep -Fc -- "-> TUNCONF" "$server_log" || true)
               if [ "$after_count" -gt "$before_count" ]; then recovered=1; break; fi
               sleep 1
             done
