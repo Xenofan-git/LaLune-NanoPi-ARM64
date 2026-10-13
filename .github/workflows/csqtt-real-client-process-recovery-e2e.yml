@@ -288,6 +288,21 @@ jobs:
             test "$client_pid" = "$client_pid_before"
             kill -0 "$client_pid"
 
+            echo "--- wait for first post-recovery TUN packet to pass ---"
+            dataplane_ready=0
+            for attempt in $(seq 1 10); do
+              if ip netns exec "$client_ns" ping -I csqtt-client0 -c 1 -W 2 10.66.67.1 >"/tmp/csqtt-ping-warmup.log" 2>&1; then
+                dataplane_ready=1
+                break
+              fi
+              sleep 1
+            done
+            if [ "$dataplane_ready" -ne 1 ]; then
+              cat /tmp/csqtt-ping-warmup.log >&2
+              echo "TUN dataplane did not resume within 10 warm-up attempts" >&2
+              tail -n 100 "$client_log" "$server_log" "$turn_log" "$bridge_log" >&2
+              exit 1
+            fi
             sleep 2
             echo "--- bidirectional TUN dataplane after server restart ---"
             if ! ip netns exec "$client_ns" ping -I csqtt-client0 -c 3 -W 3 10.66.67.1 | tee "/tmp/csqtt-ping-after.log"; then
