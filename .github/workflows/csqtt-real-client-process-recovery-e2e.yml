@@ -67,9 +67,14 @@ jobs:
           test -x "$client"
           test -x "$server"
           test "$( "$server" --protocol-revision )" = "CSQTT-WIRE-3"
-          # Confirm the real CLI executable starts and exposes its argument parser.
-          "$client" --help > "$RUNNER_TEMP/client-help.txt" 2>&1 || true
-          grep -E -- '--tun-uds|--turn-transport|--device-id' "$RUNNER_TEMP/client-help.txt"
+          # This CLI intentionally disables clap's generated --help flag.
+          # Invoke it without required connection arguments and assert its own
+          # validation path, rather than grepping for nonexistent help output.
+          if "$client" > "$RUNNER_TEMP/client-startup.txt" 2>&1; then
+            echo "client unexpectedly accepted missing required arguments" >&2
+            exit 1
+          fi
+          grep -F -- 'Нужны -peer и хеши VK' "$RUNNER_TEMP/client-startup.txt"
           {
             echo "## Process recovery E2E status"
             echo "- PASS: pinned client and server executables build; client CLI starts; server reports CSQTT-WIRE-3."
