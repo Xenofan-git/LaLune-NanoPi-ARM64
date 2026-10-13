@@ -655,6 +655,13 @@ jobs:
             grep -q '^SAME_PROCESS_TUNCONF before_restart ' /tmp/csqtt-same-process-recovery.log
             grep -q '^SAME_PROCESS_TUNCONF after_restart ' /tmp/csqtt-same-process-recovery.log
             grep -q '^CSQTT_SAME_PROCESS_PROTOCOL_RECOVERY_PASS ' /tmp/csqtt-same-process-recovery.log
+            # Re-run the existing authenticated bidirectional IPv4/TUN dataplane
+            # probe after the restart. This is deliberately a fresh probe process:
+            # it proves dataplane service is restored, while the preceding test
+            # separately proves same-process protocol recovery. It does NOT claim
+            # same-process dataplane continuity for the real Go/Rust client.
+            python3 /home/tester/csqtt-vm-probe.py | tee /tmp/csqtt-vm-probe-after-restart.log
+            grep -q '^LIVE_TUN_BIDIRECTIONAL_IPV4_PASS ' /tmp/csqtt-vm-probe-after-restart.log
             sudo systemctl is-active --quiet csqtt-lalune.service
             # Installing the isolated service must not change the main/default route table.
             sudo ip -4 route show table main > /tmp/main-routes.after-install
