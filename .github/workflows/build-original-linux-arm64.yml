@@ -479,5 +479,4 @@ jobs:
     name: Test real CSQTT artifact in ARM64 system VM
     needs: build
     uses: ./.github/workflows/csqtt-lalune-arm64-vm-test.yml
-    secrets:
-      VK_CALL_HASH: ${{ secrets.VK_CALL_HASH }}
+    secrets: inherit
