@@ -215,17 +215,17 @@ jobs:
               sleep 0.2
             done
             grep -Fq "CSQTT_TEST_TUN_BRIDGE_READY" "$bridge_log"
-            ip -n "$client_ns" addr add 10.67.68.2/32 dev csqtt-client0
+            ip -n "$client_ns" addr add 10.66.67.2/32 dev csqtt-client0
             ip -n "$client_ns" link set csqtt-client0 mtu 1300 up
-            ip -n "$client_ns" route replace 10.67.68.1/32 dev csqtt-client0
+            ip -n "$client_ns" route replace 10.66.67.1/32 dev csqtt-client0
 
             echo "--- bidirectional TUN dataplane before server restart ---"
-            if ! ip netns exec "$client_ns" ping -I csqtt-client0 -c 3 -W 3 10.67.68.1 | tee "$RUNNER_TEMP/csqtt-ping-before.log"; then
+            if ! ip netns exec "$client_ns" ping -I csqtt-client0 -c 3 -W 3 10.66.67.1 | tee "/tmp/csqtt-ping-before.log"; then
               echo "bidirectional TUN ping failed before restart" >&2
               tail -n 100 "$client_log" "$server_log" "$turn_log" "$bridge_log" >&2
               exit 1
             fi
-            grep -Eq "0% packet loss|0 packets lost" "$RUNNER_TEMP/csqtt-ping-before.log"
+            grep -Eq "0% packet loss|0 packets lost" "/tmp/csqtt-ping-before.log"
 
             client_pid_before=$client_pid
             before_count=$(grep -Fc -- "-> TUNCONF" "$server_log")
@@ -261,12 +261,12 @@ jobs:
             kill -0 "$client_pid"
 
             echo "--- bidirectional TUN dataplane after server restart ---"
-            if ! ip netns exec "$client_ns" ping -I csqtt-client0 -c 3 -W 3 10.67.68.1 | tee "$RUNNER_TEMP/csqtt-ping-after.log"; then
+            if ! ip netns exec "$client_ns" ping -I csqtt-client0 -c 3 -W 3 10.66.67.1 | tee "/tmp/csqtt-ping-after.log"; then
               echo "bidirectional TUN ping failed after restart" >&2
               tail -n 120 "$client_log" "$server_log" "$turn_log" "$bridge_log" >&2
               exit 1
             fi
-            grep -Eq "0% packet loss|0 packets lost" "$RUNNER_TEMP/csqtt-ping-after.log"
+            grep -Eq "0% packet loss|0 packets lost" "/tmp/csqtt-ping-after.log"
 
             echo "PASS: native Rust client PID remained stable across server restart."
             echo "PASS: same Rust client process received and parsed fresh TUNCONF after restart."
