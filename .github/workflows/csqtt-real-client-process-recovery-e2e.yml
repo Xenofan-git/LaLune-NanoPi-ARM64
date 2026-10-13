@@ -30,6 +30,11 @@ jobs:
           test "$(git -C client-source rev-parse HEAD)" = "3eafb7ee868f5f2690edf3b0326153813f88eb5f"
           test "$(git -C server-source describe --tags --exact-match)" = "v2.1.9"
           cmp client-source/shared/wire_protocol.rs server-source/shared/wire_protocol.rs
+          # Patch only the disposable pinned-client checkout. The normal
+          # upstream VK auth path remains unchanged unless all three
+          # CSQTT_TEST_TURN_* variables are explicitly supplied at runtime.
+          python3 scripts/ci/patch-csqtt-process-e2e-auth.py
+          grep -F 'CSQTT_TEST_TURN_USERNAME' client-source/rust-client/auth.rs
 
       - name: Build actual client and server executables
         shell: bash
@@ -62,7 +67,8 @@ jobs:
             echo "- Pinned client and server executables built successfully."
             echo "- The real server binary was invoked for protocol revision."
             echo "- NOT PASSED: client/server connection, bidirectional TUN traffic, server restart, stable client PID, and recovery timeout."
-            echo "- The pinned client obtains TURN credentials through VK auth. A dedicated CI-only credential provider and TURN relay fixture must be added before the process recovery scenario can be run without external VK services."
+            echo "- Applied and compile-checked the disposable CI-only TURN credential hook in the pinned client checkout; no production source is changed."
+            echo "- STILL BLOCKED: the authenticated local TURN relay and deterministic server/client session fixture are not yet implemented, so no process recovery claim is made."
             echo "- This run makes no production changes and does not repeat passed TURN/worker unit tests."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "PROCESS_RECOVERY_E2E_BLOCKED_NO_LOCAL_TURN_AUTH_FIXTURE"
