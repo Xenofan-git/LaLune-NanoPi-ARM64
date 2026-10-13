@@ -118,11 +118,13 @@ jobs:
           client_log="$RUNNER_TEMP/csqtt-native-recovery-client.log"
           turn_log="$RUNNER_TEMP/csqtt-native-recovery-turn.log"
           bridge_log="$RUNNER_TEMP/csqtt-native-recovery-bridge.log"
+          counter_file="$RUNNER_TEMP/csqtt-native-recovery-tunconf-counter.log"
           mkdir -p "$config"
           : > "$server_log"
           : > "$client_log"
           : > "$turn_log"
           : > "$bridge_log"
+          : > "$counter_file"
           test -s "$bridge_script"
           python3 -m py_compile "$bridge_script"
           # All processes run in one disposable outer netns, with separate nested
@@ -130,7 +132,7 @@ jobs:
           # otherwise the server's local TUN address would intercept the client's
           # test ping before it entered the client TUN.
           sudo timeout --signal=TERM --kill-after=5s 150s unshare --net --fork --mount-proc bash -euc '
-            client="$1"; server="$2"; config="$3"; server_log="$4"; client_log="$5"; turn_log="$6"; bridge_script="$7"; bridge_log="$8"
+            client="$1"; server="$2"; config="$3"; server_log="$4"; client_log="$5"; turn_log="$6"; bridge_script="$7"; bridge_log="$8"; counter_file="$9"
             server_ns=csqtt-server-e2e
             client_ns=csqtt-client-e2e
             server_pid=
@@ -164,6 +166,7 @@ jobs:
             export CSQTT_TEST_TURN_PASSWORD=ci-e2e-turn-password
             export CSQTT_TEST_TURN_SERVER=10.200.0.1
             export CSQTT_TEST_PEER_IDLE_TIMEOUT_MS=15000
+            export CSQTT_TEST_TUNCONF_COUNTER_FILE="$counter_file"
             ip netns exec "$server_ns" turnserver -n --listening-ip=10.200.0.1 --relay-ip=10.200.0.1 \
               --listening-port=3478 --min-port=49160 --max-port=49200 \
               --realm=ci.test --user=ci-e2e-user:ci-e2e-turn-password \
@@ -229,7 +232,7 @@ jobs:
 
             client_pid_before=$client_pid
             before_count=$(grep -Fc -- "-> TUNCONF" "$server_log")
-            client_tunconf_before=$(grep -Fc "CSQTT_TEST_TUNCONF_PARSED" "$client_log")
+            client_tunconf_before=$(grep -Fxc "TUNCONF" "$counter_file" || true)
             test "$before_count" -gt 0
             test "$client_tunconf_before" -gt 0
             old_server_pid=$server_pid
@@ -265,7 +268,7 @@ jobs:
             for attempt in $(seq 1 80); do
               if ! kill -0 "$client_pid" 2>/dev/null; then cat "$client_log" >&2; echo "client exited after server restart" >&2; exit 1; fi
               after_count=$(grep -Fc -- "-> TUNCONF" "$server_log" || true)
-              client_tunconf_after=$(grep -Fc "CSQTT_TEST_TUNCONF_RECEIVED" "$client_log" || true)
+              client_tunconf_after=$(grep -Fxc "TUNCONF" "$counter_file" || true)
               if [ "$after_count" -gt "$before_count" ] && [ "$client_tunconf_after" -gt "$client_tunconf_before" ]; then recovered=1; break; fi
               sleep 1
             done
@@ -291,7 +294,7 @@ jobs:
             echo "PASS: bidirectional IPv4 packets traversed the real client UDP dispatcher and Linux TUN before and after restart."
             cleanup
             trap - EXIT
-          ' _ "$client" "$server" "$config" "$server_log" "$client_log" "$turn_log" "$bridge_script" "$bridge_log"
+          ' _ "$client" "$server" "$config" "$server_log" "$client_log" "$turn_log" "$bridge_script" "$bridge_log" "$counter_file"
           echo "NATIVE_RUST_CLIENT_SAME_PROCESS_TUN_DATAPLANE_RECOVERY_PASS"
 
       - name: Verify process-level test prerequisites (not the recovery E2E)
