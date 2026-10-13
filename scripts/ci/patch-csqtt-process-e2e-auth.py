@@ -19,8 +19,8 @@ recv_marker = """    async fn recv(&mut self) -> Result<PacketBuf> {
                 .await
                 .context("TURN allocation receive")?;"""
 recv_replacement = """    async fn recv(&mut self) -> Result<PacketBuf> {
-        # Default is conservative; the isolated E2E lowers this timeout.
-        idle_timeout_ms = std::env::var("CSQTT_TEST_PEER_IDLE_TIMEOUT_MS")
+        // Default is conservative; the isolated E2E lowers this timeout.
+        let idle_timeout_ms = std::env::var("CSQTT_TEST_PEER_IDLE_TIMEOUT_MS")
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
             .filter(|value| *value >= 1000)
