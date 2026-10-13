@@ -41,19 +41,19 @@ jobs:
         working-directory: client-source/rust-client
         env:
           CARGO_TERM_COLOR: never
-        run: cargo build --locked --bin client
+        run: cargo build --locked --target x86_64-unknown-linux-gnu --bin client
 
       - name: Build pinned CSQTT server
         working-directory: server-source/rust-server
         env:
           CARGO_TERM_COLOR: never
-        run: cargo build --locked --bin csqtt
+        run: cargo build --locked --target x86_64-unknown-linux-gnu --bin csqtt
 
       - name: Verify server protocol revision
         shell: bash
         run: |
           set -euo pipefail
-          revision="$(server-source/target/debug/csqtt --protocol-revision)"
+          revision="$(server-source/target/x86_64-unknown-linux-gnu/debug/csqtt --protocol-revision)"
           test -n "$revision"
           printf 'CSQTT_SERVER_PROTOCOL_REVISION=%s\n' "$revision" >> "$GITHUB_STEP_SUMMARY"
           echo "SERVER_PROTOCOL_REVISION=$revision"
