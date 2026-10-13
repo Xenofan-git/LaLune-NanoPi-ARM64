@@ -60,4 +60,20 @@ path.write_text(source.replace(marker, hook, 1), encoding="utf-8")
 if session_source.count(recv_marker) != 1:
     raise SystemExit("Expected exactly one TransportReader::recv insertion point; refusing patch")
 session_path.write_text(session_source.replace(recv_marker, recv_replacement, 1), encoding="utf-8")
-print("Applied disposable CI-only TURN credential hook; secret values were not printed.")
+
+# Instrument the disposable client so recovery assertions count every valid
+# TUNCONF received, even when the assigned IP/DNS are unchanged and the normal
+# UI/config event intentionally deduplicates identical config strings.
+main_path = Path("client-source/rust-client/main.rs")
+main_source = main_path.read_text(encoding="utf-8")
+main_marker = """        while let Some(config) = config_rx.recv().await {
+            if last_config.as_deref() == Some(config.as_str()) {"""
+main_replacement = """        while let Some(config) = config_rx.recv().await {
+            if config.starts_with("TUNCONF:") {
+                crate::log_error!("CSQTT_TEST_TUNCONF_RECEIVED");
+            }
+            if last_config.as_deref() == Some(config.as_str()) {"""
+if main_source.count(main_marker) != 1:
+    raise SystemExit("Expected exactly one client config event loop marker; refusing test instrumentation")
+main_path.write_text(main_source.replace(main_marker, main_replacement, 1), encoding="utf-8")
+print("Applied disposable CI-only TURN credentials, receive watchdog, and TUNCONF instrumentation; secret values were not printed.")
