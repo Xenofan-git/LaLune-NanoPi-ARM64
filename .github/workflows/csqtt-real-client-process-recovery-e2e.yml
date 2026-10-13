@@ -233,6 +233,7 @@ jobs:
             client_pid_before=$client_pid
             before_count=$(grep -Fc -- "-> TUNCONF" "$server_log")
             client_tunconf_before=$(grep -Fxc "TUNCONF" "$counter_file" || true)
+            client_ready_before=$(grep -Fc "[READY] Поток готов" "$client_log" || true)
             test "$before_count" -gt 0
             test "$client_tunconf_before" -gt 0
             old_server_pid=$server_pid
@@ -269,22 +270,25 @@ jobs:
               if ! kill -0 "$client_pid" 2>/dev/null; then cat "$client_log" >&2; echo "client exited after server restart" >&2; exit 1; fi
               after_count=$(grep -Fc -- "-> TUNCONF" "$server_log" || true)
               client_tunconf_after=$(grep -Fxc "TUNCONF" "$counter_file" || true)
+              client_ready_after=$(grep -Fc "[READY] Поток готов" "$client_log" || true)
               server_delta=$((after_count - before_count))
               client_delta=$((client_tunconf_after - client_tunconf_before))
-              # Wait until every one of the nine configured workers has parsed
-              # a fresh TUNCONF before checking the restored packet data plane.
-              if [ "$server_delta" -ge 9 ] && [ "$client_delta" -ge 9 ]; then recovered=1; break; fi
+              ready_delta=$((client_ready_after - client_ready_before))
+              # Wait until all nine workers have parsed fresh TUNCONF and
+              # completed session startup before probing packet flow.
+              if [ "$server_delta" -ge 9 ] && [ "$client_delta" -ge 9 ] && [ "$ready_delta" -ge 9 ]; then recovered=1; break; fi
               sleep 1
             done
             if [ "$recovered" -ne 1 ]; then
               echo "same Rust client process did not receive a fresh TUNCONF after server restart" >&2
-              echo "TUNCONF_COUNTS server_before=$before_count server_after=$after_count server_delta=$server_delta client_before=$client_tunconf_before client_after=$client_tunconf_after client_delta=$client_delta" >&2
+              echo "RECOVERY_COUNTS server_delta=$server_delta client_tunconf_delta=$client_delta client_ready_delta=$ready_delta" >&2
               tail -n 120 "$client_log" "$server_log" "$turn_log" "$bridge_log" >&2
               exit 1
             fi
             test "$client_pid" = "$client_pid_before"
             kill -0 "$client_pid"
 
+            sleep 2
             echo "--- bidirectional TUN dataplane after server restart ---"
             if ! ip netns exec "$client_ns" ping -I csqtt-client0 -c 3 -W 3 10.66.67.1 | tee "/tmp/csqtt-ping-after.log"; then
               echo "bidirectional TUN ping failed after restart" >&2
