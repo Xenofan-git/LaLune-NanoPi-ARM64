@@ -1,5 +1,5 @@
 name: Build pinned original LaLune Linux ARM64
-# CI trigger verification: test/csqtt-client-reconnect-vm (inherited VK secret)
+# CI trigger verification: test/csqtt-client-reconnect-vm
 # pinned-reference: Endlad2/LaLune @ e4a6d08
 
 on:
@@ -477,5 +477,3 @@ jobs:
     name: Test real CSQTT artifact in ARM64 system VM
     needs: build
     uses: ./.github/workflows/csqtt-lalune-arm64-vm-test.yml
-    secrets:
-      VK_CALL_HASH: ${{ secrets.VK_CALL_HASH }}
