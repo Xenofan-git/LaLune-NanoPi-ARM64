@@ -7,6 +7,8 @@ permissions:
   contents: read
   actions: read
 
+# Passed only to this isolated disposable VM; never printed or packaged.
+
 jobs:
   arm64-system-vm:
     runs-on: ubuntu-24.04
@@ -29,6 +31,10 @@ jobs:
           test -s vm/real/server-assets/csqtt-lalune-linux-arm64
           test -x vm/real/server-assets/install-csqtt-lalune.sh
           test -x vm/real/server-assets/uninstall-csqtt-lalune.sh
+          test -s vm/real/client-linux-arm64
+          test "$(cat vm/real/CSQTT_CLIENT_VERSION)" = "2026.09.16.17.59"
+          sha256sum vm/real/client-linux-arm64
+          file vm/real/client-linux-arm64
           test -x vm/real/client-tun-tests-arm64
           file vm/real/server-assets/csqtt-lalune-linux-arm64
           sha256sum vm/real/server-assets/csqtt-lalune-linux-arm64
@@ -98,6 +104,48 @@ jobs:
           done
           cat vm/serial.log
           exit 1
+
+      - name: Validate VK call hash with the pinned real ARM64 client
+        env:
+          VK_CALL_HASH: ${{ secrets.VK_CALL_HASH }}
+        run: |
+          set -euo pipefail
+          test -n "${VK_CALL_HASH:-}" || { echo "VK_CALL_HASH repository secret is missing" >&2; exit 1; }
+          SSH=(ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1)
+          SCP=(scp -i vm/id_ed25519 -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+          "${SCP[@]}" vm/real/client-linux-arm64 tester@127.0.0.1:/home/tester/client-linux-arm64
+          printf '%s' "$VK_CALL_HASH" | "${SSH[@]}" 'umask 077; cat > /home/tester/.vk-call-hash'
+          unset VK_CALL_HASH
+          "${SSH[@]}" 'set -euo pipefail
+            trap "rm -f /home/tester/.vk-call-hash" EXIT
+            chmod 0755 /home/tester/client-linux-arm64
+            HASH="$(cat /home/tester/.vk-call-hash)"
+            test -n "$HASH"
+            set +e
+            /home/tester/client-linux-arm64 --vk "$HASH" --validate-vk-hashes > /tmp/vk-hash-validation.jsonl 2>/tmp/vk-hash-validation.stderr
+            rc=$?
+            set -e
+            python3 - <<"PY"
+          import json
+          from pathlib import Path
+          rows = []
+          for line in Path("/tmp/vk-hash-validation.jsonl").read_text(errors="replace").splitlines():
+              if line.startswith("HASH_CHECK:"):
+                  try:
+                      rows.append(json.loads(line[len("HASH_CHECK:"):]))
+                  except Exception:
+                      pass
+          if not rows:
+              print("VK_HASH_VALIDATION_NO_RESULT")
+              raise SystemExit(1)
+          statuses = [str(row.get("status", "unknown")) for row in rows]
+          print("VK_HASH_VALIDATION_STATUSES", ",".join(statuses))
+          if not any(row.get("status") == "valid" for row in rows):
+              raise SystemExit(1)
+          PY
+            test "$rc" -eq 0
+            echo REAL_ARM64_CLIENT_VK_HASH_VALIDATION_PASS
+          '
 
       - name: Test Direct routing policy with real Linux kernel routes
         run: |
@@ -391,6 +439,77 @@ jobs:
           PY_PROBE_FILE
           python3 -m py_compile vm/csqtt-vm-probe.py
 
+      - name: Prepare persistent-process CSQTT recovery probe
+        run: |
+          set -euxo pipefail
+          cat > vm/csqtt-same-process-recovery.py <<'PY_RECOVERY'
+          import socket, struct, subprocess, time
+          from cryptography.hazmat.primitives import hashes
+          from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+          from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+          
+          fixture = bytes.fromhex(
+              "b06f77881122334410203040bede0002325566775199aa009e2a813c2df794"
+              "354293ade7b0b8ef4aa6297cf3cc8b0a372342fbd678c10260dc543f833826"
+              "2292992b12600eaa12d0d3155fa7179b62cd34ac41afb32db0ab7f6dced9"
+              "e1bb0620daa26d1743f2c25af6bd9ade9901"
+          )
+          password = b"wire-password"
+          key = HKDF(algorithm=hashes.SHA256(), length=32, salt=b"CSQTT-WRAP-v1",
+                     info=b"rtp-obfs/chacha20poly1305").derive(password)
+          
+          def exchange(sock, phase):
+              sock.sendto(fixture, ("127.0.0.1", 47000))
+              deadline = time.monotonic() + 8
+              while time.monotonic() < deadline:
+                  try:
+                      response, peer = sock.recvfrom(65535)
+                  except socket.timeout:
+                      continue
+                  if len(response) < 41 or response[0] >> 6 != 2 or response[12:14] != b"\xbe\xde":
+                      continue
+                  header = response[:24]
+                  end = len(response)
+                  if response[0] & 0x20:
+                      padding = response[-1]
+                      if not 1 <= padding <= end - 40:
+                          continue
+                      end -= padding
+                  nonce = header[8:12] + header[2:4] + b"\x00\x00" + header[4:8]
+                  try:
+                      plain = ChaCha20Poly1305(key).decrypt(nonce, response[24:end], header)
+                  except Exception:
+                      continue
+                  if plain.startswith(b"TUNCONF:"):
+                      fields = plain.decode().split(":")
+                      if len(fields) >= 3:
+                          print("SAME_PROCESS_TUNCONF", phase, fields[1], fields[2], flush=True)
+                          return
+              raise SystemExit(f"no authenticated TUNCONF after {phase}")
+          
+          sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+          sock.bind(("127.0.0.1", 0))
+          sock.settimeout(0.5)
+          local = sock.getsockname()
+          exchange(sock, "before_restart")
+          subprocess.run(["sudo", "systemctl", "restart", "csqtt-lalune.service"], check=True)
+          for _ in range(20):
+              ready = subprocess.run(
+                  "sudo ss -H -lun 'sport = :47000' | grep -q .",
+                  shell=True
+              ).returncode == 0
+              if ready:
+                  break
+              time.sleep(0.5)
+          if sock.getsockname() != local:
+              raise SystemExit("client UDP socket identity changed during server restart")
+          exchange(sock, "after_restart")
+          print("CSQTT_SAME_PROCESS_PROTOCOL_RECOVERY_PASS", "local_udp", local, flush=True)
+          sock.close()
+          PY_RECOVERY
+          
+          python3 -m py_compile vm/csqtt-same-process-recovery.py
+
       - name: Test installer isolation and lifecycle in ARM64 system guest
         run: |
           set -euxo pipefail
@@ -414,12 +533,26 @@ jobs:
           WantedBy=multi-user.target
           EOF
           done
-          $SCP "$INSTALLER" "$UNINSTALLER" "$BINARY" vm/real/client-tun-tests-arm64 vm/csqtt.service vm/csqtt-47000.service vm/csqtt-47000-netns.service vm/csqtt-vm-probe.py tester@127.0.0.1:/home/tester/
+          $SCP vm/real/client-linux-arm64 tester@127.0.0.1:/home/tester/
+          $SCP "$INSTALLER" "$UNINSTALLER" "$BINARY" vm/real/client-tun-tests-arm64 vm/csqtt.service vm/csqtt-47000.service vm/csqtt-47000-netns.service vm/csqtt-vm-probe.py vm/csqtt-same-process-recovery.py tester@127.0.0.1:/home/tester/
           $SSH 'set -eux
             sudo install -d -m 0755 /opt/lalune-package
             sudo install -m 0755 /home/tester/install-csqtt-lalune.sh /opt/lalune-package/install-csqtt-lalune.sh
             sudo install -m 0755 /home/tester/uninstall-csqtt-lalune.sh /opt/lalune-package/uninstall-csqtt-lalune.sh
             test -s /home/tester/csqtt-lalune-linux-arm64
+            # Exercise the exact runtime CSQTT core that the pinned LaLune
+            # release selector downloads. This is an executable/CLI smoke only;
+            # it does not claim an authenticated VK/TURN session or recovery.
+            sudo install -m 0755 /home/tester/client-linux-arm64 /usr/local/bin/csqtt-client
+            test "$(uname -m)" = aarch64
+            file /usr/local/bin/csqtt-client
+            set +e
+            /usr/local/bin/csqtt-client >/tmp/csqtt-client-argument-smoke.log 2>&1
+            client_status=$?
+            set -e
+            test "$client_status" -ne 0
+            grep -Fq -- "Нужны -peer и хеши VK" /tmp/csqtt-client-argument-smoke.log
+            echo REAL_RUNTIME_CSQTT_CLIENT_ARM64_EXECUTABLE_PASS
             sudo install -m 0755 /home/tester/csqtt-lalune-linux-arm64 /opt/lalune-package/csqtt-lalune-linux-arm64
             sudo install -m 0755 /home/tester/client-tun-tests-arm64 /usr/local/bin/client-tun-tests-arm64
             /usr/local/bin/client-tun-tests-arm64 -test.v
@@ -439,6 +572,14 @@ jobs:
             sudo ip route add blackhole 198.18.77.0/24 table 42424
             sudo ip rule add priority 42424 to 198.18.77.0/24 lookup 42424
             sudo iptables -I OUTPUT 1 -d 198.18.77.0/24 -m comment --comment FOREIGN_TEST_RULE_KEEP -j ACCEPT
+            # Adversarial near-miss resources: values deliberately share LaLune
+            # identifiers as prefixes but are not exact owned IDs/markers. Cleanup
+            # must not match them by substring or numeric prefix.
+            sudo ip route add blackhole 198.18.78.0/24 table 470010
+            sudo ip rule add priority 470010 to 198.18.78.0/24 lookup 470010
+            sudo ip rule add priority 470011 fwmark 0x67410/0xffff lookup 470010
+            sudo iptables -I OUTPUT 1 -d 198.18.78.0/24 -m comment --comment CSQTT_LALUNE-FOREIGN_RULE_KEEP -j ACCEPT
+            sudo iptables -I OUTPUT 1 -d 198.18.79.0/24 -m comment --comment CSQTT_LALUNEISH_FOREIGN_KEEP -j ACCEPT
             sudo sha256sum /etc/systemd/system/csqtt.service /etc/systemd/system/csqtt-47000.service /etc/systemd/system/csqtt-47000-netns.service > /tmp/production-units.before
             sudo systemctl show -p ActiveState -p SubState csqtt.service csqtt-47000.service csqtt-47000-netns.service > /tmp/production-states.before
             sudo ip -4 route show table main > /tmp/main-routes.before
@@ -448,6 +589,13 @@ jobs:
             grep -Fq "blackhole 198.18.77.0/24" /tmp/foreign-routes.before
             grep -Eq "^42424:.*to 198\\.18\\.77\\.0/24.*lookup 42424$" /tmp/ip-rules.before
             grep -Fq 'FOREIGN_TEST_RULE_KEEP' /tmp/iptables.before
+            sudo ip -4 route show table 470010 > /tmp/near-miss-routes.before
+            sudo ip -4 rule show > /tmp/all-ip-rules.before
+            grep -Fq "blackhole 198.18.78.0/24" /tmp/near-miss-routes.before
+            grep -Eq "^470010:.*to 198\\.18\\.78\\.0/24.*lookup 470010$" /tmp/all-ip-rules.before
+            grep -Eq "^470011:.*fwmark 0x67410/0xffff lookup 470010$" /tmp/all-ip-rules.before
+            grep -Fq 'CSQTT_LALUNE-FOREIGN_RULE_KEEP' /tmp/iptables.before
+            grep -Fq 'CSQTT_LALUNEISH_FOREIGN_KEEP' /tmp/iptables.before
             sudo /opt/lalune-package/install-csqtt-lalune.sh
             sudo systemctl is-active --quiet csqtt-lalune.service
             sudo systemctl is-active --quiet csqtt.service
@@ -457,6 +605,13 @@ jobs:
             diff -u /tmp/production-states.before /tmp/production-states.after-install
             sudo ip -4 route show table 42424 > /tmp/foreign-routes.after-install
             diff -u /tmp/foreign-routes.before /tmp/foreign-routes.after-install
+            sudo ip -4 route show table 470010 > /tmp/near-miss-routes.after-install
+            diff -u /tmp/near-miss-routes.before /tmp/near-miss-routes.after-install
+            sudo ip -4 rule show > /tmp/all-ip-rules.after-install
+            while IFS= read -r rule; do grep -Fqx -- "$rule" /tmp/all-ip-rules.after-install; done < /tmp/all-ip-rules.before
+            sudo iptables-save | sed "/^# Generated by iptables-save/d; /^# Completed on /d; s/\\[[0-9:]*\\]/[COUNTERS]/g" > /tmp/iptables.after-install
+            grep -Fq 'CSQTT_LALUNE-FOREIGN_RULE_KEEP' /tmp/iptables.after-install
+            grep -Fq 'CSQTT_LALUNEISH_FOREIGN_KEEP' /tmp/iptables.after-install
             # The packaged service must bind only its dedicated ports.
             for attempt in $(seq 1 20); do
               if sudo ss -H -lun 'sport = :47000' | grep -q . && sudo ss -H -ltn 'sport = :47002' | grep -q .; then break; fi
@@ -480,6 +635,9 @@ jobs:
               sleep 1
             done
             sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-before-probe.log
+            # First independent probe process completed an authenticated server exchange
+            # and bidirectional TUN packet test. Now force a server process restart and
+            # launch a fresh OS process with a fresh UDP socket to verify recovery.
             python3 /home/tester/csqtt-vm-probe.py
             sudo systemctl is-active --quiet csqtt-lalune.service
             sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-after-probe.log
@@ -488,6 +646,16 @@ jobs:
             sudo systemctl is-active --quiet csqtt-lalune.service
             sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-after-probe.log
             diff -u /tmp/csqtt-lalune-before-probe.log /tmp/csqtt-lalune-after-probe.log > /tmp/csqtt-lalune-probe-diff.log || true
+
+            # Same-process recovery check: keep one Python client process and one UDP
+            # socket alive while restarting only the disposable server. Authenticate
+            # and decrypt TUNCONF both before and after restart. This tests protocol
+            # re-establishment in a persistent client process, not the Go app supervisor.
+            python3 /home/tester/csqtt-same-process-recovery.py | tee /tmp/csqtt-same-process-recovery.log
+            grep -q '^SAME_PROCESS_TUNCONF before_restart ' /tmp/csqtt-same-process-recovery.log
+            grep -q '^SAME_PROCESS_TUNCONF after_restart ' /tmp/csqtt-same-process-recovery.log
+            grep -q '^CSQTT_SAME_PROCESS_PROTOCOL_RECOVERY_PASS ' /tmp/csqtt-same-process-recovery.log
+            sudo systemctl is-active --quiet csqtt-lalune.service
             # Installing the isolated service must not change the main/default route table.
             sudo ip -4 route show table main > /tmp/main-routes.after-install
             # The dedicated TUN subnet route is expected while the isolated service is running.
@@ -510,6 +678,13 @@ jobs:
             diff -u /tmp/production-states.before /tmp/production-states.after-uninstall
             sudo ip -4 route show table 42424 > /tmp/foreign-routes.after-uninstall
             diff -u /tmp/foreign-routes.before /tmp/foreign-routes.after-uninstall
+            sudo ip -4 route show table 470010 > /tmp/near-miss-routes.after-uninstall
+            diff -u /tmp/near-miss-routes.before /tmp/near-miss-routes.after-uninstall
+            sudo ip -4 rule show > /tmp/all-ip-rules.after-uninstall
+            while IFS= read -r rule; do grep -Fqx -- "$rule" /tmp/all-ip-rules.after-uninstall; done < /tmp/all-ip-rules.before
+            sudo iptables-save | sed "/^# Generated by iptables-save/d; /^# Completed on /d; s/\\[[0-9:]*\\]/[COUNTERS]/g" > /tmp/iptables.after-uninstall
+            grep -Fq 'CSQTT_LALUNE-FOREIGN_RULE_KEEP' /tmp/iptables.after-uninstall
+            grep -Fq 'CSQTT_LALUNEISH_FOREIGN_KEEP' /tmp/iptables.after-uninstall
             sudo ip -4 route show table main > /tmp/main-routes.after-uninstall
             sudo diff -u /tmp/main-routes.before /tmp/main-routes.after-uninstall
             sudo ip -4 rule show > /tmp/ip-rules.after-uninstall

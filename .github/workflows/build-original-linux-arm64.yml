@@ -1,4 +1,5 @@
 name: Build pinned original LaLune Linux ARM64
+# CI trigger verification: test/csqtt-client-reconnect-vm
 # pinned-reference: Endlad2/LaLune @ e4a6d08
 
 on:
@@ -8,6 +9,7 @@ on:
       - integration/deploymanager-fix
       - fix/captcha-stale-overlay
       - feature/csqtt-direct-route-tab
+      - test/csqtt-client-reconnect-vm
   workflow_dispatch:
 
 permissions:
@@ -278,6 +280,19 @@ jobs:
           grep -Fq '"assetName":  "csqtt-linux-amd64"' server-assets/csqtt.server-provenance.json
           grep -Fq '"assetName":  "csqtt-linux-armv7"' server-assets/csqtt.server-provenance.json
           grep -Fq 'readonly SCRIPT_VERSION="2.1.9"' server-assets/deploy.sh
+      - name: Fetch pinned runtime CSQTT client core
+        run: |
+          set -euxo pipefail
+          mkdir -p client-assets
+          CLIENT_VERSION=2026.09.16.17.59
+          test "$(curl -fsSL https://raw.githubusercontent.com/Endlad2/csqtt-core/main/LATEST)" = "$CLIENT_VERSION"
+          curl -fL --retry 3 "https://github.com/Endlad2/csqtt-core/releases/download/$CLIENT_VERSION/client-linux-arm64" -o client-assets/client-linux-arm64
+          printf '%s  %s\n' '9a5b917665fda6ee7b3cf8439e3194d46c763f2305d188b4962caee69048ae31' 'client-assets/client-linux-arm64' | sha256sum -c -
+          printf '%s\n' "$CLIENT_VERSION" > client-assets/VERSION
+          chmod 0755 client-assets/client-linux-arm64
+          file client-assets/client-linux-arm64
+          readelf -h client-assets/client-linux-arm64 | grep -Fq 'AArch64'
+          echo PINNED_RUNTIME_CSQTT_CLIENT_ARTIFACT_PASS
       - name: Exercise LaLune installer lifecycle in disposable root
         run: |
           set -euxo pipefail
@@ -372,6 +387,8 @@ jobs:
           set -euxo pipefail
           file upstream-lalune/Desktop/Linux/lalune-original-linux-arm64
           rm -rf dist && mkdir -p dist
+          install -m 0755 client-assets/client-linux-arm64 dist/client-linux-arm64
+          install -m 0644 client-assets/VERSION dist/CSQTT_CLIENT_VERSION
           cp upstream-lalune/Desktop/Linux/lalune-original-linux-arm64 dist/
           install -m 0755 client-tun-tests-arm64 dist/client-tun-tests-arm64
           cp upstream-lalune/Core/DeployManager/target/aarch64-unknown-linux-gnu/release/deploy-manager dist/
@@ -401,7 +418,7 @@ jobs:
           cp adaptation-source.sha256 dist/
           cp protocols-source.sha256 dist/
           printf '%s\n' 'e4a6d08b63aef6025bf8ad8f77da660ea552e04b' > dist/UPSTREAM_COMMIT
-          (cd dist && sha256sum lalune-original-linux-arm64 > SHA256SUMS && sha256sum -c SHA256SUMS)
+          (cd dist && sha256sum lalune-original-linux-arm64 client-linux-arm64 > SHA256SUMS && sha256sum -c SHA256SUMS)
           tar -C dist -czf lalune-original-linux-arm64.tar.gz .
       - uses: actions/upload-artifact@v4
         with:
@@ -456,9 +473,8 @@ jobs:
           path: csqtt-lalune-nanopi-arm64-isolated.tar.gz
           if-no-files-found: error
 
-
-
   arm64-system-vm:
     name: Test real CSQTT artifact in ARM64 system VM
     needs: build
     uses: ./.github/workflows/csqtt-lalune-arm64-vm-test.yml
+    secrets: inherit

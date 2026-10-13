@@ -1,0 +1,46 @@
+name: Pinned CSQTT Rust client source tests
+
+on:
+  push:
+    branches:
+      - test/csqtt-client-reconnect-vm
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-rust-tests:
+    name: Compile and test pinned upstream Rust client
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Fetch exact upstream client source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/Endlad2/csqtt-core.git upstream-csqtt-core
+          git -C upstream-csqtt-core checkout --detach 3eafb7ee868f5f2690edf3b0326153813f88eb5f
+          test "$(git -C upstream-csqtt-core rev-parse HEAD)" = "3eafb7ee868f5f2690edf3b0326153813f88eb5f"
+          test -s upstream-csqtt-core/rust-client/Cargo.lock
+          test -s upstream-csqtt-core/rust-client/main.rs
+          printf 'PINNED_CSQTT_SOURCE_COMMIT=%s\n' "$(git -C upstream-csqtt-core rev-parse HEAD)"
+
+      - name: Compile and run Rust client unit tests
+        working-directory: upstream-csqtt-core/rust-client
+        env:
+          CARGO_TERM_COLOR: never
+        run: cargo test --locked --bin client
+
+      - name: Record scope of this test
+        run: |
+          echo "PINNED_RUST_CLIENT_SOURCE_TESTS_PASS"
+          echo "Scope: upstream Rust source compiles and its non-ignored unit tests pass."
+          echo "This job does not claim same-PID end-to-end recovery through VK, TURN, and TUN."
