@@ -59,7 +59,30 @@ hook = marker + """
 path.write_text(source.replace(marker, hook, 1), encoding="utf-8")
 if session_source.count(recv_marker) != 1:
     raise SystemExit("Expected exactly one TransportReader::recv insertion point; refusing patch")
-session_path.write_text(session_source.replace(recv_marker, recv_replacement, 1), encoding="utf-8")
+session_patched = session_source.replace(recv_marker, recv_replacement, 1)
+
+# Instrument both client-side protocol parse paths, before optional config
+# delivery/deduplication, so the test can distinguish server send from client
+# actually parsing the response.
+handshake_marker = """            ConfigResponse::Config(value) => {
+                if value.ends_with(":stream-v1")"""
+handshake_replacement = """            ConfigResponse::Config(value) => {
+                crate::log_error!("CSQTT_TEST_TUNCONF_PARSED");
+                if value.ends_with(":stream-v1")"""
+if session_patched.count(handshake_marker) != 1:
+    raise SystemExit("Expected exactly one client handshake TUNCONF parse branch; refusing instrumentation")
+session_patched = session_patched.replace(handshake_marker, handshake_replacement, 1)
+reader_marker = """        if packet.as_slice().starts_with(b"TUNCONF:") {
+            if let Ok(ConfigResponse::Config(config)) = parse_config_response(packet.as_slice()) {
+                let _ = config_tx.try_send(config);"""
+reader_replacement = """        if packet.as_slice().starts_with(b"TUNCONF:") {
+            if let Ok(ConfigResponse::Config(config)) = parse_config_response(packet.as_slice()) {
+                crate::log_error!("CSQTT_TEST_TUNCONF_PARSED");
+                let _ = config_tx.try_send(config);"""
+if session_patched.count(reader_marker) != 1:
+    raise SystemExit("Expected exactly one client inbound TUNCONF parse branch; refusing instrumentation")
+session_patched = session_patched.replace(reader_marker, reader_replacement, 1)
+session_path.write_text(session_patched, encoding="utf-8")
 
 # Instrument the disposable client so recovery assertions count every valid
 # TUNCONF received, even when the assigned IP/DNS are unchanged and the normal
@@ -76,4 +99,4 @@ main_replacement = """        while let Some(config) = config_rx.recv().await {
 if main_source.count(main_marker) != 1:
     raise SystemExit("Expected exactly one client config event loop marker; refusing test instrumentation")
 main_path.write_text(main_source.replace(main_marker, main_replacement, 1), encoding="utf-8")
-print("Applied disposable CI-only TURN credentials, receive watchdog, and TUNCONF instrumentation; secret values were not printed.")
+print("Applied disposable CI-only TURN credentials, receive watchdog, and pre-dedup TUNCONF parse instrumentation; secret values were not printed.")
