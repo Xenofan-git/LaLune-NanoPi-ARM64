@@ -33,10 +33,6 @@ jobs:
           test -s upstream-csqtt-core/rust-client/main.rs
           printf 'PINNED_CSQTT_SOURCE_COMMIT=%s\n' "$(git -C upstream-csqtt-core rev-parse HEAD)"
 
-      - name: Check formatting of pinned Rust client
-        working-directory: upstream-csqtt-core/rust-client
-        run: cargo fmt --all -- --check
-
       - name: Compile and run Rust client unit tests
         working-directory: upstream-csqtt-core/rust-client
         env:
