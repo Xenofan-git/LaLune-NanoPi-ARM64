@@ -1,0 +1,69 @@
+name: CSQTT real client process recovery E2E
+
+on:
+  push:
+    branches:
+      - test/csqtt-process-recovery-e2e
+
+permissions:
+  contents: read
+
+jobs:
+  process-recovery:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain and Linux test tools
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Fetch pinned client and server
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/Endlad2/csqtt-core.git client-source
+          git -C client-source checkout --detach 3eafb7ee868f5f2690edf3b0326153813f88eb5f
+          git clone --depth 1 --branch v2.1.9 https://github.com/amurcanov/csqtt.git server-source
+          test "$(git -C client-source rev-parse HEAD)" = "3eafb7ee868f5f2690edf3b0326153813f88eb5f"
+          test "$(git -C server-source describe --tags --exact-match)" = "v2.1.9"
+          cmp client-source/shared/wire_protocol.rs server-source/shared/wire_protocol.rs
+
+      - name: Build actual client and server executables
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --target x86_64-unknown-linux-gnu --manifest-path client-source/rust-client/Cargo.toml --bin client
+          cargo build --locked --target x86_64-unknown-linux-gnu --manifest-path server-source/rust-server/Cargo.toml --bin csqtt
+          test -x client-source/rust-client/target/x86_64-unknown-linux-gnu/debug/client
+          test -x server-source/rust-server/target/x86_64-unknown-linux-gnu/debug/csqtt
+
+      - name: Start real server process in isolated test namespace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/csqtt-e2e-config"
+          # This stage validates that the real server binary can run as an isolated
+          # process with disposable config. It intentionally does not modify host
+          # routes, firewall policy, DNS, Tailscale or any production service.
+          server-source/rust-server/target/x86_64-unknown-linux-gnu/debug/csqtt \
+            --protocol-revision > "$RUNNER_TEMP/server-protocol-revision.txt"
+          test -s "$RUNNER_TEMP/server-protocol-revision.txt"
+          cat "$RUNNER_TEMP/server-protocol-revision.txt"
+
+      - name: Record why full recovery assertions are gated
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Process recovery E2E status"
+            echo "- Pinned client and server executables built successfully."
+            echo "- The real server binary was invoked for protocol revision."
+            echo "- NOT PASSED: client/server connection, bidirectional TUN traffic, server restart, stable client PID, and recovery timeout."
+            echo "- The pinned client obtains TURN credentials through VK auth. A dedicated CI-only credential provider and TURN relay fixture must be added before the process recovery scenario can be run without external VK services."
+            echo "- This run makes no production changes and does not repeat passed TURN/worker unit tests."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "PROCESS_RECOVERY_E2E_BLOCKED_NO_LOCAL_TURN_AUTH_FIXTURE"
+          exit 1
