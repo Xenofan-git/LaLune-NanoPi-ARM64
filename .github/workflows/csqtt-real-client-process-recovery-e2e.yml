@@ -229,7 +229,7 @@ jobs:
 
             client_pid_before=$client_pid
             before_count=$(grep -Fc -- "-> TUNCONF" "$server_log")
-            client_tunconf_before=$(grep -Fc "CSQTT_TEST_TUNCONF_RECEIVED" "$client_log")
+            client_tunconf_before=$(grep -Fc "CSQTT_TEST_TUNCONF_PARSED" "$client_log")
             test "$before_count" -gt 0
             test "$client_tunconf_before" -gt 0
             kill "$server_pid"
