@@ -45,18 +45,53 @@ jobs:
           test -x client-source/rust-client/target/x86_64-unknown-linux-gnu/debug/client
           test -x server-source/rust-server/target/x86_64-unknown-linux-gnu/debug/csqtt
 
-      - name: Start real server process in isolated test namespace
+      - name: Start and stop the actual server in an isolated network namespace
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/csqtt-e2e-config"
-          # This stage validates that the real server binary can run as an isolated
-          # process with disposable config. It intentionally does not modify host
-          # routes, firewall policy, DNS, Tailscale or any production service.
-          server-source/rust-server/target/x86_64-unknown-linux-gnu/debug/csqtt \
-            --protocol-revision > "$RUNNER_TEMP/server-protocol-revision.txt"
-          test -s "$RUNNER_TEMP/server-protocol-revision.txt"
-          cat "$RUNNER_TEMP/server-protocol-revision.txt"
+          server="$GITHUB_WORKSPACE/server-source/rust-server/target/x86_64-unknown-linux-gnu/debug/csqtt"
+          config="$RUNNER_TEMP/csqtt-e2e-config"
+          log="$RUNNER_TEMP/csqtt-server-startup.log"
+          mkdir -p "$config"
+          # The server requires root and performs startup cleanup of its proxy
+          # policy. Run it in a private network namespace so that cleanup and
+          # any sockets/routes cannot affect the GitHub runner's host namespace.
+          # No production machine or service is involved.
+          sudo unshare --net --fork --mount-proc bash -euc '
+            ip link set lo up
+            exec "$1" --listen 127.0.0.1:46000 --web-port 0 \
+              --config-dir "$2" --password ci-e2e-password \
+              --device-id ci-e2e-device --web-pass ci-e2e-web-password
+          ' _ "$server" "$config" >"$log" 2>&1 &
+          namespace_pid=$!
+          cleanup() {
+            sudo kill "$namespace_pid" 2>/dev/null || true
+            wait "$namespace_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          ready=0
+          for attempt in $(seq 1 40); do
+            if grep -Fq 'RTP AEAD: 127.0.0.1:46000' "$log"; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$namespace_pid" 2>/dev/null; then
+              cat "$log"
+              echo "isolated CSQTT server exited before becoming ready" >&2
+              exit 1
+            fi
+            sleep 0.5
+          done
+          if [ "$ready" -ne 1 ]; then
+            cat "$log"
+            echo "isolated CSQTT server did not report its UDP listener" >&2
+            exit 1
+          fi
+          grep -F 'RTP AEAD: 127.0.0.1:46000' "$log"
+          echo "PASS: real CSQTT server process started with disposable config in a private network namespace."
+          # Keep server alive through the readiness assertion, then stop it cleanly.
+          cleanup
+          trap - EXIT
 
       - name: Verify process-level test prerequisites (not the recovery E2E)
         shell: bash
