@@ -5,7 +5,7 @@ on:
     secrets:
       VK_CALL_HASH:
         description: VK call hash used only by the disposable ARM64 validation VM
-        required: true
+        required: false
 
 permissions:
   contents: read
