@@ -42,11 +42,11 @@ jobs:
         run: |
           {
             echo "## Scope"
-            echo "- Pinned Rust TURN/session integration tests only."
+            echo "- Pinned Rust TURN/session tests plus worker reconnect scheduling tests."
             echo "- Test listing is checked before execution, and substring filters are used."
             echo "- No VK secret or token is used or printed."
             echo "- No production device, VPS, router, firewall, DNS, or tunnel is touched."
             echo "- This does not claim that the stock Rust client process survives a server restart."
             echo "- The disposable source checkout receives a test-only local TURN credential hook; no credentials are supplied by this foundation workflow."
-            echo "- Full acceptance still requires a local test server, a real client process, stable PID, and bidirectional TUN traffic before/after server restart."
+            echo "- Full acceptance still requires a local CSQTT test server, a real client process, stable PID, and bidirectional TUN traffic before/after server restart."
           } >> "$GITHUB_STEP_SUMMARY"
