@@ -102,6 +102,120 @@ jobs:
             exit "$rc"
           fi
 
+      - name: Exercise real Rust client recovery across isolated server restart
+        shell: bash
+        env:
+          CARGO_TERM_COLOR: never
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y coturn
+          client="$GITHUB_WORKSPACE/client-source/rust-client/target/x86_64-unknown-linux-gnu/debug/client"
+          server="$GITHUB_WORKSPACE/server-source/rust-server/target/x86_64-unknown-linux-gnu/debug/csqtt"
+          config="$RUNNER_TEMP/csqtt-native-recovery-config"
+          server_log="$RUNNER_TEMP/csqtt-native-recovery-server.log"
+          client_log="$RUNNER_TEMP/csqtt-native-recovery-client.log"
+          turn_log="$RUNNER_TEMP/csqtt-native-recovery-turn.log"
+          mkdir -p "$config"
+          : > "$server_log"
+          : > "$client_log"
+          : > "$turn_log"
+          # All three processes live in the same disposable netns. The test-only
+          # auth hook supplies fixed local TURN credentials; no VK secret/network
+          # access is needed, and the fake hash is never used for real VK calls.
+          sudo timeout --signal=TERM --kill-after=5s 110s unshare --net --fork --mount-proc bash -euc '
+            client="$1"; server="$2"; config="$3"; server_log="$4"; client_log="$5"; turn_log="$6"
+            ip link set lo up
+            export CSQTT_TEST_TURN_USERNAME=ci-e2e-user
+            export CSQTT_TEST_TURN_PASSWORD=ci-e2e-turn-password
+            export CSQTT_TEST_TURN_SERVER=127.0.0.1
+            turnserver -n --listening-ip=127.0.0.1 --relay-ip=127.0.0.1 \
+              --listening-port=3478 --min-port=49160 --max-port=49200 \
+              --realm=ci.test --user=ci-e2e-user:ci-e2e-turn-password \
+              --lt-cred-mech --fingerprint --no-cli --no-tls --no-dtls \
+              --log-file="$turn_log" &
+            turn_pid=$!
+            server_pid=
+            client_pid=
+            cleanup() {
+              [ -z "$client_pid" ] || { kill "$client_pid" 2>/dev/null || true; wait "$client_pid" 2>/dev/null || true; }
+              [ -z "$server_pid" ] || { kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; }
+              kill "$turn_pid" 2>/dev/null || true
+              wait "$turn_pid" 2>/dev/null || true
+            }
+            trap cleanup EXIT
+            for attempt in $(seq 1 30); do
+              if ! kill -0 "$turn_pid" 2>/dev/null; then cat "$turn_log" >&2; echo "local TURN server exited early" >&2; exit 1; fi
+              if grep -Eqi "listener address.*127\.0\.0\.1|listening.*3478" "$turn_log"; then break; fi
+              sleep 0.5
+            done
+            "$server" --listen 127.0.0.1:46000 --web-port 0 \
+              --config-dir "$config" --password ci-e2e-password \
+              --device-id ci-e2e-device --web-pass ci-e2e-web-password \
+              >"$server_log" 2>&1 &
+            server_pid=$!
+            for attempt in $(seq 1 40); do
+              if grep -Fq "RTP AEAD: 127.0.0.1:46000" "$server_log"; then break; fi
+              if ! kill -0 "$server_pid" 2>/dev/null; then cat "$server_log" >&2; echo "server exited before readiness" >&2; exit 1; fi
+              sleep 0.5
+            done
+            grep -Fq "RTP AEAD: 127.0.0.1:46000" "$server_log"
+            "$client" --peer 127.0.0.1:46000 --turn 127.0.0.1 --port 3478 \
+              --vk ci-e2e-hash --vk-hash-mode manual --vk-auth-mode vkcalls \
+              --password ci-e2e-password --device-id ci-e2e-device \
+              --workers 9 --listen 127.0.0.1:9000 --turn-transport udp \
+              >"$client_log" 2>&1 &
+            client_pid=$!
+            for attempt in $(seq 1 60); do
+              if grep -Fq "[КЛИЕНТ] Tunnel IP:" "$client_log" && grep -Fq "-> TUNCONF" "$server_log"; then break; fi
+              if ! kill -0 "$client_pid" 2>/dev/null; then cat "$client_log" >&2; echo "real Rust client exited before TUNCONF" >&2; exit 1; fi
+              sleep 1
+            done
+            if ! grep -Fq "[КЛИЕНТ] Tunnel IP:" "$client_log" || ! grep -Fq "-> TUNCONF" "$server_log"; then
+              echo "client did not complete authenticated TUNCONF before restart" >&2
+              echo "--- client log ---" >&2; tail -n 100 "$client_log" >&2
+              echo "--- server log ---" >&2; tail -n 100 "$server_log" >&2
+              echo "--- TURN log ---" >&2; tail -n 60 "$turn_log" >&2
+              exit 1
+            fi
+            client_pid_before=$client_pid
+            before_count=$(grep -Fc "-> TUNCONF" "$server_log")
+            test "$before_count" -gt 0
+            kill "$server_pid"
+            wait "$server_pid" 2>/dev/null || true
+            server_pid=
+            for attempt in $(seq 1 20); do
+              if ! kill -0 "$client_pid" 2>/dev/null; then echo "client exited during server restart" >&2; exit 1; fi
+              sleep 0.25
+            done
+            "$server" --listen 127.0.0.1:46000 --web-port 0 \
+              --config-dir "$config" --password ci-e2e-password \
+              --device-id ci-e2e-device --web-pass ci-e2e-web-password \
+              >>"$server_log" 2>&1 &
+            server_pid=$!
+            recovered=0
+            for attempt in $(seq 1 80); do
+              if ! kill -0 "$client_pid" 2>/dev/null; then cat "$client_log" >&2; echo "client exited after server restart" >&2; exit 1; fi
+              after_count=$(grep -Fc "-> TUNCONF" "$server_log" || true)
+              if [ "$after_count" -gt "$before_count" ]; then recovered=1; break; fi
+              sleep 1
+            done
+            if [ "$recovered" -ne 1 ]; then
+              echo "same Rust client process did not re-establish GETCONF/TUNCONF after server restart" >&2
+              echo "--- client log ---" >&2; tail -n 120 "$client_log" >&2
+              echo "--- server log ---" >&2; tail -n 120 "$server_log" >&2
+              echo "--- TURN log ---" >&2; tail -n 80 "$turn_log" >&2
+              exit 1
+            fi
+            test "$client_pid" = "$client_pid_before"
+            kill -0 "$client_pid"
+            echo "PASS: native Rust client PID remained stable across server restart."
+            echo "PASS: server recorded a new TUNCONF after restart from the same client process."
+            cleanup
+            trap - EXIT
+          ' _ "$client" "$server" "$config" "$server_log" "$client_log" "$turn_log"
+          echo "NATIVE_RUST_CLIENT_SAME_PROCESS_RECOVERY_PASS"
+
       - name: Verify process-level test prerequisites (not the recovery E2E)
         shell: bash
         run: |
