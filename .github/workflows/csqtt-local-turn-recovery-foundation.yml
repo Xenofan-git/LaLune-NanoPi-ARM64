@@ -27,9 +27,10 @@ jobs:
           CARGO_TERM_COLOR: never
         run: |
           set -euo pipefail
-          # These focused tests exercise the real Rust TURN/session implementation.
-          # They are not yet a full process-level server-restart recovery test.
-          cargo test --locked --bin client turn_integration_tests::running_client_receives_hot_dns_configuration_without_reconnect -- --exact --nocapture
+          # These are local, non-ignored tests in the real Rust TURN implementation.
+          # The separately-hosted WSL hot-DNS test is intentionally excluded.
+          # This is still not a full process-level server-restart recovery test.
+          cargo test --locked --bin client turn_integration_tests::authenticated_flow_survives_pool_deficit_and_keeps_channel_data_zero_copy -- --exact --nocapture
           cargo test --locked --bin client turn_integration_tests::tcp_turn_transport_allocates_without_udp_fallback -- --exact --nocapture
           echo CSQTT_LOCAL_TURN_SESSION_FOUNDATION_PASS
       - name: Explicitly record missing acceptance gate
