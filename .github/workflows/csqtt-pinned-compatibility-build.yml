@@ -53,7 +53,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          server_bin="$(find server-source/target -type f -name csqtt -perm -u+x -print -quit)"
+          server_bin="$(find server-source/rust-server/target -type f -name csqtt -perm -u+x -print -quit)"
           test -n "$server_bin"
           revision="$("$server_bin" --protocol-revision)"
           test -n "$revision"
