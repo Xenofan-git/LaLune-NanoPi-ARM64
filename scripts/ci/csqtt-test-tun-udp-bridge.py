@@ -24,7 +24,7 @@ def main() -> int:
     listen_host = os.environ.get("CSQTT_TEST_CLIENT_LISTEN", "127.0.0.1")
     listen_port = int(os.environ.get("CSQTT_TEST_CLIENT_PORT", "9000"))
     tun_fd = os.open("/dev/net/tun", os.O_RDWR | os.O_CLOEXEC)
-    request = struct.pack("16sH", tun_name.encode()[: IFNAMSIZ - 1], IFF_TUN | IFF_NO_PI)
+    request = struct.pack("16sH22x", tun_name.encode()[: IFNAMSIZ - 1], IFF_TUN | IFF_NO_PI)
     try:
         response = fcntl.ioctl(tun_fd, TUNSETIFF, request)
     except Exception:
