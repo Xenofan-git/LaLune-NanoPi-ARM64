@@ -112,6 +112,9 @@ jobs:
           set -euo pipefail
           test -n "${VK_CALL_HASH:-}" || { echo "VK_CALL_HASH repository secret is missing" >&2; exit 1; }
           SSH="ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1"
+          SCP="scp -i vm/id_ed25519 -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          $SCP vm/real/client-linux-arm64 tester@127.0.0.1:/home/tester/client-linux-arm64
+          $SSH 'chmod 0755 /home/tester/client-linux-arm64'
           printf '%s' "$VK_CALL_HASH" | $SSH 'umask 077; cat > /home/tester/.vk-call-hash'
           unset VK_CALL_HASH
           $SSH 'set -euo pipefail
