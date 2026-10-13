@@ -1,6 +1,9 @@
 name: CSQTT isolated Rust recovery-harness groundwork
 
 on:
+  push:
+    branches:
+      - test/csqtt-rust-recovery-harness
   workflow_dispatch:
 
 permissions:
