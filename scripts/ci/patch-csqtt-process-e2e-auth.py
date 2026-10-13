@@ -67,6 +67,11 @@ session_patched = session_source.replace(recv_marker, recv_replacement, 1)
 handshake_marker = """            ConfigResponse::Config(value) => {
                 if value.ends_with(":stream-v1")"""
 handshake_replacement = """            ConfigResponse::Config(value) => {
+                if let Ok(path) = std::env::var("CSQTT_TEST_TUNCONF_COUNTER_FILE") {
+                    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                        let _ = std::io::Write::write_all(&mut file, b"TUNCONF\\n");
+                    }
+                }
                 crate::log_error!("CSQTT_TEST_TUNCONF_PARSED");
                 if value.ends_with(":stream-v1")"""
 if session_patched.count(handshake_marker) != 1:
@@ -77,6 +82,11 @@ reader_marker = """        if packet.as_slice().starts_with(b"TUNCONF:") {
                 let _ = config_tx.try_send(config);"""
 reader_replacement = """        if packet.as_slice().starts_with(b"TUNCONF:") {
             if let Ok(ConfigResponse::Config(config)) = parse_config_response(packet.as_slice()) {
+                if let Ok(path) = std::env::var("CSQTT_TEST_TUNCONF_COUNTER_FILE") {
+                    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                        let _ = std::io::Write::write_all(&mut file, b"TUNCONF\\n");
+                    }
+                }
                 crate::log_error!("CSQTT_TEST_TUNCONF_PARSED");
                 let _ = config_tx.try_send(config);"""
 if session_patched.count(reader_marker) != 1:
