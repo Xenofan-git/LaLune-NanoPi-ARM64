@@ -1,0 +1,68 @@
+name: CSQTT pinned client-server compatibility build
+
+on:
+  push:
+    branches:
+      - test/csqtt-client-process-recovery-e2e
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Fetch exact client and server sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/Endlad2/csqtt-core.git client-source
+          git -C client-source checkout --detach 3eafb7ee868f5f2690edf3b0326153813f88eb5f
+          test "$(git -C client-source rev-parse HEAD)" = "3eafb7ee868f5f2690edf3b0326153813f88eb5f"
+
+          git clone --depth 1 --branch v2.1.9 https://github.com/amurcanov/csqtt.git server-source
+          test "$(git -C server-source describe --tags --exact-match)" = "v2.1.9"
+
+          cmp client-source/shared/wire_protocol.rs server-source/shared/wire_protocol.rs
+          for f in auth.rs turn.rs session.rs dispatcher.rs wrap.rs obfs.rs; do
+            cmp "client-source/rust-client/$f" "server-source/rust-client/$f"
+          done
+          echo "PINNED_SOURCE_PARITY_PASS"
+
+      - name: Build pinned Rust client
+        working-directory: client-source/rust-client
+        env:
+          CARGO_TERM_COLOR: never
+        run: cargo build --locked --bin client
+
+      - name: Build pinned CSQTT server
+        working-directory: server-source/rust-server
+        env:
+          CARGO_TERM_COLOR: never
+        run: cargo build --locked --bin csqtt
+
+      - name: Verify server protocol revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision="$(server-source/target/debug/csqtt --protocol-revision)"
+          test -n "$revision"
+          printf 'CSQTT_SERVER_PROTOCOL_REVISION=%s\n' "$revision" >> "$GITHUB_STEP_SUMMARY"
+          echo "SERVER_PROTOCOL_REVISION=$revision"
+          echo "CLIENT_SERVER_BUILD_PASS" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo
+            echo "## Scope and limits"
+            echo "- This workflow compiles the pinned client and server and verifies source parity."
+            echo "- It does not claim process recovery or bidirectional TUN recovery."
+            echo "- No production systems or secrets are used."
+            echo "- No previously passed TURN/worker tests are repeated."
+          } >> "$GITHUB_STEP_SUMMARY"
