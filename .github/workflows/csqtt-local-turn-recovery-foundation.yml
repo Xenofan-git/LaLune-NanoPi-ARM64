@@ -1,0 +1,44 @@
+name: CSQTT isolated Rust recovery-harness groundwork
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-turn-session-foundation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Fetch pinned CSQTT client source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/Endlad2/csqtt-core.git upstream-csqtt-core
+          git -C upstream-csqtt-core checkout --detach 3eafb7ee868f5f2690edf3b0326153813f88eb5
+          test "$(git -C upstream-csqtt-core rev-parse HEAD)" = "3eafb7ee868f5f2690edf3b0326153813f88eb5"
+      - name: Run only local TURN integration tests relevant to session survival
+        working-directory: upstream-csqtt-core/rust-client
+        env:
+          CARGO_TERM_COLOR: never
+        run: |
+          set -euo pipefail
+          # These focused tests exercise the real Rust TURN/session implementation.
+          # They are not yet a full process-level server-restart recovery test.
+          cargo test --locked --bin client turn_integration_tests::running_client_receives_hot_dns_configuration_without_reconnect -- --exact --nocapture
+          cargo test --locked --bin client turn_integration_tests::tcp_turn_transport_allocates_without_udp_fallback -- --exact --nocapture
+          echo CSQTT_LOCAL_TURN_SESSION_FOUNDATION_PASS
+      - name: Explicitly record missing acceptance gate
+        run: |
+          {
+            echo "## Scope"
+            echo "- Pinned Rust TURN/session integration tests only."
+            echo "- No VK secret or token is used or printed."
+            echo "- No production device, VPS, router, firewall, DNS, or tunnel is touched."
+            echo "- This does not claim that the stock Rust client process survives a server restart."
+            echo "- Full acceptance still requires test-only local TURN credential injection, a real client process, stable PID, and bidirectional TUN traffic before/after server restart."
+          } >> "$GITHUB_STEP_SUMMARY"
