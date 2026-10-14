@@ -333,8 +333,9 @@ replace_once(
 )
 replace_once(
     deploy_go,
-    '\targs = append(args, "--local-binary-dir", filepath.Join(filepath.Dir(binPath), "server-assets"))\n\tif req.SSHPort > 0 {',
-    '''\tsecretsFile := ""
+    '\tif req.SSHPort > 0 {',
+    '''\targs = append(args, "--local-binary-dir", filepath.Join(filepath.Dir(binPath), "server-assets"))
+\tsecretsFile := ""
 \tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") && !req.Uninstall {
 \t\tf, err := os.CreateTemp("", "csqtt-deploy-secrets-*.txt")
 \t\tif err != nil { deployAppend("[deploy] не удалось создать временный файл авторизации"); return false }
