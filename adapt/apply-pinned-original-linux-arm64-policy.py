@@ -104,24 +104,31 @@ if old not in s:
     raise SystemExit(f"marker not found in {DEPLOY_GO}: {old!r}")
 DEPLOY_GO.write_text(s.replace(old, new, 1))
 
-# Linux runner must feed the new Auto JS bootstrap to core stdin.
+# Linux runner must feed the Auto JS bootstrap through a dedicated stdin pipe.
+# Authenticate sudo separately so its password pipeline can never consume the
+# bootstrap or CAPTCHA_RESULT messages.
 s = LINUX.read_text()
 old = '\tcmd := exec.Command("sh", "-c", r.app.runSudoCommand(cmdLine))\n\tcmd.Stdin = os.Stdin\n\tcmd.Stdout = os.Stdout\n\tcmd.Stderr = os.Stderr\n'
-new = '\tcmd := exec.Command("sh", "-c", r.app.runSudoCommand(cmdLine))\n\tstdin, err := cmd.StdinPipe()\n\tif err != nil {\n\t\tbridge.Core.AddLog(fmt.Sprintf("[ERROR] Не удалось подготовить stdin ядра: %v", err))\n\t\tbridge.Core.SetConnected(false)\n\t\treturn\n\t}\n\tcmd.Stdout = os.Stdout\n\tcmd.Stderr = os.Stderr\n'
-if old not in s: raise SystemExit("stdin marker not found")
+new = '\tvar cmd *exec.Cmd\n\tif os.Geteuid() == 0 {\n\t\tcmd = exec.Command("sh", "-c", cmdLine)\n\t} else {\n\t\tr.app.mu.Lock()\n\t\tpassword := r.app.sudoPass\n\t\tr.app.mu.Unlock()\n\t\tvar auth *exec.Cmd\n\t\tif password != "" {\n\t\t\tauth = exec.Command("sudo", "-S", "-v")\n\t\t\tauth.Stdin = strings.NewReader(password + "\\n")\n\t\t} else {\n\t\t\tauth = exec.Command("sudo", "-v")\n\t\t\tauth.Stdin = os.Stdin\n\t\t}\n\t\tauth.Stdout = os.Stdout\n\t\tauth.Stderr = os.Stderr\n\t\tif err := auth.Run(); err != nil {\n\t\t\tbridge.Core.AddLog(fmt.Sprintf("[АВТО ВК] Не удалось авторизовать sudo: %v", err))\n\t\t\tbridge.Core.SetConnected(false)\n\t\t\treturn\n\t\t}\n\t\tcmd = exec.Command("sudo", "-n", "sh", "-c", cmdLine)\n\t}\n\tstdin, err := cmd.StdinPipe()\n\tif err != nil {\n\t\tbridge.Core.AddLog(fmt.Sprintf("[ERROR] Не удалось подготовить stdin ядра: %v", err))\n\t\tbridge.Core.SetConnected(false)\n\t\treturn\n\t}\n\tcmd.Stdout = os.Stdout\n\tcmd.Stderr = os.Stderr\n'
+if old not in s: raise SystemExit("stdin launch marker not found")
 s = s.replace(old, new, 1)
 old = '\tif err := cmd.Start(); err != nil {\n\t\tbridge.Core.AddLog(fmt.Sprintf("[ERROR] Не удалось запустить: %v", err))\n\t\tbridge.Core.SetConnected(false)\n\t\treturn\n\t}\n'
-new = '\tif err := cmd.Start(); err != nil {\n\t\t_ = stdin.Close()\n\t\tbridge.Core.AddLog(fmt.Sprintf("[ERROR] Не удалось запустить: %v", err))\n\t\tbridge.Core.SetConnected(false)\n\t\treturn\n\t}\n\tif bootstrap := bridge.AutoVkBootstrap(); bootstrap != "" {\n\t\tif _, err := io.WriteString(stdin, bootstrap); err != nil {\n\t\t\tbridge.Core.AddLog(fmt.Sprintf("[АВТО ВК] Ошибка передачи bootstrap: %v", err))\n\t\t} else {\n\t\t\tbridge.Core.AddLog("[АВТО ВК] VK_JS_BOOTSTRAP передан в core")\n\t\t}\n\t}\n\t_ = stdin.Close()\n'
-if old not in s: raise SystemExit("start marker not found")
+new = '\tif err := cmd.Start(); err != nil {\n\t\t_ = stdin.Close()\n\t\tbridge.Core.AddLog(fmt.Sprintf("[ERROR] Не удалось запустить: %v", err))\n\t\tbridge.Core.SetConnected(false)\n\t\treturn\n\t}\n\tlinuxRunnerInputs.Store(r, stdin)\n\tif bootstrap := bridge.AutoVkBootstrap(); bootstrap != "" {\n\t\tif _, err := io.WriteString(stdin, bootstrap); err != nil {\n\t\t\tbridge.Core.AddLog(fmt.Sprintf("[АВТО ВК] Ошибка передачи bootstrap: %v", err))\n\t\t} else {\n\t\t\tbridge.Core.AddLog("[АВТО ВК] VK_JS_BOOTSTRAP передан в core")\n\t\t}\n\t}\n'
+if old not in s: raise SystemExit("stdin start marker not found")
 s = s.replace(old, new, 1)
-s = s.replace('\t"time"\n)', '\t"time"\n\t"io"\n)', 1)
+if '\t"io"\n' not in s:
+    s = s.replace('\t"time"\n)', '\t"time"\n\t"io"\n)', 1)
 LINUX.write_text(s)
 
-# Keep the core stdin pipe alive for asynchronous CAPTCHA_RESULT responses.
+# Keep the same stdin pipe open for later CAPTCHA_RESULT responses. Close it
+# deterministically when the core process exits.
 s = LINUX.read_text()
 s = s.replace("type LinuxRunner struct {", "var linuxRunnerInputs sync.Map\n\ntype LinuxRunner struct {", 1)
-s = s.replace("\tlinuxRunnerInputs.Store(r, stdin)\n\tif bootstrap := bridge.AutoVkBootstrap(); bootstrap != \"\" {", "\tlinuxRunnerInputs.Store(r, stdin)\n\tif bootstrap := bridge.AutoVkBootstrap(); bootstrap != \"\" {", 1)
-s = s.replace("\\tcmd.Wait()", "\tcmd.Wait()\n\tif v, ok := linuxRunnerInputs.LoadAndDelete(r); ok { _ = v.(io.WriteCloser).Close() }", 1)
+wait_old = '\t\tcmd.Wait()'
+wait_new = '\t\tcmd.Wait()\n\t\tif v, ok := linuxRunnerInputs.LoadAndDelete(r); ok { _ = v.(io.WriteCloser).Close() }'
+if wait_old not in s:
+    raise SystemExit("core wait marker not found for stdin cleanup")
+s = s.replace(wait_old, wait_new, 1)
 method = '''func (r *LinuxRunner) SubmitCaptchaResult(result string) bool {
 \tif len(result) == 0 || len(result) > 16384 || strings.ContainsAny(result, "\\r\\n") { return false }
 \tv, ok := linuxRunnerInputs.Load(r)

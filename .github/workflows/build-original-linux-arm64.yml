@@ -126,14 +126,6 @@ jobs:
         run: |
           set -euxo pipefail
           python3 adapt/apply-pinned-original-linux-arm64-policy.py
-      - name: Remove Auto VK token from argv and deliver bootstrap through stdin
-        run: |
-          set -euxo pipefail
-          python3 adapt/patch-auto-vk-stdin.py
-          ! grep -Fq '"--token", token' upstream-lalune/Desktop/Libs/bridge.go
-          ! grep -Fq 'cmd = append(cmd, "--token"' upstream-lalune/Desktop/Libs/bridge.go
-          grep -Fq 'VK_JS_BOOTSTRAP:' upstream-lalune/Desktop/Libs/bridge.go
-          grep -Fq 'cmd.Stdin = bytes.NewReader(bootstrap)' upstream-lalune/Desktop/Linux/app_linux.go
       - name: Build original Flutter Web panel for NanoPi
         working-directory: upstream-lalune/Frontend/Core
         run: |
@@ -155,6 +147,14 @@ jobs:
           grep -Fq 'resolvectl dns csqtt0' upstream-lalune/Desktop/Linux/app_linux.go
           grep -Fq 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go
           grep -Fq 'func (r *LinuxRunner) StartCore' upstream-lalune/Desktop/Linux/app_linux.go
+          # Auto VK must never put access tokens in argv; sudo auth uses a separate stdin exchange.
+          ! grep -Fq 'cmd = append(cmd, "--token", token)' upstream-lalune/Desktop/Libs/bridge.go
+          grep -Fq 'VK_JS_BOOTSTRAP:' upstream-lalune/Desktop/Libs/bridge.go
+          grep -Fq 'sudo", "-S", "-v' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -Fq 'sudo", "-n", "sh", "-c", cmdLine' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -Fq 'linuxRunnerInputs.Store(r, stdin)' upstream-lalune/Desktop/Linux/app_linux.go
+          grep -Fq 'LoadAndDelete(r)' upstream-lalune/Desktop/Linux/app_linux.go
+
           test "$(grep -Fc 'bridge.StartTunnel(coreListenPort)' upstream-lalune/Desktop/Linux/app_linux.go)" = "1"
           test "$(grep -Fc 'func (r *LinuxRunner) StartCore' upstream-lalune/Desktop/Linux/app_linux.go)" = "1"
           sha256sum upstream-lalune/Desktop/Linux/app_linux.go | tee adaptation-source.sha256
