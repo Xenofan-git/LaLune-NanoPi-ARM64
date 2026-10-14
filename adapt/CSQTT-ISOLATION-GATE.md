@@ -136,7 +136,7 @@ Before changing the packaged client, choose and test a bounded liveness signal t
 4. Unit tests for healthy idle sessions, missing heartbeat/peer death, delayed responses, packet loss, and recovery; then the existing real Rust client E2E must prove same PID, fresh authenticated TUNCONF for all nine workers, and bidirectional TUN traffic after restart.
 5. Build provenance for the client artifact. The currently packaged ARM64 client is a separately pinned runtime artifact, not this disposable source build; a source-only test patch does not update or fix that package.
 
-Until these gates pass, report the stock-client limitation as known and keep deployment disabled. Do not touch NanoPi, production services, routes, firewall/DNS, VPS, or Keenetic during these tests.
+Until these gates pass, report the stock-client limitation as known and keep **production deployment** disabled. The new button-to-SSH E2E is limited to a disposable VM. Do not touch NanoPi, production services, routes, firewall/DNS, VPS, or Keenetic during these tests.
 
 
 ## CI follow-up (2026-10-14; commit `fd409a401d7136798bdf03a9f863661924212e99`)
@@ -145,3 +145,12 @@ Until these gates pass, report the stock-client limitation as known and keep dep
 - [Native client process-recovery E2E, run 38551706831](https://github.com/Xenofan-git/LaLune-NanoPi-ARM64/actions/runs/38551706831): both matrix legs passed. The no-watchdog leg remains diagnostic and confirms the stock receive wait does not recover within the test bound; the watchdog-enabled leg restores TUNCONF and bidirectional dataplane in the same client PID, but only after a timeout was injected into a disposable source checkout.
 - [ARM64 build and system VM, run 38551706933](https://github.com/Xenofan-git/LaLune-NanoPi-ARM64/actions/runs/38551706933): build and VM lifecycle/policy/protocol checks passed in the disposable guest.
 - This is CI validation only. It does not fix the packaged client, establish VK-auth compatibility, or authorize deployment to NanoPi. The liveness protocol remains proposal-only until negotiated authenticated request/response is implemented and tested against both endpoints.
+
+
+## Deploy button wiring (2026-10-14)
+
+- The panel defaults now use the isolated fork's UDP `47000` and TCP `47002`; original Android CSQTT ports `46000/46002` are not selected or managed by the fork's installer.
+- The Go Deploy API passes the packaged `server-assets` directory and writes credentials to a short-lived mode-0600 file. The Rust DeployManager stages only the LaLune-specific server binary and installer/uninstaller, then invokes `csqtt-lalune.service` through non-interactive sudo.
+- The dedicated installer writes `/etc/csqtt-lalune/server.env` with mode `0600`; the systemd unit reads credentials from this file. Uninstall removes only the isolated unit/binary/library and preserves config/state/logs by default.
+- The full artifact now includes ARM64 and x86_64 isolated server binaries plus `LaLune-CAPTCHA-Bridge.zip` and its README. The workflow adds a host-native backend/DeployManager test that sends the same `/deploy` API payload used by the panel to a disposable ARM64 VM, checks the service/listeners and preservation of unrelated routes/services, then uninstalls through the API.
+- This implementation is not yet declared successful until the resulting GitHub Actions build and `DEPLOY_BUTTON_INSTALL_UNINSTALL_E2E_PASS` step are green. No production deployment is authorized by that CI result.
