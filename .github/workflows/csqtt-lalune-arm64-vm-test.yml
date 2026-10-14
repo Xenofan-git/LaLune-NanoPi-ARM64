@@ -710,6 +710,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p vm/deploy-e2e-home
+          ip -4 route show table main > vm/runner-main-routes.before
+          ip -4 rule show > vm/runner-ip-rules.before
           export HOME="$GITHUB_WORKSPACE/vm/deploy-e2e-home"
           export XDG_CONFIG_HOME="$HOME/.config"
           cd vm/real/deploy-e2e
