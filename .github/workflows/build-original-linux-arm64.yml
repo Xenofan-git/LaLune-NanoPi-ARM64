@@ -328,7 +328,10 @@ jobs:
           # the server-side encrypted TUNCONF/client-parser roundtrip and exercises
           # the actual client protocol, crypto, packet and TUN-adjacent modules.
           rustup toolchain install 1.97.1 --profile minimal
-          cargo +1.97.1 test --locked
+          # The pinned client has native TURN-core integration tests sharing
+          # process-wide native state. Serialize this suite to avoid scheduler
+          # races that can make the authenticated pool-deficit flow time out.
+          cargo +1.97.1 test --locked -- --test-threads=1
       - name: Build isolated CSQTT server for Linux ARM64
         working-directory: server-source/rust-server
         run: |
