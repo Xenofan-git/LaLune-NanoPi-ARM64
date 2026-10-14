@@ -381,6 +381,9 @@ jobs:
           grep -Fq '10.67.68.0/24' server-source/rust-server/tun_device.rs
           grep -Fq 'const TPROXY_TABLE: &str = "47001";' server-source/rust-server/proxy_route.rs
           grep -Fq 'const LEGACY_POLICY_TABLE: &str = "47066";' server-source/rust-server/proxy_route.rs
+          grep -Fq 'CSQTT_SYSTEMD_UNIT' server-source/rust-server/main.rs
+          ! grep -Fq '.args(["--no-block", "restart", "csqtt"])' server-source/rust-server/main.rs
+          ! grep -Fq 'command.args([action, "csqtt"])' server-source/rust-server/main.rs
           grep -Fq 'CSQTT_LALUNE_TPROXY' server-source/rust-server/proxy_route.rs
           ! grep -Fq '"30001"' server-source/rust-server/proxy_route.rs
           ! grep -Fq '"1066"' server-source/rust-server/proxy_route.rs
