@@ -128,8 +128,7 @@ func captchaRequestIsActive(mode, redirectURI string, now time.Time) bool {
     return true
 }
 
-func refreshCaptchaState(app *App) {
-    raw := app.GetLogsJson()
+func refreshCaptchaStateFromLogs(raw string, now time.Time) {
     var logs []string
     if json.Unmarshal([]byte(raw), &logs) != nil { return }
     captchaMu.Lock()
@@ -148,7 +147,7 @@ func refreshCaptchaState(app *App) {
             captchaUpdated = time.Time{}
             return
         }
-        if !captchaRequestIsActive(parts[1], parts[2], time.Now()) {
+        if !captchaRequestIsActive(parts[1], parts[2], now) {
             captchaPending = false
             captchaMode = ""
             captchaRedirectURI = ""
@@ -157,7 +156,7 @@ func refreshCaptchaState(app *App) {
             return
         }
         if captchaSessionToken != session || !captchaPending {
-            captchaUpdated = time.Now()
+            captchaUpdated = now
         }
         captchaPending = true
         captchaMode = strings.TrimSpace(parts[1])
@@ -171,6 +170,10 @@ func refreshCaptchaState(app *App) {
     captchaRedirectURI = ""
     captchaSessionToken = ""
     captchaUpdated = time.Time{}
+}
+
+func refreshCaptchaState(app *App) {
+    refreshCaptchaStateFromLogs(app.GetLogsJson(), time.Now())
 }
 
 func captchaState(app *App) map[string]any {
