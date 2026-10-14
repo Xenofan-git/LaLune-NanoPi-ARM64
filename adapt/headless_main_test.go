@@ -104,9 +104,13 @@ func TestCaptchaRequestIsActive(t *testing.T) {
 		url  string
 		want bool
 	}{
-		{name: "active manual challenge", mode: "manual", url: "https://id.vk.ru/not_robot_captcha?expired_at=1791549600", want: true},
-		{name: "automatic event never opens dialog", mode: "auto", url: "https://id.vk.ru/not_robot_captcha?expired_at=1791549600", want: false},
+		{name: "active manual fallback", mode: "manual", url: "https://id.vk.ru/not_robot_captcha?expired_at=1791549600", want: true},
+		{name: "explicit WBV selected mode uses Linux browser bridge", mode: "selected", url: "https://id.vk.ru/not_robot_captcha?expired_at=1791549600", want: true},
+		{name: "selected mode is case and whitespace tolerant", mode: " Selected ", url: "https://id.vk.ru/not_robot_captcha?expired_at=1791549600", want: true},
+		{name: "automatic retry never opens dialog", mode: "auto", url: "https://id.vk.ru/not_robot_captcha?expired_at=1791549600", want: false},
+		{name: "unknown mode never opens dialog", mode: "wv", url: "https://id.vk.ru/not_robot_captcha?expired_at=1791549600", want: false},
 		{name: "expired manual challenge", mode: "manual", url: "https://id.vk.ru/not_robot_captcha?expired_at=1791549400", want: false},
+		{name: "expired selected challenge", mode: "selected", url: "https://id.vk.ru/not_robot_captcha?expired_at=1791549400", want: false},
 		{name: "missing expiry", mode: "manual", url: "https://id.vk.ru/not_robot_captcha", want: false},
 		{name: "invalid expiry", mode: "manual", url: "https://id.vk.ru/not_robot_captcha?expired_at=nope", want: false},
 	}
