@@ -103,6 +103,18 @@ This section supersedes the older "Current CI status and next end-to-end gate" c
 Deployment remains **BLOCKED / NOT AUTHORIZED**. Do not run the installer or uninstaller on NanoPi and do not merge/deploy solely on the strength of CI #443. Next tests should prioritize: (a) an independent client-process end-to-end exchange, (b) disconnect/reconnect recovery, and (c) adversarial ownership/cleanup preservation tests. After those, verify the Direct-tab backend-to-policy integration and review the resulting evidence before reconsidering the gate.
 
 
+## Existing SESSION_LEASE is not a heartbeat (2026-10-14 follow-up)
+
+A targeted audit of the pinned client and server sources refines the finding above:
+
+- The server defines `SESSION_LEASE = b"\\xffCSQTT_LEASE"`. After decrypting/authenticating an inbound packet, it refreshes that session's `last_inbound_ms` and then returns immediately when the payload equals `SESSION_LEASE`. It sends no acknowledgement for this message.
+- The pinned client `rust-client/session.rs` contains no `SESSION_LEASE` sender or lease-ack receiver. Therefore this constant is not an existing end-to-end liveness protocol and must not be treated as proof that the client can detect a dead peer.
+- The server's legacy all-0xff keepalive path is also one-way: `is_idle_keepalive` returns without a reply.
+- A safe candidate needs an explicit, authenticated request/ack exchange and capability negotiation. Without negotiation, a new client that expects acknowledgements from an old server could misclassify a healthy but incompatible peer as dead and repeatedly reconnect.
+- Do not implement a production timeout until capability negotiation, nonce/sequence validation, missed-ack bounds, healthy-idle behavior, and mixed-version behavior are covered in tests. The current test-only timeout remains diagnostic only.
+
+This follow-up is a source-audit correction, not a client fix. Packaged-client provenance and the closed deployment gate remain unchanged.
+
 ## Client liveness finding (2026-10-14; pinned-source audit)
 
 Pinned client: `Endlad2/csqtt-core@3eafb7ee868f5f2690edf3b0326153813f88eb5`.
