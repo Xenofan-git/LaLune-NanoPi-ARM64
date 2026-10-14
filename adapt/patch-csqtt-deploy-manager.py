@@ -282,29 +282,17 @@ official = r'''fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Res
         let script = format!(r#"set -Eeuo pipefail
 STAGE='{remote_stage}'
 BUNDLE='{remote_bundle}'
-cleanup() {{
-  rm -rf -- "$STAGE"
-  rm -f -- /tmp/deploy.sh /tmp/.csqtt-upload-server /tmp/.csqtt-upload-web.env /tmp/.csqtt-upload-overrides.json
-}}
-trap cleanup EXIT
-# Fail closed unconditionally: this upstream installer is not namespaced.
-# Even an apparently clean preflight cannot prove absence of shared firewall,
-# sysctl, helper, Docker, TUN, or future cleanup conflicts. Never run it until
-# the dedicated LaLune installer has been fully isolated and audited.
-echo "CSQTT_ISOLATION_REQUIRED: upstream CSQTT 2.1.9 installer uses global resources; LaLune deployment is disabled pending a namespaced installer" >&2
-exit 73
+trap 'rm -rf -- "$STAGE"' EXIT
 case "$(uname -m)" in
-  x86_64|amd64) ARCH=amd64 ;;
-  aarch64|arm64) ARCH=arm64 ;;
-  armv7l|armv7|armhf) ARCH=armv7 ;;
-  *) echo "Unsupported server architecture: $(uname -m)" >&2; exit 2 ;;
+  aarch64|arm64) ;;
+  *) echo "LaLune isolated server package requires ARM64; no service files changed" >&2; exit 2 ;;
 esac
-install -m 0755 "$BUNDLE/deploy.sh" /tmp/deploy.sh
-install -m 0755 "$BUNDLE/csqtt-linux-$ARCH" /tmp/.csqtt-upload-server
-install -m 0600 "$BUNDLE/csqtt.env" /tmp/.csqtt-upload-web.env
-install -m 0600 "$BUNDLE/csqtt-deploy.json" /tmp/.csqtt-upload-overrides.json
-env CSQTT_PEER_PORT={peer_port} CSQTT_SSH_PORT={ssh_port} CSQTT_WEB_PORT={web_port} CSQTT_DEPLOY_MODE={mode} bash /tmp/deploy.sh install
-"#, ssh_port=args.ssh_port, peer_port=peer_port, web_port=web_port, mode=mode);
+CSQTT_LALUNE_UDP_PORT='{peer_port}' CSQTT_LALUNE_WEB_PORT='{web_port}' bash "$BUNDLE/install-csqtt-lalune.sh" --secrets-file "$BUNDLE/server-secrets.txt"
+systemctl is-active --quiet csqtt-lalune.service
+ss -H -lun "sport = :{peer_port}" | grep -q .
+ss -H -ltn "sport = :{web_port}" | grep -q .
+echo "CSQTT_LALUNE_DEPLOY_OK"
+"#, peer_port=peer_port, web_port=web_port);
         let output = run_ssh(args, &remote, &script).context("run official CSQTT 2.1.9 installer")?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
