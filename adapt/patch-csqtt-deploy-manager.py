@@ -293,15 +293,15 @@ ss -H -lun "sport = :{peer_port}" | grep -q .
 ss -H -ltn "sport = :{web_port}" | grep -q .
 echo "CSQTT_LALUNE_DEPLOY_OK"
 "#, peer_port=peer_port, web_port=web_port);
-        let output = run_ssh(args, &remote, &script).context("run official CSQTT 2.1.9 installer")?;
+        let output = run_ssh(args, &remote, &script).context("run isolated LaLune CSQTT installer")?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
         for line in stdout.lines() { println!("[remote] {line}"); }
         for line in stderr.lines() { eprintln!("[remote:err] {line}"); }
-        if !output.status.success() || !stdout.lines().any(|line| line.trim() == "CSQTT_DEPLOY_OK") {
-            anyhow::bail!("official CSQTT installer failed (exit {}); see remote output above", output.status);
+        if !output.status.success() || !stdout.lines().any(|line| line.trim() == "CSQTT_LALUNE_DEPLOY_OK") {
+            anyhow::bail!("isolated LaLune installer failed (exit {}); see remote output above", output.status);
         }
-        println!("[deploy] official CSQTT 2.1.9 deployment completed");
+        println!("CSQTT_LALUNE_DEPLOY_OK");
         Ok(())
     })();
     let _ = fs::remove_dir_all(&bundle);
