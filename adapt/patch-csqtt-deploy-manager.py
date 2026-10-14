@@ -301,6 +301,8 @@ echo "CSQTT_LALUNE_DEPLOY_OK"
             anyhow::bail!("isolated LaLune installer failed (exit {}); see remote output above", output.status);
         }
         println!("CSQTT_LALUNE_DEPLOY_OK");
+        let panel_host = if args.host.contains(':') && !args.host.starts_with('[') { format!("[{}]", args.host) } else { args.host.clone() };
+        println!("PANEL_URL=https://{}:{}", panel_host, web_port);
         Ok(())
     })();
     let _ = fs::remove_dir_all(&bundle);
