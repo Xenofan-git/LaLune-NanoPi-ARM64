@@ -240,29 +240,29 @@ replace_once("client-source/rust-client/session.rs",
     let request = build_registration_payload(config);''', "handshake return type")
 
 replace_once("client-source/rust-client/session.rs",
-'''            ConfigResponse::NoConfig => return Ok(false),
-            ConfigResponse::Config(value) => {
-                if value.ends_with(":stream-v1") || value.ends_with(":stream-v2") {
+'''            ConfigResponse::NoConfig => return Ok(false),''',
+'''            ConfigResponse::NoConfig => return Ok((false, false)),''', "no-config handshake result")
+
+replace_once("client-source/rust-client/session.rs",
+'''                if value.ends_with(":stream-v1") || value.ends_with(":stream-v2") {
+                    config.server_stream_repair.store(true, Ordering::Release);
+                }''',
+'''                if value.contains(":stream-v1") || value.contains(":stream-v2") {
                     config.server_stream_repair.store(true, Ordering::Release);
                 }
-                if let Some(sender) = &config_tx {
-                    let _ = sender.try_send(value);
-                }
-                crate::log_error!("[ВОРКЕР #{}] Конфиг получен", config.id);
-                return Ok(true);
-            }''',
-'''            ConfigResponse::NoConfig => return Ok((false, false)),
-            ConfigResponse::Config(value) => {
-                if value.contains(":stream-v1") || value.contains(":stream-v2") {
-                    config.server_stream_repair.store(true, Ordering::Release);
-                }
-                let liveness_enabled = value.ends_with(":liveness-v1");
-                if let Some(sender) = &config_tx {
-                    let _ = sender.try_send(value);
-                }
-                crate::log_error!("[ВОРКЕР #{}] Конфиг получен", config.id);
-                return Ok((true, liveness_enabled));
-            }''', "detect exact liveness confirmation")
+                let liveness_enabled = value.ends_with(":liveness-v1");''', "detect exact liveness confirmation")
+
+replace_once("client-source/rust-client/session.rs",
+'''                return Ok(true);
+            }
+        }
+    }
+    let message = "FATAL_HANDSHAKE: сервер не подтвердил конфигурацию";''',
+'''                return Ok((true, liveness_enabled));
+            }
+        }
+    }
+    let message = "FATAL_HANDSHAKE: сервер не подтвердил конфигурацию";''', "return negotiated capability")
 
 replace_once("client-source/rust-client/session.rs",
 '''    let ReaderRuntime {
