@@ -40,13 +40,18 @@ deploy_rs = Path("upstream-lalune/Core/DeployManager/src/deploy.rs")
 if not deploy_rs.is_file():
     raise SystemExit("patched DeployManager source missing")
 patched = deploy_rs.read_text()
-if "CSQTT_ISOLATION_REQUIRED" not in patched:
-    raise SystemExit("deployment guard missing: refusing to package")
-if "exit 73" not in patched:
-    raise SystemExit("deployment guard exit missing: refusing to package")
-if "bash /tmp/deploy.sh uninstall" in patched:
+if "CSQTT_ISOLATION_REQUIRED" in patched or "exit 73" in patched:
+    raise SystemExit("obsolete fail-closed stub remains instead of the isolated installer")
+for marker in (
+    "install-csqtt-lalune.sh",
+    "uninstall-csqtt-lalune.sh",
+    "CSQTT_LALUNE_DEPLOY_OK",
+    "CSQTT_LALUNE_UNINSTALL_OK",
+    "fn uninstall_official_csqtt",
+):
+    if marker not in patched:
+        raise SystemExit(f"isolated deployment marker missing: {marker}")
+if "bash /tmp/deploy.sh uninstall" in patched or "deploy.sh uninstall" in patched:
     raise SystemExit("unsafe upstream uninstaller invocation found")
-if "upstream cleanup is global and could remove Android/production CSQTT" not in patched:
-    raise SystemExit("uninstall safety guard missing")
 
-print("CSQTT isolation audit passed: upstream hazards detected and deployment remains blocked.")
+print("CSQTT isolation audit passed: upstream hazards detected and only namespaced LaLune installer/uninstaller are wired.")
