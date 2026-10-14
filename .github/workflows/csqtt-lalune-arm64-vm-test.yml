@@ -717,7 +717,7 @@ jobs:
           cd vm/real/deploy-e2e
           ./lalune-original-linux-amd64 > "$GITHUB_WORKSPACE/vm/deploy-e2e-backend.log" 2>&1 &
           BACKEND_PID=$!
-          cleanup_backend() { kill "$BACKEND_PID" 2>/dev/null || true; wait "$BACKEND_PID" 2>/dev/null || true; }
+          cleanup_backend() { kill -KILL "$BACKEND_PID" 2>/dev/null || true; wait "$BACKEND_PID" 2>/dev/null || true; }
           trap cleanup_backend EXIT
           cd "$GITHUB_WORKSPACE"
           for attempt in $(seq 1 60); do
