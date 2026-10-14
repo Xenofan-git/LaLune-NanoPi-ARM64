@@ -33,7 +33,10 @@ trap cleanup EXIT
 test "$(uname -m)" = aarch64
 test -x "$CLIENT"; test -x "$SERVER"; test -s "$BRIDGE"
 test "$("$SERVER" --protocol-revision)" = CSQTT-WIRE-4
-"$CLIENT" >"$ROOT/client-cli-smoke.log" 2>&1 && { echo "client unexpectedly accepted missing arguments" >&2; exit 1; } || true
+if "$CLIENT" >"$ROOT/client-cli-smoke.log" 2>&1; then
+  echo "client unexpectedly accepted missing arguments" >&2
+  exit 1
+fi
 grep -Fq 'Нужны -peer и хеши VK' "$ROOT/client-cli-smoke.log"
 
 ip netns del "$CLIENT_NS" 2>/dev/null || true
