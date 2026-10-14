@@ -21,6 +21,21 @@ for path in ("client-source/shared/wire_protocol.rs", "server-source/shared/wire
                  'pub const WIRE_PROTOCOL_REVISION: &str = "CSQTT-WIRE-4";',
                  "bump disposable protocol revision")
 
+# Keep upstream unit fixtures aligned with the WIRE-4 revision under test.
+# These are protocol expectation updates, not skipped or weakened tests.
+replace_once("client-source/rust-client/protocol.rs",
+             '"GETCONF:9000|device|password|7|salt|4||CSQTT-WIRE-3"',
+             '"GETCONF:9000|device|password|7|salt|4||CSQTT-WIRE-4"',
+             "update WIRE-4 request contract fixture")
+replace_once("client-source/rust-client/protocol.rs",
+             '"GETCONF:9000|device|password|7|salt|4|36|CSQTT-WIRE-3"',
+             '"GETCONF:9000|device|password|7|salt|4|36|CSQTT-WIRE-4"',
+             "update WIRE-4 optional capability fixture")
+replace_once("client-source/rust-client/session.rs",
+             'b"GETCONF:9000|device|password|7|generation-id|1|9|CSQTT-WIRE-3"',
+             'b"GETCONF:9000|device|password|7|generation-id|1|9|CSQTT-WIRE-4"',
+             "update WIRE-4 first registration fixture")
+
 replace_once("server-source/rust-server/protocol.rs",
 '''fn is_supported_wire_protocol(value: &str) -> bool {
     value == crate::wire_protocol::WIRE_PROTOCOL_REVISION
