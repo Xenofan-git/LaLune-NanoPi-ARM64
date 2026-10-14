@@ -236,7 +236,7 @@ official = r'''fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Res
     let source = args.local_binary_dir.as_deref()
         .ok_or_else(|| anyhow::anyhow!("official CSQTT assets are not bundled"))?;
     let source = Path::new(source);
-    for name in ["deploy.sh", "csqtt-linux-arm64", "csqtt-linux-amd64", "csqtt-linux-armv7"] {
+    for name in ["install-csqtt-lalune.sh", "uninstall-csqtt-lalune.sh", "csqtt-lalune-linux-arm64"] {
         if !source.join(name).is_file() {
             anyhow::bail!("required official CSQTT 2.1.9 asset is missing: {}", source.join(name).display());
         }
@@ -250,27 +250,18 @@ official = r'''fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Res
     fs::set_permissions(&bundle, std::os::unix::fs::PermissionsExt::from_mode(0o700))
         .context("restrict temporary CSQTT bundle permissions")?;
     let result = (|| -> Result<()> {
-        for name in ["deploy.sh", "csqtt-linux-arm64", "csqtt-linux-amd64", "csqtt-linux-armv7"] {
+        for name in ["install-csqtt-lalune.sh", "uninstall-csqtt-lalune.sh", "csqtt-lalune-linux-arm64"] {
             fs::copy(source.join(name), bundle.join(name))
                 .with_context(|| format!("stage official asset {name}"))?;
         }
-        fs::write(
-            bundle.join("csqtt.env"),
-            format!("CSQTT_WEB_USER={web_user}\nCSQTT_WEB_PASS={web_password}\n"),
-        ).context("write temporary CSQTT web credentials")?;
         let device_id = format!("{:016x}{:016x}", nonce, std::process::id() as u128);
         fs::write(
-            bundle.join("csqtt-deploy.json"),
-            format!("{{\"main_password\":\"{main_password}\",\"device_id\":\"{device_id}\"}}\n"),
-        ).context("write temporary CSQTT deployment overrides")?;
+            bundle.join("server-secrets.txt"),
+            format!("{main_password}\n{web_user}\n{web_password}\n{device_id}\n"),
+        ).context("write temporary LaLune server credentials")?;
         #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(bundle.join("csqtt.env"), fs::Permissions::from_mode(0o600))
-                .context("restrict temporary CSQTT web credentials")?;
-            fs::set_permissions(bundle.join("csqtt-deploy.json"), fs::Permissions::from_mode(0o600))
-                .context("restrict temporary CSQTT deployment overrides")?;
-        }
+        fs::set_permissions(bundle.join("server-secrets.txt"), fs::Permissions::from_mode(0o600))
+            .context("restrict temporary LaLune server credentials")?;
 
         let remote = format!("{}@{}", args.user, args.host);
         let remote_stage = format!("/tmp/lalune-csqtt-deploy-{}", std::process::id());
