@@ -167,7 +167,9 @@ jobs:
       - name: Verify CSQTT deploy patch invariants
         run: |
           set -euxo pipefail
-          grep -Fq 'SOURCE="$LOCAL_STAGE/server-assets/csqtt-linux-$ASSET_ARCH"' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'install-csqtt-lalune.sh' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'uninstall-csqtt-lalune.sh' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'CSQTT_LALUNE_DEPLOY_OK' upstream-lalune/Core/DeployManager/src/deploy.rs
           grep -Fq 'trap' upstream-lalune/Core/DeployManager/src/deploy.rs
           grep -Fq 'LOCAL_STAGE' upstream-lalune/Core/DeployManager/src/deploy.rs
           grep -Fq 'SSH_ASKPASS_REQUIRE' upstream-lalune/Core/DeployManager/src/deploy.rs
@@ -178,8 +180,8 @@ jobs:
           grep -Fq 'pub secrets_file: Option<String>' upstream-lalune/Core/DeployManager/src/main.rs
           grep -Fq 'pub uninstall: bool' upstream-lalune/Core/DeployManager/src/main.rs
           grep -Fq 'fn uninstall_official_csqtt' upstream-lalune/Core/DeployManager/src/deploy.rs
-          grep -Fq 'CSQTT_ISOLATION_REQUIRED' upstream-lalune/Core/DeployManager/src/deploy.rs
-          grep -Fq 'upstream cleanup is global and could remove Android/production CSQTT' upstream-lalune/Core/DeployManager/src/deploy.rs
+          ! grep -Fq 'CSQTT_ISOLATION_REQUIRED' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'CSQTT_LALUNE_UNINSTALL_OK' upstream-lalune/Core/DeployManager/src/deploy.rs
           ! grep -Fq 'bash /tmp/deploy.sh uninstall' upstream-lalune/Core/DeployManager/src/deploy.rs
           grep -Fq 'func validCSQTTSecret' upstream-lalune/Desktop/Libs/deploy.go
           grep -Fq 'VKTokenFetcherARM64Archive' upstream-lalune/Desktop/Libs/vktoken.go
@@ -400,6 +402,17 @@ jobs:
           grep -Fq -- '--web-port' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
           grep -Fq -- '--config-dir' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
           (cd "$GITHUB_WORKSPACE" && sha256sum server-assets/csqtt-lalune-linux-arm64 | tee -a server-assets/SHA256SUMS)
+      - name: Build isolated CSQTT server for Linux x86_64
+        working-directory: server-source/rust-server
+        run: |
+          set -euxo pipefail
+          cargo +1.97.1 build --release
+          install -D -m 0755 target/release/csqtt "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-amd64"
+          file "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-amd64" | grep -Eq 'x86-64|x86_64'
+          "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-amd64" --help > "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-amd64-help.txt"
+          grep -Fq -- '--listen' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-amd64-help.txt"
+          grep -Fq -- '--web-port' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-amd64-help.txt"
+          (cd "$GITHUB_WORKSPACE" && sha256sum server-assets/csqtt-lalune-linux-amd64 | tee -a server-assets/SHA256SUMS)
       - name: Build VK token fetcher for Linux ARM64
         run: |
           set -euxo pipefail
@@ -437,7 +450,9 @@ jobs:
           cp upstream-lalune/Core/DeployManager/target/aarch64-unknown-linux-gnu/release/deploy-manager dist/
           cp -a server-assets dist/server-assets
           test -s dist/server-assets/csqtt-lalune-linux-arm64
+          test -s dist/server-assets/csqtt-lalune-linux-amd64
           test -s dist/server-assets/csqtt-lalune-help.txt
+          test -s dist/server-assets/csqtt-lalune-amd64-help.txt
           test -x dist/server-assets/install-csqtt-lalune.sh
           test -x dist/server-assets/uninstall-csqtt-lalune.sh
           bash -n dist/server-assets/install-csqtt-lalune.sh
