@@ -6,9 +6,10 @@ Without all three explicit CSQTT_TEST_TURN_* variables the stock VK auth path
 is unchanged. Credential values are never logged.
 """
 from pathlib import Path
+import os
 
-# Patch the disposable client with a bounded receive-silence watchdog. A TURN
-# allocation can survive a CSQTT server restart, leaving the reader blocked.
+# A TURN allocation can survive a CSQTT server restart, leaving the reader blocked.
+# The watchdog is opt-in so a second matrix leg can exercise the stock receive wait.
 session_path = Path("client-source/rust-client/session.rs")
 session_source = session_path.read_text(encoding="utf-8")
 recv_marker = """    async fn recv(&mut self) -> Result<PacketBuf> {
@@ -59,7 +60,14 @@ hook = marker + """
 path.write_text(source.replace(marker, hook, 1), encoding="utf-8")
 if session_source.count(recv_marker) != 1:
     raise SystemExit("Expected exactly one TransportReader::recv insertion point; refusing patch")
-session_patched = session_source.replace(recv_marker, recv_replacement, 1)
+watchdog_enabled = os.environ.get("CSQTT_TEST_ENABLE_IDLE_WATCHDOG") == "1"
+if watchdog_enabled:
+    if session_source.count(recv_marker) != 1:
+        raise SystemExit("Expected exactly one TransportReader::recv insertion point; refusing patch")
+    session_patched = session_source.replace(recv_marker, recv_replacement, 1)
+else:
+    session_patched = session_source
+    print("PASS: receive-idle watchdog injection disabled; stock TransportReader::recv wait retained.")
 
 # Instrument both client-side protocol parse paths, before optional config
 # delivery/deduplication, so the test can distinguish server send from client
@@ -109,4 +117,7 @@ main_replacement = """        while let Some(config) = config_rx.recv().await {
 if main_source.count(main_marker) != 1:
     raise SystemExit("Expected exactly one client config event loop marker; refusing test instrumentation")
 main_path.write_text(main_source.replace(main_marker, main_replacement, 1), encoding="utf-8")
-print("Applied disposable CI-only TURN credentials, receive watchdog, and pre-dedup TUNCONF parse instrumentation; secret values were not printed.")
+if watchdog_enabled:
+    print("Applied disposable CI-only TURN credentials, opt-in receive watchdog, and pre-dedup TUNCONF parse instrumentation; secret values were not printed.")
+else:
+    print("Applied disposable CI-only TURN credentials and pre-dedup TUNCONF parse instrumentation; receive watchdog was not injected; secret values were not printed.")
