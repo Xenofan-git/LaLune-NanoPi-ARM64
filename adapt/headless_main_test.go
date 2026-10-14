@@ -333,3 +333,82 @@ func TestCaptchaResultEndpointRequiresPost(t *testing.T) {
 		t.Fatalf("GET /captcha/result Allow = %q, want POST", got)
 	}
 }
+
+
+func TestCaptchaResultEndpointRejectsMalformedJSON(t *testing.T) {
+	setCaptchaTestState(t, "ci-captcha-session")
+	req := httptest.NewRequest("POST", "/captcha/result", strings.NewReader(`{"sessionToken":`))
+	rec := httptest.NewRecorder()
+	apiHandler(&App{runner: &LinuxRunner{}}).ServeHTTP(rec, req)
+	if rec.Code != 400 {
+		t.Fatalf("malformed POST /captcha/result status = %d, want 400", rec.Code)
+	}
+}
+
+func TestCaptchaCancelEndpointForwardsCancellationAndConsumesChallenge(t *testing.T) {
+	const session = "ci-captcha-cancel-session"
+	setCaptchaTestState(t, session)
+
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	app := &App{runner: &LinuxRunner{}}
+	linuxRunnerInputs.Store(app.runner, writer)
+	defer linuxRunnerInputs.Delete(app.runner)
+
+	expected := "CAPTCHA_RESULT|error:cancelled\n"
+	gotCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		buf := make([]byte, len(expected))
+		_, err := io.ReadFull(reader, buf)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		gotCh <- string(buf)
+	}()
+
+	req := httptest.NewRequest("POST", "/captcha/cancel", nil)
+	rec := httptest.NewRecorder()
+	apiHandler(app).ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("POST /captcha/cancel status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var response map[string]bool
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("invalid /captcha/cancel JSON: %v", err)
+	}
+	if !response["ok"] {
+		t.Fatalf("/captcha/cancel rejected active fixture: %s", rec.Body.String())
+	}
+	select {
+	case got := <-gotCh:
+		if got != expected {
+			t.Fatalf("core stdin = %q, want %q", got, expected)
+		}
+	case err := <-errCh:
+		t.Fatalf("reading cancellation from core stdin: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("cancellation was not forwarded to core stdin")
+	}
+
+	captchaMu.Lock()
+	pending, activeSession := captchaPending, captchaSessionToken
+	captchaMu.Unlock()
+	if pending || activeSession != "" {
+		t.Fatalf("challenge was not consumed after cancellation: pending=%v session=%q", pending, activeSession)
+	}
+}
+
+func TestCaptchaStateEndpointRequiresGet(t *testing.T) {
+	req := httptest.NewRequest("POST", "/captcha/state", nil)
+	rec := httptest.NewRecorder()
+	apiHandler(&App{}).ServeHTTP(rec, req)
+	if rec.Code != 405 {
+		t.Fatalf("POST /captcha/state status = %d, want 405", rec.Code)
+	}
+	if got := rec.Header().Get("Allow"); got != "GET" {
+		t.Fatalf("POST /captcha/state Allow = %q, want GET", got)
+	}
+}
