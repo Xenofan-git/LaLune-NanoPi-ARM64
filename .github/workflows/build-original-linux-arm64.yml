@@ -304,8 +304,8 @@ jobs:
         run: |
           set -euxo pipefail
           git clone https://github.com/Endlad2/csqtt-core.git client-source
-          git -C client-source checkout --detach 3eafb7ee868f5f2690edf3b0326153813f88eb5
-          test "$(git -C client-source rev-parse HEAD)" = "3eafb7ee868f5f2690edf3b0326153813f88eb5"
+          git -C client-source checkout --detach 3eafb7ee868f5f2690edf3b0326153813f88eb5f
+          test "$(git -C client-source rev-parse HEAD)" = "3eafb7ee868f5f2690edf3b0326153813f88eb5f"
           rustup toolchain install 1.97.1 --profile minimal
           rustup target add aarch64-unknown-linux-gnu --toolchain 1.97.1
           python3 scripts/ci/patch-csqtt-rjs-manual-fallback.py
@@ -315,7 +315,7 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \\
             cargo +1.97.1 build --locked --release --target aarch64-unknown-linux-gnu --manifest-path client-source/rust-client/Cargo.toml --bin client
           install -m 0755 client-source/rust-client/target/aarch64-unknown-linux-gnu/release/client client-assets/client-linux-arm64
-          printf '%s\\n' 'source=Endlad2/csqtt-core@3eafb7ee868f5f2690edf3b0326153813f88eb5' 'patch=rjs-manual-captcha-fallback-v1' > client-assets/VERSION
+          printf '%s\\n' 'source=Endlad2/csqtt-core@3eafb7ee868f5f2690edf3b0326153813f88eb5f' 'patch=rjs-manual-captcha-fallback-v1' > client-assets/VERSION
           file client-assets/client-linux-arm64
           readelf -h client-assets/client-linux-arm64 | grep -Fq 'AArch64'
           strings -a client-assets/client-linux-arm64 | grep -Fq 'fallback на ручную CAPTCHA'
