@@ -1,6 +1,15 @@
 # CSQTT authenticated liveness protocol — design gate
 
-Status: proposal only; no wire behavior or production timeout has been changed.
+Status: protocol remains **CI-fixture-only / not production-ready**. No production wire behavior, runtime binary, or production timeout has been changed.
+
+## Evidence from the isolated CI fixture (2026-10-14)
+
+The disposable pinned Rust client/server clones have a test-only implementation of the negotiated exchange. It is applied by `scripts/ci/patch-csqtt-negotiated-liveness.py` only after checking out the pinned client commit and server tag. This is evidence about that fixture, not an upstream patch or the shipped runtime client.
+
+- The E2E matrix passes with the injected idle watchdog enabled and disabled; the disabled leg is the required evidence that recovery did not depend on that watchdog.
+- The separate experimental AArch64 client and server cross-compile, contain the liveness marker, and pass QEMU user-mode startup smoke checks. The server reports `CSQTT-WIRE-4`; the client reaches its normal missing-arguments validation path.
+- The stock runtime ARM64 client audit did **not** find `CSQTT_LIVENESS_V1`. The experimental artifact is separate and uses a CI-only credential hook; it must not be installed as a replacement or treated as VK-auth validated.
+- These tests do not yet establish upstream-reviewed wire compatibility, full ARM64 system-VM dataplane operation of the experimental binaries, or production readiness.
 
 ## What the pinned sources establish
 
@@ -45,4 +54,12 @@ Use a new, versioned control message family; do not overload legacy `SESSION_LEA
 
 ## Current gate
 
-Do not change the packaged runtime artifact, deployment workflows, production services, or device network configuration. Implement the protocol only in disposable pinned-source checkouts after exact wire encoding and compatibility behavior are agreed and tests can cover both endpoints. The current E2E watchdog remains a diagnostic fixture only.
+Keep the production/runtime artifact, deployment workflow, production services, and device network configuration unchanged. The current CI patch is useful as a test fixture but is not a substitute for a reviewed upstream implementation. Before considering production adoption:
+
+1. Port the protocol to the actual maintained client/server source trees (not a scripted disposable-clone patch) and obtain code review for the wire encoding and negotiation.
+2. Add endpoint-level unit tests for malformed frames, nonce/sequence matching, replay, overflow, timeout/cancellation and WIRE-3 fallback; keep the model tests as supplemental coverage.
+3. Run the experimental ARM64 binaries in a real ARM64 system VM with the same restart/TUN dataplane scenario, not only QEMU startup smoke tests.
+4. Validate the real VK authentication path and packaged-artifact provenance independently of the CI-only credential hook.
+5. Produce a new explicitly versioned artifact only after all gates pass. Do not overwrite the pinned runtime asset or install/deploy automatically.
+
+Until then, the CI fixture and its experimental artifact are diagnostics only.
