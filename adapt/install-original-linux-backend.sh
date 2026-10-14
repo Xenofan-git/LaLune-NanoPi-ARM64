@@ -19,6 +19,10 @@ for asset in install-csqtt-lalune.sh uninstall-csqtt-lalune.sh csqtt-lalune-linu
 done
 
 [ ! -L "$DEPLOY_LIB" ] || { echo "Refusing symlinked deployment library: $DEPLOY_LIB" >&2; exit 1; }
+if [ -e "$DEPLOY_LIB" ] && [ ! -f "$DEPLOY_MARKER" ]; then
+    echo "LaLune library exists without the deployment ownership marker; refusing to adopt it." >&2
+    exit 1
+fi
 [ ! -L "$ASSET_DIR" ] || { echo "Refusing symlinked deployment assets: $ASSET_DIR" >&2; exit 1; }
 [ ! -L "$DEPLOY_MANAGER" ] || { echo "Refusing symlinked DeployManager: $DEPLOY_MANAGER" >&2; exit 1; }
 [ ! -L "$DEPLOY_MARKER" ] || { echo "Refusing symlinked ownership marker: $DEPLOY_MARKER" >&2; exit 1; }
