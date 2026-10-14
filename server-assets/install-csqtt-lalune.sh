@@ -12,8 +12,15 @@ readonly STATE="/var/lib/csqtt-lalune"
 readonly LOG="/var/log/csqtt-lalune"
 readonly UNIT_FILE="/etc/systemd/system/csqtt-lalune.service"
 readonly MARKER="CSQTT-LALUNE-MANAGED-V1"
-readonly UDP_PORT="47000"
-readonly WEB_PORT="47002"
+UDP_PORT="${CSQTT_LALUNE_UDP_PORT:-47000}"
+WEB_PORT="${CSQTT_LALUNE_WEB_PORT:-47002}"
+SECRETS_FILE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --secrets-file) [[ $# -ge 2 ]] || { echo "missing value for --secrets-file" >&2; exit 2; }; SECRETS_FILE="$2"; shift 2 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
 
 die(){ echo "csqtt-lalune install: $*" >&2; exit 1; }
 [[ ${EUID} -eq 0 ]] || die "run as root"
