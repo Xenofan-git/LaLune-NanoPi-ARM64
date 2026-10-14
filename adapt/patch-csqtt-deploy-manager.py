@@ -304,7 +304,7 @@ exit 1
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
         for line in stdout.lines() { println!("[remote] {line}"); }
-        for line in stderr.lines() { eprintln!("[remote:err] {line}"); }
+        for line in stderr.lines() { println!("[remote:err] {line}"); }
         if !output.status.success() || !stdout.lines().any(|line| line.trim() == "CSQTT_LALUNE_DEPLOY_OK") {
             anyhow::bail!("isolated LaLune installer failed (exit {}); see remote output above", output.status);
         }
@@ -431,7 +431,7 @@ sudo -n bash '{remote_bundle}/uninstall-csqtt-lalune.sh'
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
         for line in stdout.lines() { println!("[remote] {line}"); }
-        for line in stderr.lines() { eprintln!("[remote:err] {line}"); }
+        for line in stderr.lines() { println!("[remote:err] {line}"); }
         if !output.status.success() || !stdout.lines().any(|line| line.trim() == "CSQTT_LALUNE_UNINSTALL_OK") {
             anyhow::bail!("isolated LaLune uninstall failed or was not confirmed");
         }
