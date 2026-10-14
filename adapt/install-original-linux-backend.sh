@@ -20,6 +20,11 @@ done
 [ ! -L "$DEPLOY_LIB" ] || { echo "Refusing symlinked deployment library: $DEPLOY_LIB" >&2; exit 1; }
 [ ! -L "$ASSET_DIR" ] || { echo "Refusing symlinked deployment assets: $ASSET_DIR" >&2; exit 1; }
 [ ! -L "$DEPLOY_MANAGER" ] || { echo "Refusing symlinked DeployManager: $DEPLOY_MANAGER" >&2; exit 1; }
+[ ! -L "$DEPLOY_MARKER" ] || { echo "Refusing symlinked ownership marker: $DEPLOY_MARKER" >&2; exit 1; }
+if [ -e "$DEPLOY_MARKER" ] && [ "$(cat "$DEPLOY_MARKER")" != "LALUNE-DEPLOY-BUNDLE-V1" ]; then
+    echo "Deployment ownership marker mismatch; refusing to overwrite deployment assets." >&2
+    exit 1
+fi
 if [ -e "$DEPLOY_MANAGER" ] && [ ! -f "$DEPLOY_MARKER" ]; then
     echo "DeployManager exists without the LaLune ownership marker; refusing to overwrite it." >&2
     exit 1
