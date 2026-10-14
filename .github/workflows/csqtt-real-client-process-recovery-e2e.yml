@@ -296,7 +296,7 @@ jobs:
                 test "$client_pid" = "$client_pid_before"
                 kill -0 "$client_pid"
                 echo "EXPECTED_LIMITATION: stock receive wait stayed blocked after server restart without injected idle watchdog."
-                echo "- LIMITATION CONFIRMED: stock receive wait did not re-register within the 80-second polling bound without an injected timeout; the same client PID remained alive." >> "$GITHUB_STEP_SUMMARY"
+                echo "LIMITATION_CONFIRMED: stock receive wait did not re-register within the 80-second polling bound without an injected timeout; the same client PID remained alive." > /tmp/csqtt-no-watchdog-limitation
                 cleanup
                 trap - EXIT
                 exit 0
@@ -371,7 +371,11 @@ jobs:
               echo "NATIVE_RUST_CLIENT_SAME_PROCESS_TUN_DATAPLANE_RECOVERY_PASS"
             else
               echo "- DIAGNOSTIC: the receive-idle watchdog was not injected; the pinned client's stock receive wait was exercised across an isolated server restart."
-              echo "- If the client did not re-register, the preceding step records the limitation; if it did, same-process dataplane checks passed."
+              if [ -f /tmp/csqtt-no-watchdog-limitation ]; then
+                echo "- LIMITATION CONFIRMED: the same client PID remained alive but did not re-register within the polling bound."
+              else
+                echo "- PASS: the stock receive path re-registered and same-process dataplane checks passed."
+              fi
             fi
             echo "- NOT TESTED: real VK authentication. The fixture uses local TURN credentials and a dummy VK hash; this is not production VK-auth validation."
             echo "- No production services or network policies are changed. Previously passed TURN/worker tests were not repeated."
