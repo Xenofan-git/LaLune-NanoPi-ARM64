@@ -40,6 +40,14 @@ jobs:
           grep -Fq 'if err := tun.SetupRoutes(tunIP, tunDNS); err != nil {' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -Fq 'return fmt.Errorf("configure csqtt0 DNS: %w", err)' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -Fq 'rollback()' adapt/apply-pinned-original-linux-arm64-policy.py
+      - name: Validate CAPTCHA Bridge source
+        run: |
+          set -euxo pipefail
+          test -s captcha-bridge/manifest.json
+          test -s captcha-bridge/captcha-bridge.js
+          test -s captcha-bridge/README.md
+          python3 -m json.tool captcha-bridge/manifest.json >/dev/null
+          node --check captcha-bridge/captcha-bridge.js
       - name: Validate CSQTT panel route UI
         run: |
           set -euxo pipefail
