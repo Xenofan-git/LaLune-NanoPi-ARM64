@@ -284,8 +284,8 @@ STAGE='{remote_stage}'
 BUNDLE='{remote_bundle}'
 trap 'rm -rf -- "$STAGE"' EXIT
 case "$(uname -m)" in
-  aarch64|arm64) ;;
-  *) echo "LaLune isolated server package requires ARM64; no service files changed" >&2; exit 2 ;;
+  aarch64|arm64|x86_64|amd64) ;;
+  *) echo "unsupported LaLune server architecture; no service files changed" >&2; exit 2 ;;
 esac
 CSQTT_LALUNE_UDP_PORT='{peer_port}' CSQTT_LALUNE_WEB_PORT='{web_port}' bash "$BUNDLE/install-csqtt-lalune.sh" --secrets-file "$BUNDLE/server-secrets.txt"
 systemctl is-active --quiet csqtt-lalune.service
