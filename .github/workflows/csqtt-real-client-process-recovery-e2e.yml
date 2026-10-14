@@ -47,7 +47,10 @@ jobs:
           # upstream VK auth path remains unchanged unless all three
           # CSQTT_TEST_TURN_* variables are explicitly supplied at runtime.
           python3 scripts/ci/patch-csqtt-process-e2e-auth.py
+          python3 scripts/ci/patch-csqtt-rjs-manual-fallback.py
           python3 scripts/ci/patch-csqtt-negotiated-liveness.py
+          grep -F 'RJS: ошибка, fallback на ручную CAPTCHA' client-source/rust-client/captcha.rs
+          grep -F 'self.webview(stream_id, captcha, "manual", Duration::from_secs(60))' client-source/rust-client/captcha.rs
           grep -F 'CSQTT_TEST_TURN_USERNAME' client-source/rust-client/auth.rs
           grep -F 'CSQTT_LIVENESS_V1' client-source/rust-client/session.rs
           grep -F 'CSQTT_LIVENESS_V1' server-source/rust-server/protocol.rs
