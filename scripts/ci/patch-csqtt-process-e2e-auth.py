@@ -256,7 +256,7 @@ mod csqtt_vk_mode_contract_tests {
     #[test]
     fn bootstrap_stdin_protocol_accepts_exact_prefix_and_json() {
         let payload = STANDARD.encode(br#"{"token":"fixture-token"}"#);
-        let parsed = parse_vk_js_bootstrap_line(&format!("VK_JS_BOOTSTRAP:{payload}\\n")).unwrap();
+        let parsed = parse_vk_js_bootstrap_line(&format!("VK_JS_BOOTSTRAP:{payload}\n")).unwrap();
         assert_eq!(parsed.token, "fixture-token");
     }
 
