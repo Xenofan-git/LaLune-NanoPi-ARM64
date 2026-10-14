@@ -43,15 +43,15 @@ ip netns del "$CLIENT_NS" 2>/dev/null || true
 ip netns del "$SERVER_NS" 2>/dev/null || true
 ip netns add "$SERVER_NS"
 ip netns add "$CLIENT_NS"
-ip link add csqtt-arm64-veth-s type veth peer name csqtt-arm64-veth-c
-ip link set csqtt-arm64-veth-s netns "$SERVER_NS"
-ip link set csqtt-arm64-veth-c netns "$CLIENT_NS"
+ip link add csqtt-vs0 type veth peer name csqtt-vc0
+ip link set csqtt-vs0 netns "$SERVER_NS"
+ip link set csqtt-vc0 netns "$CLIENT_NS"
 ip -n "$SERVER_NS" link set lo up
-ip -n "$SERVER_NS" addr add 10.200.0.1/24 dev csqtt-arm64-veth-s
-ip -n "$SERVER_NS" link set csqtt-arm64-veth-s up
+ip -n "$SERVER_NS" addr add 10.200.0.1/24 dev csqtt-vs0
+ip -n "$SERVER_NS" link set csqtt-vs0 up
 ip -n "$CLIENT_NS" link set lo up
-ip -n "$CLIENT_NS" addr add 10.200.0.2/24 dev csqtt-arm64-veth-c
-ip -n "$CLIENT_NS" link set csqtt-arm64-veth-c up
+ip -n "$CLIENT_NS" addr add 10.200.0.2/24 dev csqtt-vc0
+ip -n "$CLIENT_NS" link set csqtt-vc0 up
 ip netns exec "$CLIENT_NS" ping -c 1 -W 3 10.200.0.1 >/dev/null
 
 ip netns exec "$SERVER_NS" turnserver -n --listening-ip=10.200.0.1 --relay-ip=10.200.0.1 \
