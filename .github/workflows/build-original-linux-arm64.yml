@@ -184,7 +184,8 @@ jobs:
           ! grep -Fq 'rm -f "$DEST"' upstream-lalune/Core/DeployManager/src/deploy.rs
           grep -Fq 'systemctl restart {bin}-deployed.service' upstream-lalune/Core/DeployManager/src/deploy.rs
           grep -Fq 'deploy_official_csqtt(args, ports)' upstream-lalune/Core/DeployManager/src/deploy.rs
-          grep -Fq 'CSQTT_DEPLOY_MODE={mode}' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq "CSQTT_LALUNE_UDP_PORT='{peer_port}'" upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq "CSQTT_LALUNE_WEB_PORT='{web_port}'" upstream-lalune/Core/DeployManager/src/deploy.rs
           grep -Fq 'pub secrets_file: Option<String>' upstream-lalune/Core/DeployManager/src/main.rs
           grep -Fq 'pub uninstall: bool' upstream-lalune/Core/DeployManager/src/main.rs
           grep -Fq 'fn uninstall_official_csqtt' upstream-lalune/Core/DeployManager/src/deploy.rs
