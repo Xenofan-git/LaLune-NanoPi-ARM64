@@ -34,6 +34,10 @@ command -v systemctl >/dev/null 2>&1 || die "systemd is required"
 command -v ss >/dev/null 2>&1 || die "ss is required for safe port preflight"
 command -v ip >/dev/null 2>&1 || die "iproute2 is required for safe route/interface preflight"
 command -v iptables-save >/dev/null 2>&1 || die "iptables is required for safe firewall preflight"
+for port in "$UDP_PORT" "$WEB_PORT"; do
+  [[ "$port" =~ ^[0-9]{1,5}$ ]] && (( port >= 1 && port <= 65535 )) || die "invalid port: $port"
+done
+[[ "$UDP_PORT" != "$WEB_PORT" ]] || die "UDP and TCP ports must be different"
 
 # Reject symlinks before checking ownership markers or writing anything. A marker
 # reachable through a symlink does not make the external target LaLune-owned.
