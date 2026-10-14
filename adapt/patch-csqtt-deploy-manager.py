@@ -334,24 +334,25 @@ replace_once(
 replace_once(
     deploy_go,
     '\tif req.SSHPort > 0 {',
-    '''\tassetsDir := filepath.Join(filepath.Dir(binPath), "server-assets")
-\tif st, err := os.Stat(assetsDir); err != nil || !st.IsDir() {
-\t\tassetsDir = filepath.Join("/usr/local/lib/lalune", "server-assets")
-\t}
-\targs = append(args, "--local-binary-dir", assetsDir)
-\tsecretsFile := ""
-\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") && !req.Uninstall {
-\t\tf, err := os.CreateTemp("", "csqtt-deploy-secrets-*.txt")
-\t\tif err != nil { deployAppend("[deploy] не удалось создать временный файл авторизации"); return false }
-\t\t_ = f.Chmod(0600)
-\t\t_, writeErr := f.WriteString(req.MainPassword + "\\n" + req.WebUser + "\\n" + req.WebPassword + "\\n")
-\t\tcloseErr := f.Close()
-\t\tif writeErr != nil || closeErr != nil { _ = os.Remove(f.Name()); deployAppend("[deploy] не удалось сохранить временные данные авторизации"); return false }
-\t\tsecretsFile = f.Name()
-\t\targs = append(args, "--secrets-file", secretsFile)
-\t\tif req.DockerInstall { args = append(args, "--install-in-docker") }\n\t\t
-\t}
-\tif req.Uninstall { args = append(args, "--uninstall") }\n\tif req.SSHPort > 0 {''',
+    '''	assetsDir := filepath.Join(filepath.Dir(binPath), "server-assets")
+	if st, err := os.Stat(assetsDir); err != nil || !st.IsDir() {
+		assetsDir = filepath.Join("/usr/local/lib/lalune", "server-assets")
+	}
+	args = append(args, "--local-binary-dir", assetsDir)
+	secretsFile := ""
+	if strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") && !req.Uninstall {
+		f, err := os.CreateTemp("", "csqtt-deploy-secrets-*.txt")
+		if err != nil { deployAppend("[deploy] не удалось создать временный файл авторизации"); return false }
+		_ = f.Chmod(0600)
+		_, writeErr := f.WriteString(req.MainPassword + "\\n" + req.WebUser + "\\n" + req.WebPassword + "\\n")
+		closeErr := f.Close()
+		if writeErr != nil || closeErr != nil { _ = os.Remove(f.Name()); deployAppend("[deploy] не удалось сохранить временные данные авторизации"); return false }
+		secretsFile = f.Name()
+		args = append(args, "--secrets-file", secretsFile)
+		if req.DockerInstall { args = append(args, "--install-in-docker") }
+	}
+	if req.Uninstall { args = append(args, "--uninstall") }
+	if req.SSHPort > 0 {''',
 )
 replace_once(
     deploy_go,
