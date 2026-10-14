@@ -32,7 +32,8 @@ jobs:
           test -x vm/real/server-assets/install-csqtt-lalune.sh
           test -x vm/real/server-assets/uninstall-csqtt-lalune.sh
           test -s vm/real/client-linux-arm64
-          test "$(cat vm/real/CSQTT_CLIENT_VERSION)" = "2026.09.16.17.59"
+          grep -Fq 'source=Endlad2/csqtt-core@3eafb7ee868f5f2690edf3b0326153813f88eb5f' vm/real/CSQTT_CLIENT_VERSION
+          grep -Fq 'patch=rjs-manual-captcha-fallback-v1' vm/real/CSQTT_CLIENT_VERSION
           sha256sum vm/real/client-linux-arm64
           file vm/real/client-linux-arm64
           test -x vm/real/client-tun-tests-arm64
