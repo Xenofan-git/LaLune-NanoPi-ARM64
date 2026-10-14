@@ -123,6 +123,61 @@ func TestCaptchaRequestIsActive(t *testing.T) {
 	}
 }
 
+func TestRJSManualFallbackSupersedesAutoCaptchaEvent(t *testing.T) {
+    // Simulate the core's event stream after RJS fails: its earlier Auto retry
+    // must not open the Linux overlay, but the later manual fallback must.
+    old := struct {
+        pending bool
+        mode, uri, session, handled string
+        updated time.Time
+    }{}
+    captchaMu.Lock()
+    old.pending, old.mode, old.uri, old.session, old.handled, old.updated =
+        captchaPending, captchaMode, captchaRedirectURI, captchaSessionToken, captchaHandledSession, captchaUpdated
+    captchaPending, captchaMode, captchaRedirectURI, captchaSessionToken, captchaHandledSession = false, "", "", "", ""
+    captchaUpdated = time.Time{}
+    captchaMu.Unlock()
+    t.Cleanup(func() {
+        captchaMu.Lock()
+        captchaPending, captchaMode, captchaRedirectURI, captchaSessionToken, captchaHandledSession, captchaUpdated =
+            old.pending, old.mode, old.uri, old.session, old.handled, old.updated
+        captchaMu.Unlock()
+    })
+
+    now := time.Unix(1791549509, 0)
+    uri := "https://id.vk.ru/not_robot_captcha?expired_at=1791549600"
+    autoLogs, _ := json.Marshal([]string{"CAPTCHA_SOLVE|auto|" + uri + "|rjs-auto-session"})
+    refreshCaptchaStateFromLogs(string(autoLogs), now)
+    captchaMu.Lock()
+    if captchaPending || captchaMode != "" {
+        t.Fatalf("auto retry unexpectedly opened manual overlay: pending=%v mode=%q", captchaPending, captchaMode)
+    }
+    captchaMu.Unlock()
+
+    fallbackLogs, _ := json.Marshal([]string{
+        "CAPTCHA_SOLVE|auto|" + uri + "|rjs-auto-session",
+        "CAPTCHA_SOLVE|manual|" + uri + "|rjs-manual-session",
+    })
+    refreshCaptchaStateFromLogs(string(fallbackLogs), now.Add(time.Second))
+    captchaMu.Lock()
+    defer captchaMu.Unlock()
+    if !captchaPending {
+        t.Fatal("manual RJS fallback did not create a pending CAPTCHA")
+    }
+    if captchaMode != "manual" {
+        t.Fatalf("fallback mode = %q, want manual", captchaMode)
+    }
+    if captchaSessionToken != "rjs-manual-session" {
+        t.Fatalf("fallback session = %q, want rjs-manual-session", captchaSessionToken)
+    }
+    if captchaRedirectURI != uri {
+        t.Fatalf("fallback redirect URI = %q, want %q", captchaRedirectURI, uri)
+    }
+    if !captchaUpdated.Equal(now.Add(time.Second)) {
+        t.Fatalf("updated = %v, want %v", captchaUpdated, now.Add(time.Second))
+    }
+}
+
 func TestDirectDomainValidation(t *testing.T) {
 	tests := []struct {
 		name string
