@@ -296,7 +296,7 @@ jobs:
           CLIENT_VERSION=2026.09.16.17.59
           test "$(curl -fsSL https://raw.githubusercontent.com/Endlad2/csqtt-core/main/LATEST)" = "$CLIENT_VERSION"
           curl -fL --retry 3 "https://github.com/Endlad2/csqtt-core/releases/download/$CLIENT_VERSION/client-linux-arm64" -o client-assets/client-linux-arm64-upstream
-          printf '%s  %s\\n' '9a5b917665fda6ee7b3cf8439e3194d46c763f2305d188b4962caee69048ae31' 'client-assets/client-linux-arm64-upstream' | sha256sum -c -
+          printf '%s  %s\n' '9a5b917665fda6ee7b3cf8439e3194d46c763f2305d188b4962caee69048ae31' 'client-assets/client-linux-arm64-upstream' | sha256sum -c -
           file client-assets/client-linux-arm64-upstream
           readelf -h client-assets/client-linux-arm64-upstream | grep -Fq 'AArch64'
           echo PINNED_UPSTREAM_RUNTIME_CSQTT_CLIENT_BASELINE_PASS
