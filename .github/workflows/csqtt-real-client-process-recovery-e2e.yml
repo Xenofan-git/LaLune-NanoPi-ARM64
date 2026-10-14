@@ -405,7 +405,7 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-user
       - uses: dtolnay/rust-toolchain@1.97.1
         with:
           targets: aarch64-unknown-linux-gnu
@@ -439,6 +439,15 @@ jobs:
           readelf -h "$server" | grep -Fq 'AArch64'
           strings -a "$client" | grep -Fq 'CSQTT_LIVENESS_V1'
           strings -a "$server" | grep -Fq 'CSQTT_LIVENESS_V1'
+          # Execute the cross-compiled AArch64 binaries under user-mode emulation.
+          # Server revision query is a non-network smoke test; client must reject
+          # missing connection args rather than crash during startup.
+          test "$(qemu-aarch64 -L /usr/aarch64-linux-gnu "$server" --protocol-revision)" = "CSQTT-WIRE-4"
+          if qemu-aarch64 -L /usr/aarch64-linux-gnu "$client" > "$RUNNER_TEMP/arm64-client-smoke.log" 2>&1; then
+            echo "AArch64 client unexpectedly accepted missing connection arguments" >&2
+            exit 1
+          fi
+          grep -F 'Нужны -peer и хеши VK' "$RUNNER_TEMP/arm64-client-smoke.log"
           mkdir -p experimental-arm64
           install -m 0755 "$client" experimental-arm64/csqtt-client-arm64-liveness-experimental
           install -m 0755 "$server" experimental-arm64/csqtt-server-arm64-liveness-experimental
