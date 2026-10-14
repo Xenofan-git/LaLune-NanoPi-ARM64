@@ -12,6 +12,40 @@ import (
 	libs "lalune-desktop/Libs"
 )
 
+func TestAutoApiCallCountAndHashBatchContract(t *testing.T) {
+	cases := []struct {
+		name string
+		workers int
+		perCall int
+		want int
+	}{
+		{name: "one worker group", workers: 1, perCall: 9, want: 1},
+		{name: "exactly one call", workers: 9, perCall: 9, want: 1},
+		{name: "rounds up partial call", workers: 10, perCall: 9, want: 2},
+		{name: "three calls for 27 workers", workers: 27, perCall: 9, want: 3},
+		{name: "caps at six calls", workers: 126, perCall: 9, want: 6},
+		{name: "caps pathological worker count", workers: 10000, perCall: 1, want: 6},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := libs.CallCountForWorkers(tt.workers, tt.perCall); got != tt.want {
+				t.Fatalf("CallCountForWorkers(%d, %d) = %d, want %d", tt.workers, tt.perCall, got, tt.want)
+			}
+		})
+	}
+
+	batch := &libs.VkCallsBatch{Calls: []libs.VkAutoCall{
+		{CallID: "fixture-call-1", Hash: "fixture-hash-1"},
+		{CallID: "fixture-call-2", Hash: "fixture-hash-2"},
+	}}
+	if got, want := batch.Hashes(), []string{"fixture-hash-1", "fixture-hash-2"}; !slices.Equal(got, want) {
+		t.Fatalf("Auto API hashes = %#v, want %#v", got, want)
+	}
+	if got, want := batch.CallIds(), []string{"fixture-call-1", "fixture-call-2"}; !slices.Equal(got, want) {
+		t.Fatalf("Auto API call IDs = %#v, want %#v", got, want)
+	}
+}
+
 func TestPrivateClient(t *testing.T) {
 	tests := []struct {
 		name       string
