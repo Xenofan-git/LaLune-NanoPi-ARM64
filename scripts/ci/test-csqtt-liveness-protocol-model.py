@@ -40,6 +40,10 @@ def decode(frame: bytes):
         return None
     return kind, sequence, nonce
 
+def liveness_negotiated(wire_revision: str, tunconf: str) -> bool:
+    """Legacy peers remain on the old path; exact WIRE-4 confirmation is required."""
+    return wire_revision == "CSQTT-WIRE-4" and tunconf.endswith(":liveness-v1")
+
 
 @dataclass
 class ProbeState:
@@ -84,6 +88,15 @@ class ProbeState:
 
 
 class LivenessProtocolModelTests(unittest.TestCase):
+    def test_wire3_legacy_peer_never_enables_liveness(self):
+        self.assertFalse(liveness_negotiated("CSQTT-WIRE-3", "TUNCONF:10.0.0.2:1.1.1.1:9000:stream-v1"))
+        self.assertFalse(liveness_negotiated("CSQTT-WIRE-3", "TUNCONF:10.0.0.2:1.1.1.1:9000:stream-v1:liveness-v1"))
+
+    def test_wire4_requires_exact_server_capability_confirmation(self):
+        self.assertTrue(liveness_negotiated("CSQTT-WIRE-4", "TUNCONF:10.0.0.2:1.1.1.1:9000:stream-v2:liveness-v1"))
+        self.assertFalse(liveness_negotiated("CSQTT-WIRE-4", "TUNCONF:10.0.0.2:1.1.1.1:9000:stream-v2"))
+        self.assertFalse(liveness_negotiated("CSQTT-WIRE-4", "TUNCONF:10.0.0.2:1.1.1.1:9000:stream-v2:liveness-v10"))
+
     def test_ping_pong_round_trip_echo(self):
         client = ProbeState()
         ping = client.challenge()
