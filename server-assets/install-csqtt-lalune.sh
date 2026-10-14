@@ -25,10 +25,14 @@ done
 die(){ echo "csqtt-lalune install: $*" >&2; exit 1; }
 [[ ${EUID} -eq 0 ]] || die "run as root"
 [[ "$(uname -s)" == Linux ]] || die "Linux is required"
-[[ "$(uname -m)" == aarch64 || "$(uname -m)" == arm64 ]] || die "this package targets ARM64; found $(uname -m)"
+case "$(uname -m)" in
+  aarch64|arm64) SERVER_ASSET="csqtt-lalune-linux-arm64" ;;
+  x86_64|amd64) SERVER_ASSET="csqtt-lalune-linux-amd64" ;;
+  *) die "unsupported server architecture: $(uname -m)" ;;
+esac
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-SOURCE="${HERE}/csqtt-lalune-linux-arm64"
+SOURCE="${HERE}/${SERVER_ASSET}"
 [[ -s "$SOURCE" ]] || die "missing isolated binary: $SOURCE"
 command -v systemctl >/dev/null 2>&1 || die "systemd is required"
 command -v ss >/dev/null 2>&1 || die "ss is required for safe port preflight"
