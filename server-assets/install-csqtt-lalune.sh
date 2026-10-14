@@ -94,6 +94,17 @@ if iptables-save 2>/dev/null | grep -Fq 'CSQTT_LALUNE_'; then
   die "LaLune firewall markers already exist; refusing to adopt or clean up existing rules"
 fi
 
+[[ -n "$SECRETS_FILE" && -f "$SECRETS_FILE" && ! -L "$SECRETS_FILE" ]] || die "a regular --secrets-file is required"
+mapfile -t secret_values < "$SECRETS_FILE"
+[[ "${#secret_values[@]}" -ge 4 ]] || die "secrets file must contain four values"
+MAIN_PASSWORD="${secret_values[0]}"
+WEB_USER="${secret_values[1]}"
+WEB_PASSWORD="${secret_values[2]}"
+DEVICE_ID="${secret_values[3]}"
+for value in "$MAIN_PASSWORD" "$WEB_USER" "$WEB_PASSWORD" "$DEVICE_ID"; do
+  [[ -n "$value" && "$value" =~ ^[A-Za-z0-9]+$ ]] || die "credentials/device ID must be non-empty ASCII letters or digits"
+done
+
 install -d -m 0750 "$ETC" "$STATE" "$LOG" "$LIB"
 printf '%s\n' "$MARKER" > "$ETC/.managed-by-lalune"
 printf '%s\n' "$MARKER" > "$LIB/.managed-by-lalune"
