@@ -10,6 +10,7 @@ paths = {
     "proxy": root / "proxy_route.rs",
     "model": root / "model.rs",
     "protocol": root / "protocol.rs",
+    "main": root / "main.rs",
 }
 sources = {key: path.read_text() for key, path in paths.items()}
 
@@ -401,6 +402,32 @@ sources["proxy"] = sources["proxy"].replace(
 )
 if global_route_cache_flush in sources["proxy"]:
     raise SystemExit("global route-cache flush remains in proxy_route.rs")
+
+# Panel service actions must target the namespaced LaLune unit, never the original csqtt.service.
+service_unit_replacements = [
+    (
+        '    let status = command.args([action, "csqtt"]).status();',
+        '    let service_unit = std::env::var("CSQTT_SYSTEMD_UNIT").unwrap_or_else(|_| "csqtt".to_string());\n    let status = command.args([action, service_unit.as_str()]).status();',
+        "systemctl action target",
+    ),
+    (
+        '    let unit = format!("csqtt-panel-restart-{}-{sequence}", std::process::id());',
+        '    let service_unit = std::env::var("CSQTT_SYSTEMD_UNIT").unwrap_or_else(|_| "csqtt".to_string());\n    let unit_prefix = service_unit.strip_suffix(".service").unwrap_or(&service_unit);\n    let unit = format!("{unit_prefix}-panel-restart-{}-{sequence}", std::process::id());',
+        "panel restart timer name",
+    ),
+    (
+        '.args(["--no-block", "restart", "csqtt"])',
+        '.args(["--no-block", "restart", service_unit.as_str()])',
+        "panel restart target",
+    ),
+]
+for old, new, label in service_unit_replacements:
+    count = sources["main"].count(old)
+    if count != 1:
+        raise SystemExit(f"main.rs {label}: expected one reference, found {count}")
+    sources["main"] = sources["main"].replace(old, new, 1)
+if 'command.args([action, "csqtt"])' in sources["main"] or '.args(["--no-block", "restart", "csqtt"])' in sources["main"]:
+    raise SystemExit("main.rs still contains a hard-coded original CSQTT service action")
 
 # Rule cleanup is marker-based, so the TPROXY comment must be unique as well.
 sources["proxy"] = sources["proxy"].replace("CSQTT_TPROXY", "CSQTT_LALUNE_TPROXY")
