@@ -236,7 +236,7 @@ official = r'''fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Res
     let source = args.local_binary_dir.as_deref()
         .ok_or_else(|| anyhow::anyhow!("official CSQTT assets are not bundled"))?;
     let source = Path::new(source);
-    for name in ["install-csqtt-lalune.sh", "uninstall-csqtt-lalune.sh", "csqtt-lalune-linux-arm64"] {
+    for name in ["install-csqtt-lalune.sh", "uninstall-csqtt-lalune.sh", "csqtt-lalune-linux-arm64", "csqtt-lalune-linux-amd64"] {
         if !source.join(name).is_file() {
             anyhow::bail!("required official CSQTT 2.1.9 asset is missing: {}", source.join(name).display());
         }
@@ -250,7 +250,7 @@ official = r'''fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Res
     fs::set_permissions(&bundle, std::os::unix::fs::PermissionsExt::from_mode(0o700))
         .context("restrict temporary CSQTT bundle permissions")?;
     let result = (|| -> Result<()> {
-        for name in ["install-csqtt-lalune.sh", "uninstall-csqtt-lalune.sh", "csqtt-lalune-linux-arm64"] {
+        for name in ["install-csqtt-lalune.sh", "uninstall-csqtt-lalune.sh", "csqtt-lalune-linux-arm64", "csqtt-lalune-linux-amd64"] {
             fs::copy(source.join(name), bundle.join(name))
                 .with_context(|| format!("stage official asset {name}"))?;
         }
