@@ -66,17 +66,21 @@ for attempt in $(seq 1 40); do
 done
 
 start_server() {
+  local previous_count
+  previous_count=$(grep -Fc 'RTP AEAD: 10.200.0.1:46000' "$SERVER_LOG" || true)
   ip netns exec "$SERVER_NS" "$SERVER" --listen 10.200.0.1:46000 --web-port 0 \
     --config-dir "$ROOT/server-config" --password ci-e2e-password \
     --device-id ci-e2e-device --web-pass ci-e2e-web-password >>"$SERVER_LOG" 2>&1 &
   server_pid=$!
   local ready=0
   for attempt in $(seq 1 60); do
-    if grep -Fq 'RTP AEAD: 10.200.0.1:46000' "$SERVER_LOG"; then ready=1; break; fi
+    local current_count
+    current_count=$(grep -Fc 'RTP AEAD: 10.200.0.1:46000' "$SERVER_LOG" || true)
+    if [ "$current_count" -gt "$previous_count" ]; then ready=1; break; fi
     if ! kill -0 "$server_pid" 2>/dev/null; then tail -n 100 "$SERVER_LOG" >&2; exit 1; fi
     sleep 0.5
   done
-  [ "$ready" -eq 1 ] || { tail -n 100 "$SERVER_LOG" >&2; echo "ARM64 server did not become ready" >&2; exit 1; }
+  [ "$ready" -eq 1 ] || { tail -n 100 "$SERVER_LOG" >&2; echo "ARM64 server did not announce a fresh ready event" >&2; exit 1; }
 }
 start_server
 
