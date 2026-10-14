@@ -302,7 +302,8 @@ replace_once("client-source/rust-client/session.rs",
                     }
                 } else {
                     let sequence = next_sequence;
-                    next_sequence = next_sequence.checked_add(1).unwrap_or(1);
+                    next_sequence = next_sequence.checked_add(1)
+                        .ok_or_else(|| anyhow::anyhow!("CSQTT liveness sequence exhausted"))?;
                     let nonce = rand::random::<[u8; 16]>();
                     let frame = liveness_frame(LIVENESS_PING, sequence, &nonce);
                     send_writer_bytes(&writer, &frame).await.context("send CSQTT liveness PING")?;
