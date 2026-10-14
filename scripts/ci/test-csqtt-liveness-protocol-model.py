@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Executable design tests for the proposed negotiated CSQTT liveness control.
 
-This is deliberately a protocol-model test, not a live CSQTT wire test. The
-client/server integration gate remains closed until the same frames are sent
-through the pinned Rust client/server packet paths in the disposable E2E.
+This is deliberately a protocol-model test, not a live CSQTT wire test.
+The client/server integration gate remains closed until the same frames are
+sent through the pinned Rust client/server packet paths in the disposable E2E.
 """
 from dataclasses import dataclass
 import secrets
@@ -14,8 +14,7 @@ MAGIC = b"\xffCSQTT_LIVENESS_V1"
 PING = 1
 PONG = 2
 CAPABILITY = 1
-HEADER = len(MAGIC) + 1 + 1 + 8 + 16
-MAX_FRAME = HEADER
+FRAME_LENGTH = len(MAGIC) + 1 + 1 + 8 + 16
 
 
 def encode(kind: int, sequence: int, nonce: bytes) -> bytes:
@@ -29,7 +28,7 @@ def encode(kind: int, sequence: int, nonce: bytes) -> bytes:
 
 
 def decode(frame: bytes):
-    if len(frame) != MAX_FRAME or not frame.startswith(MAGIC):
+    if len(frame) != FRAME_LENGTH or not frame.startswith(MAGIC):
         return None
     pos = len(MAGIC)
     version, kind = frame[pos], frame[pos + 1]
@@ -50,16 +49,27 @@ class ProbeState:
     max_missed: int = 3
 
     def challenge(self):
+        # A caller must wait for a response or explicitly report a timeout;
+        # polling this method must never count as a missed response.
+        if self.missed >= self.max_missed:
+            return "failed"
         if self.pending is not None:
-            self.missed += 1
-            if self.missed >= self.max_missed:
-                return "failed"
             return "pending"
         nonce = secrets.token_bytes(16)
         seq = self.next_sequence
         self.next_sequence += 1
         self.pending = (seq, nonce)
         return encode(PING, seq, nonce)
+
+    def on_timeout(self) -> str:
+        # Only an actual timeout advances the consecutive-miss counter.
+        if self.pending is None:
+            return "no_pending_challenge"
+        self.pending = None
+        self.missed += 1
+        if self.missed >= self.max_missed:
+            return "failed"
+        return "retry"
 
     def accept_pong(self, frame: bytes) -> bool:
         parsed = decode(frame)
@@ -86,6 +96,7 @@ class LivenessProtocolModelTests(unittest.TestCase):
         first = client.challenge()
         self.assertIsInstance(first, bytes)
         self.assertEqual(client.challenge(), "pending")
+        self.assertEqual(client.missed, 0)
         self.assertTrue(client.accept_pong(encode(PONG, *decode(first)[1:])))
         self.assertIsInstance(client.challenge(), bytes)
 
@@ -103,19 +114,32 @@ class LivenessProtocolModelTests(unittest.TestCase):
         self.assertIsNone(decode(ping[:-1]))
         self.assertIsNone(decode(ping + b"extra"))
         self.assertIsNone(decode(MAGIC + bytes((99, PING)) + ping[len(MAGIC)+2:]))
-        self.assertIsNone(decode(encode(PING, 1, b"n" * 16)[:len(MAGIC)] + b"\x01\x01" + b"\x00"*24))
+        self.assertIsNone(decode(MAGIC + bytes((CAPABILITY, PING)) + b"\x00" * 24))
 
-    def test_loss_requires_bounded_consecutive_failures(self):
+    def test_only_actual_timeouts_count_toward_bounded_failure(self):
         client = ProbeState(max_missed=3)
-        self.assertIsInstance(client.challenge(), bytes)
+        first = client.challenge()
         self.assertEqual(client.challenge(), "pending")
         self.assertEqual(client.challenge(), "pending")
+        self.assertEqual(client.missed, 0)
+        self.assertEqual(client.on_timeout(), "retry")
+        self.assertEqual(client.missed, 1)
+        second = client.challenge()
+        self.assertGreater(decode(second)[1], decode(first)[1])
+        self.assertEqual(client.on_timeout(), "retry")
+        third = client.challenge()
+        self.assertGreater(decode(third)[1], decode(second)[1])
+        self.assertEqual(client.on_timeout(), "failed")
         self.assertEqual(client.challenge(), "failed")
+        self.assertEqual(client.missed, 3)
 
-    def test_valid_pong_resets_missed_count(self):
+    def test_valid_pong_resets_consecutive_misses(self):
         client = ProbeState(max_missed=3)
         ping = client.challenge()
-        _, seq, nonce = decode(ping)
+        self.assertEqual(client.on_timeout(), "retry")
+        self.assertEqual(client.missed, 1)
+        next_ping = client.challenge()
+        _, seq, nonce = decode(next_ping)
         self.assertTrue(client.accept_pong(encode(PONG, seq, nonce)))
         self.assertEqual(client.missed, 0)
         self.assertIsInstance(client.challenge(), bytes)
