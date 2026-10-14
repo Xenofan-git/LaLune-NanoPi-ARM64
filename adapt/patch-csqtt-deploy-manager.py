@@ -379,13 +379,56 @@ replace_once(
     "fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {",
     "fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {\n    if args.uninstall { return uninstall_official_csqtt(args, ports); }",
 )
-uninstall = r'''fn uninstall_official_csqtt(_args: &DeployArgs, _ports: &Ports) -> Result<()> {
-    // The upstream v2.1.9 uninstaller removes global CSQTT service/config/TUN,
-    // sysctl and firewall resources. Do not run it on a shared host.
-    anyhow::bail!("CSQTT uninstall disabled: upstream cleanup is global and could remove Android/production CSQTT. No remote changes were made.")
+uninstall = r'''fn uninstall_official_csqtt(args: &DeployArgs, _ports: &Ports) -> Result<()> {
+    let source = args.local_binary_dir.as_deref()
+        .ok_or_else(|| anyhow::anyhow!("bundled LaLune server-assets directory was not found"))?;
+    let installer = Path::new(source).join("uninstall-csqtt-lalune.sh");
+    if !installer.is_file() {
+        anyhow::bail!("isolated LaLune uninstaller is missing: {}", installer.display());
+    }
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let bundle_name = format!("lalune-csqtt-uninstall-{}-{nonce:x}", std::process::id());
+    let bundle = std::env::temp_dir().join(&bundle_name);
+    fs::create_dir(&bundle).context("create temporary uninstaller bundle")?;
+    #[cfg(unix)]
+    fs::set_permissions(&bundle, std::os::unix::fs::PermissionsExt::from_mode(0o700))?;
+    let result = (|| -> Result<()> {
+        fs::copy(&installer, bundle.join("uninstall-csqtt-lalune.sh"))
+            .context("stage isolated LaLune uninstaller")?;
+        let remote = format!("{}@{}", args.user, args.host);
+        let remote_stage = format!("/tmp/lalune-csqtt-uninstall-{}-{nonce:x}", std::process::id());
+        let prepare = format!("set -euo pipefail\ntest ! -e '{remote_stage}'\ninstall -d -m 700 '{remote_stage}'");
+        let prepared = run_ssh(args, &remote, &prepare)?;
+        if !prepared.status.success() {
+            anyhow::bail!("could not prepare remote uninstaller staging directory");
+        }
+        if let Err(error) = run_scp(args, &remote, bundle.to_str().unwrap_or(""), &remote_stage) {
+            let _ = run_ssh(args, &remote, &format!("rm -rf -- '{remote_stage}'"));
+            return Err(error).context("upload isolated LaLune uninstaller");
+        }
+        let remote_bundle = format!("{remote_stage}/{bundle_name}");
+        let script = format!(r#"set -Eeuo pipefail
+STAGE='{remote_stage}'
+trap 'rm -rf -- "$STAGE"' EXIT
+bash '{remote_bundle}/uninstall-csqtt-lalune.sh'
+"#);
+        let output = run_ssh(args, &remote, &script).context("run isolated LaLune uninstaller over SSH")?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        for line in stdout.lines() { println!("[remote] {line}"); }
+        for line in stderr.lines() { eprintln!("[remote:err] {line}"); }
+        if !output.status.success() || !stdout.lines().any(|line| line.trim() == "CSQTT_LALUNE_UNINSTALL_OK") {
+            anyhow::bail!("isolated LaLune uninstall failed or was not confirmed");
+        }
+        println!("CSQTT_LALUNE_UNINSTALL_OK");
+        Ok(())
+    })();
+    let _ = fs::remove_dir_all(&bundle);
+    result
 }
 
 '''
+
 
 replace_once(deploy, "fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {", uninstall + "fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {")
 
