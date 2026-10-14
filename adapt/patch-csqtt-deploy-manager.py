@@ -287,10 +287,18 @@ case "$(uname -m)" in
   *) echo "unsupported LaLune server architecture; no service files changed" >&2; exit 2 ;;
 esac
 sudo -n env CSQTT_LALUNE_UDP_PORT='{peer_port}' CSQTT_LALUNE_WEB_PORT='{web_port}' bash "$BUNDLE/install-csqtt-lalune.sh" --secrets-file "$BUNDLE/server-secrets.txt"
-systemctl is-active --quiet csqtt-lalune.service
-ss -H -lun "sport = :{peer_port}" | grep -q .
-ss -H -ltn "sport = :{web_port}" | grep -q .
-echo "CSQTT_LALUNE_DEPLOY_OK"
+for attempt in $(seq 1 30); do
+  systemctl is-active --quiet csqtt-lalune.service || { sleep 1; continue; }
+  if ss -H -lun "sport = :{peer_port}" | grep -q . && ss -H -ltn "sport = :{web_port}" | grep -q .; then
+    echo "CSQTT_LALUNE_DEPLOY_OK"
+    exit 0
+  fi
+  sleep 1
+done
+echo "LaLune service did not become healthy on UDP {peer_port}/TCP {web_port}" >&2
+systemctl status csqtt-lalune.service --no-pager >&2 || true
+journalctl -u csqtt-lalune.service -n 80 --no-pager >&2 || true
+exit 1
 "#, peer_port=peer_port, web_port=web_port);
         let output = run_ssh(args, &remote, &script).context("run isolated LaLune CSQTT installer")?;
         let stdout = String::from_utf8_lossy(&output.stdout);
