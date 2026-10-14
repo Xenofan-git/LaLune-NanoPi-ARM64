@@ -294,6 +294,18 @@ jobs:
           file client-assets/client-linux-arm64
           readelf -h client-assets/client-linux-arm64 | grep -Fq 'AArch64'
           echo PINNED_RUNTIME_CSQTT_CLIENT_ARTIFACT_PASS
+      - name: Audit whether runtime ARM64 client contains negotiated liveness
+        run: |
+          set -euo pipefail
+          if strings -a client-assets/client-linux-arm64 | grep -Fq 'CSQTT_LIVENESS_V1'; then
+            echo "PASS: pinned runtime ARM64 client contains CSQTT_LIVENESS_V1 marker."
+            echo "- Runtime ARM64 client binary contains the negotiated liveness protocol marker." >> "$GITHUB_STEP_SUMMARY"
+            echo "CSQTT_RUNTIME_ARM64_LIVENESS_MARKER_PRESENT"
+          else
+            echo "NOT INCLUDED: pinned runtime ARM64 client does not contain CSQTT_LIVENESS_V1."
+            echo "- LIMITATION: pinned runtime ARM64 client does not contain CSQTT_LIVENESS_V1; the passing negotiated-liveness E2E patches disposable source clones only and is not included in this release binary." >> "$GITHUB_STEP_SUMMARY"
+            echo "CSQTT_RUNTIME_ARM64_LIVENESS_MARKER_ABSENT"
+          fi
       - name: Exercise LaLune installer lifecycle in disposable root
         run: |
           set -euxo pipefail
