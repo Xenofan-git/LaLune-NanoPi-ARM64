@@ -101,3 +101,27 @@ This section supersedes the older "Current CI status and next end-to-end gate" c
 ### Gate decision
 
 Deployment remains **BLOCKED / NOT AUTHORIZED**. Do not run the installer or uninstaller on NanoPi and do not merge/deploy solely on the strength of CI #443. Next tests should prioritize: (a) an independent client-process end-to-end exchange, (b) disconnect/reconnect recovery, and (c) adversarial ownership/cleanup preservation tests. After those, verify the Direct-tab backend-to-policy integration and review the resulting evidence before reconsidering the gate.
+
+
+## Client liveness finding (2026-10-14; pinned-source audit)
+
+Pinned client: `Endlad2/csqtt-core@3eafb7ee868f5f2690edf3b0326153813f88eb5`.
+Pinned server: `amurcanov/csqtt@v2.1.9`.
+
+- In the pinned client, `TransportReader::recv()` awaits `TurnReceiver::recv()` without an inactivity deadline. The session supervisor exits into the worker retry loop when its reader/writer returns an error, but an indefinitely pending receive does not produce that error.
+- The server accepts and ignores client idle keepalive packets (`is_idle_keepalive`); that behavior does not itself provide a client-observable acknowledgement.
+- The server's `STREAM_ALIVE` control frame is part of the stream-repair round and is emitted while a repair round has recently observed the stream inventory. It is not evidence of a periodic, general-purpose session heartbeat.
+- The disposable E2E confirms the distinction: with the injected test-only receive timeout, the same client process re-registers all nine workers and restores bidirectional TUN traffic; without it, the process stays alive but receives no fresh TUNCONF within the 80-second bound. Both legs are diagnostic CI successes, not proof that the stock packaged client recovers.
+
+### Required next client-recovery design gate
+
+Do **not** promote the test-only idle timeout into production as a generic fix without a protocol/liveness review: a quiet but healthy tunnel may legitimately have no inbound payload, so an arbitrary receive-idle deadline can cause needless reconnect loops.
+
+Before changing the packaged client, choose and test a bounded liveness signal that distinguishes a dead CSQTT peer/session from legitimate idle traffic. The candidate must specify:
+1. Which authenticated message or transport-level failure proves peer liveness, how often it is expected, and how missed responses are bounded.
+2. Backward compatibility with the pinned server/client protocol and behavior when one side does not support the signal.
+3. Worker/session teardown and retry behavior, including TURN allocation reuse versus replacement, with no duplicate workers or stale dispatcher registrations.
+4. Unit tests for healthy idle sessions, missing heartbeat/peer death, delayed responses, packet loss, and recovery; then the existing real Rust client E2E must prove same PID, fresh authenticated TUNCONF for all nine workers, and bidirectional TUN traffic after restart.
+5. Build provenance for the client artifact. The currently packaged ARM64 client is a separately pinned runtime artifact, not this disposable source build; a source-only test patch does not update or fix that package.
+
+Until these gates pass, report the stock-client limitation as known and keep deployment disabled. Do not touch NanoPi, production services, routes, firewall/DNS, VPS, or Keenetic during these tests.
