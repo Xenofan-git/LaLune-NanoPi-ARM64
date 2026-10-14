@@ -183,7 +183,7 @@ SS_MODE=clear IP_RULES= IP_ROUTE_PRESENT=0 IP_TUN_PRESENT=0 IPTABLES_RULES= "$RO
 grep -q 'CSQTT_LALUNE_INSTALL_OK' "$ROOT/out"
 [[ -x "$ROOT/host/usr/local/bin/csqtt-lalune" ]]
 grep -Fq 'Description=CSQTT LaLune isolated dataplane' "$ROOT/host/etc/systemd/system/csqtt-lalune.service"
-grep -Fq 'EnvironmentFile=/etc/csqtt-lalune/server.env' "$ROOT/host/etc/systemd/system/csqtt-lalune.service"
+grep -Fq "EnvironmentFile=$ROOT/host/etc/csqtt-lalune/server.env" "$ROOT/host/etc/systemd/system/csqtt-lalune.service"
 grep -Fq 'CSQTT_MAIN_PASSWORD=mainPass123' "$ROOT/host/etc/csqtt-lalune/server.env"
 grep -Fq 'CSQTT_WEB_USER=webUser123' "$ROOT/host/etc/csqtt-lalune/server.env"
 grep -Fq 'CSQTT_LALUNE_UDP_PORT=47000' "$ROOT/host/etc/csqtt-lalune/server.env"
