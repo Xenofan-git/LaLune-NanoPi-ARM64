@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - test/csqtt-client-reconnect-vm
+      - test/csqtt-process-recovery-e2e
   workflow_dispatch:
 
 permissions:
