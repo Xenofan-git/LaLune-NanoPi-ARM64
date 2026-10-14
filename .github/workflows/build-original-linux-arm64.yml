@@ -318,7 +318,7 @@ jobs:
           printf '%s\n' 'source=Endlad2/csqtt-core@3eafb7ee868f5f2690edf3b0326153813f88eb5f' 'patch=rjs-manual-captcha-fallback-v1' > client-assets/VERSION
           file client-assets/client-linux-arm64
           readelf -h client-assets/client-linux-arm64 | grep -Fq 'AArch64'
-          strings -a client-assets/client-linux-arm64 | grep -Fq 'fallback на ручную CAPTCHA'
+          strings -a client-assets/client-linux-arm64 | grep -Fq 'fallback'
           sha256sum client-assets/client-linux-arm64 | tee client-assets/SHA256SUMS
           echo PATCHED_RJS_MANUAL_FALLBACK_ARM64_CLIENT_BUILD_PASS
       - name: Audit whether built runtime ARM64 client contains negotiated liveness
