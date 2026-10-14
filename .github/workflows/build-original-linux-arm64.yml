@@ -289,29 +289,48 @@ jobs:
           grep -Fq '"assetName":  "csqtt-linux-amd64"' server-assets/csqtt.server-provenance.json
           grep -Fq '"assetName":  "csqtt-linux-armv7"' server-assets/csqtt.server-provenance.json
           grep -Fq 'readonly SCRIPT_VERSION="2.1.9"' server-assets/deploy.sh
-      - name: Fetch pinned runtime CSQTT client core
+      - name: Verify pinned upstream CSQTT ARM64 release baseline
         run: |
           set -euxo pipefail
           mkdir -p client-assets
           CLIENT_VERSION=2026.09.16.17.59
           test "$(curl -fsSL https://raw.githubusercontent.com/Endlad2/csqtt-core/main/LATEST)" = "$CLIENT_VERSION"
-          curl -fL --retry 3 "https://github.com/Endlad2/csqtt-core/releases/download/$CLIENT_VERSION/client-linux-arm64" -o client-assets/client-linux-arm64
-          printf '%s  %s\n' '9a5b917665fda6ee7b3cf8439e3194d46c763f2305d188b4962caee69048ae31' 'client-assets/client-linux-arm64' | sha256sum -c -
-          printf '%s\n' "$CLIENT_VERSION" > client-assets/VERSION
-          chmod 0755 client-assets/client-linux-arm64
+          curl -fL --retry 3 "https://github.com/Endlad2/csqtt-core/releases/download/$CLIENT_VERSION/client-linux-arm64" -o client-assets/client-linux-arm64-upstream
+          printf '%s  %s\\n' '9a5b917665fda6ee7b3cf8439e3194d46c763f2305d188b4962caee69048ae31' 'client-assets/client-linux-arm64-upstream' | sha256sum -c -
+          file client-assets/client-linux-arm64-upstream
+          readelf -h client-assets/client-linux-arm64-upstream | grep -Fq 'AArch64'
+          echo PINNED_UPSTREAM_RUNTIME_CSQTT_CLIENT_BASELINE_PASS
+      - name: Build isolated patched CSQTT client with RJS manual CAPTCHA fallback
+        run: |
+          set -euxo pipefail
+          git clone https://github.com/Endlad2/csqtt-core.git client-source
+          git -C client-source checkout --detach 3eafb7ee868f5f2690edf3b0326153813f88eb5
+          test "$(git -C client-source rev-parse HEAD)" = "3eafb7ee868f5f2690edf3b0326153813f88eb5"
+          rustup toolchain install 1.97.1 --profile minimal
+          rustup target add aarch64-unknown-linux-gnu --toolchain 1.97.1
+          python3 scripts/ci/patch-csqtt-rjs-manual-fallback.py
+          grep -F 'RJS: ошибка, fallback на ручную CAPTCHA' client-source/rust-client/captcha.rs
+          grep -F 'self.webview(stream_id, captcha, "manual", Duration::from_secs(60))' client-source/rust-client/captcha.rs
+          CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \\
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \\
+            cargo +1.97.1 build --locked --release --target aarch64-unknown-linux-gnu --manifest-path client-source/rust-client/Cargo.toml --bin client
+          install -m 0755 client-source/rust-client/target/aarch64-unknown-linux-gnu/release/client client-assets/client-linux-arm64
+          printf '%s\\n' 'source=Endlad2/csqtt-core@3eafb7ee868f5f2690edf3b0326153813f88eb5' 'patch=rjs-manual-captcha-fallback-v1' > client-assets/VERSION
           file client-assets/client-linux-arm64
           readelf -h client-assets/client-linux-arm64 | grep -Fq 'AArch64'
-          echo PINNED_RUNTIME_CSQTT_CLIENT_ARTIFACT_PASS
-      - name: Audit whether runtime ARM64 client contains negotiated liveness
+          strings -a client-assets/client-linux-arm64 | grep -Fq 'fallback на ручную CAPTCHA'
+          sha256sum client-assets/client-linux-arm64 | tee client-assets/SHA256SUMS
+          echo PATCHED_RJS_MANUAL_FALLBACK_ARM64_CLIENT_BUILD_PASS
+      - name: Audit whether built runtime ARM64 client contains negotiated liveness
         run: |
           set -euo pipefail
           if strings -a client-assets/client-linux-arm64 | grep -Fq 'CSQTT_LIVENESS_V1'; then
-            echo "PASS: pinned runtime ARM64 client contains CSQTT_LIVENESS_V1 marker."
+            echo "PASS: runtime ARM64 client contains CSQTT_LIVENESS_V1."
             echo "- Runtime ARM64 client binary contains the negotiated liveness protocol marker." >> "$GITHUB_STEP_SUMMARY"
             echo "CSQTT_RUNTIME_ARM64_LIVENESS_MARKER_PRESENT"
           else
-            echo "NOT INCLUDED: pinned runtime ARM64 client does not contain CSQTT_LIVENESS_V1."
-            echo "- LIMITATION: pinned runtime ARM64 client does not contain CSQTT_LIVENESS_V1; the passing negotiated-liveness E2E patches disposable source clones only and is not included in this release binary." >> "$GITHUB_STEP_SUMMARY"
+            echo "NOT INCLUDED: runtime ARM64 client does not contain CSQTT_LIVENESS_V1."
+            echo "- LIMITATION: runtime ARM64 client does not contain CSQTT_LIVENESS_V1; negotiated-liveness E2E patches disposable source clones only and is not included in this release binary." >> "$GITHUB_STEP_SUMMARY"
             echo "CSQTT_RUNTIME_ARM64_LIVENESS_MARKER_ABSENT"
           fi
       - name: Exercise LaLune installer lifecycle in disposable root
