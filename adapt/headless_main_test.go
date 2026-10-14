@@ -4,8 +4,10 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,5 +212,124 @@ func TestDirectPlanTransitions(t *testing.T) {
 			if needsDNS != tt.wantDNS { t.Errorf("needsDNS = %v, want %v", needsDNS, tt.wantDNS) }
 			if (len(domains)+len(ips) > 0) != tt.wantEnabled { t.Errorf("enabled = %v, want %v", len(domains)+len(ips)>0, tt.wantEnabled) }
 		})
+	}
+}
+
+
+// setCaptchaTestState installs an isolated pending challenge for endpoint tests.
+func setCaptchaTestState(t *testing.T, session string) {
+	t.Helper()
+	captchaMu.Lock()
+	oldPending, oldMode := captchaPending, captchaMode
+	oldURI, oldSession, oldHandled, oldUpdated := captchaRedirectURI, captchaSessionToken, captchaHandledSession, captchaUpdated
+	captchaPending = true
+	captchaMode = "manual"
+	captchaRedirectURI = "https://id.vk.ru/not_robot_captcha?expired_at=1791549600"
+	captchaSessionToken = session
+	captchaHandledSession = ""
+	captchaUpdated = time.Now()
+	captchaMu.Unlock()
+	t.Cleanup(func() {
+		captchaMu.Lock()
+		captchaPending, captchaMode = oldPending, oldMode
+		captchaRedirectURI, captchaSessionToken = oldURI, oldSession
+		captchaHandledSession, captchaUpdated = oldHandled, oldUpdated
+		captchaMu.Unlock()
+	})
+}
+
+func TestCaptchaResultEndpointForwardsToCoreStdin(t *testing.T) {
+	const session = "ci-captcha-session"
+	const result = "fixture-captcha-result"
+	setCaptchaTestState(t, session)
+
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	app := &App{runner: &LinuxRunner{}}
+	linuxRunnerInputs.Store(app.runner, writer)
+	defer linuxRunnerInputs.Delete(app.runner)
+
+	expected := "CAPTCHA_RESULT|" + result + "\n"
+	readResult := make(chan string, 1)
+	readErr := make(chan error, 1)
+	go func() {
+		buf := make([]byte, len(expected))
+		_, err := io.ReadFull(reader, buf)
+		if err != nil {
+			readErr <- err
+			return
+		}
+		readResult <- string(buf)
+	}()
+
+	body := strings.NewReader(`{"sessionToken":"ci-captcha-session","result":"fixture-captcha-result"}`)
+	req := httptest.NewRequest("POST", "/captcha/result", body)
+	rec := httptest.NewRecorder()
+	apiHandler(app).ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("/captcha/result status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var response map[string]bool
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("invalid /captcha/result JSON: %v", err)
+	}
+	if !response["ok"] {
+		t.Fatalf("/captcha/result rejected valid fixture: %s", rec.Body.String())
+	}
+	select {
+	case got := <-readResult:
+		if got != expected {
+			t.Fatalf("core stdin = %q, want %q", got, expected)
+		}
+	case err := <-readErr:
+		t.Fatalf("reading core stdin fixture: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("CAPTCHA_RESULT was not forwarded to core stdin")
+	}
+}
+
+func TestCaptchaResultEndpointRejectsStaleSessionAndUnsafeResult(t *testing.T) {
+	const session = "ci-captcha-session"
+	setCaptchaTestState(t, session)
+	app := &App{runner: &LinuxRunner{}}
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "stale session", body: `{"sessionToken":"old-session","result":"fixture-result"}`},
+		{name: "embedded newline", body: `{"sessionToken":"ci-captcha-session","result":"fixture\nresult"}`},
+		{name: "empty result", body: `{"sessionToken":"ci-captcha-session","result":"  "}`},
+		{name: "oversized result", body: `{"sessionToken":"ci-captcha-session","result":"` + strings.Repeat("x", 16385) + `"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/captcha/result", strings.NewReader(tt.body))
+			rec := httptest.NewRecorder()
+			apiHandler(app).ServeHTTP(rec, req)
+			if rec.Code != 200 {
+				t.Fatalf("/captcha/result status = %d, want 200: %s", rec.Code, rec.Body.String())
+			}
+			var response map[string]bool
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatalf("invalid /captcha/result JSON: %v", err)
+			}
+			if response["ok"] {
+				t.Fatalf("/captcha/result accepted unsafe fixture: %s", tt.name)
+			}
+		})
+	}
+}
+
+func TestCaptchaResultEndpointRequiresPost(t *testing.T) {
+	req := httptest.NewRequest("GET", "/captcha/result", nil)
+	rec := httptest.NewRecorder()
+	apiHandler(&App{}).ServeHTTP(rec, req)
+	if rec.Code != 405 {
+		t.Fatalf("GET /captcha/result status = %d, want 405", rec.Code)
+	}
+	if got := rec.Header().Get("Allow"); got != "POST" {
+		t.Fatalf("GET /captcha/result Allow = %q, want POST", got)
 	}
 }
