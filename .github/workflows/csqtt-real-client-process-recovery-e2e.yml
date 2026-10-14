@@ -137,7 +137,7 @@ jobs:
           # client/server netns joined by a veth pair. Separate netns are essential:
           # otherwise the server's local TUN address would intercept the client's
           # test ping before it entered the client TUN.
-          sudo timeout --signal=TERM --kill-after=5s 150s unshare --net --fork --mount-proc bash -euc '
+          sudo env CSQTT_TEST_ENABLE_IDLE_WATCHDOG="$CSQTT_TEST_ENABLE_IDLE_WATCHDOG" timeout --signal=TERM --kill-after=5s 150s unshare --net --fork --mount-proc bash -euc '
             client="$1"; server="$2"; config="$3"; server_log="$4"; client_log="$5"; turn_log="$6"; bridge_script="$7"; bridge_log="$8"; counter_file="$9"
             server_ns=csqtt-server-e2e
             client_ns=csqtt-client-e2e
