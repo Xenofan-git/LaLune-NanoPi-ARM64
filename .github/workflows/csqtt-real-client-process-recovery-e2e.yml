@@ -462,3 +462,127 @@ jobs:
           path: experimental-arm64/
           if-no-files-found: error
           retention-days: 14
+
+
+  experimental-arm64-system-vm:
+    name: Test experimental ARM64 liveness client/server in system VM with TUN recovery
+    needs: experimental-arm64-liveness-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download experimental ARM64 client and server
+        uses: actions/download-artifact@v4
+        with:
+          name: experimental-csqtt-arm64-negotiated-liveness
+          path: experimental-arm64
+
+      - name: Verify experimental artifact provenance and hashes
+        run: |
+          set -euxo pipefail
+          (cd experimental-arm64 && sha256sum -c SHA256SUMS)
+          grep -Fq 'CI-only credentials hook' experimental-arm64/README.txt
+          file experimental-arm64/csqtt-client-arm64-liveness-experimental
+          file experimental-arm64/csqtt-server-arm64-liveness-experimental
+          readelf -h experimental-arm64/csqtt-client-arm64-liveness-experimental | grep -Fq AArch64
+          readelf -h experimental-arm64/csqtt-server-arm64-liveness-experimental | grep -Fq AArch64
+          strings -a experimental-arm64/csqtt-client-arm64-liveness-experimental | grep -Fq CSQTT_LIVENESS_V1
+          strings -a experimental-arm64/csqtt-server-arm64-liveness-experimental | grep -Fq CSQTT_LIVENESS_V1
+
+      - name: Install QEMU system emulator and cloud image tools
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-arm qemu-efi-aarch64 cloud-image-utils openssh-client
+
+      - name: Prepare disposable Debian ARM64 guest
+        run: |
+          set -euxo pipefail
+          mkdir -p vm
+          curl -fL --retry 3 https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-arm64.qcow2 -o vm/guest.qcow2
+          ssh-keygen -q -t ed25519 -N '' -f vm/id_ed25519
+          cat > vm/user-data <<'EOF'
+          #cloud-config
+          users:
+            - name: tester
+              groups: [sudo]
+              shell: /bin/bash
+              sudo: ALL=(ALL) NOPASSWD:ALL
+              ssh_authorized_keys:
+                - KEY_PLACEHOLDER
+          ssh_pwauth: false
+          package_update: true
+          packages:
+            - coturn
+            - iproute2
+            - iptables
+            - nftables
+            - iputils-ping
+            - python3
+            - python3-cryptography
+            - openssh-server
+          EOF
+          sed -i "s|KEY_PLACEHOLDER|$(cat vm/id_ed25519.pub)|" vm/user-data
+          cat > vm/meta-data <<'EOF'
+          instance-id: csqtt-experimental-arm64-liveness
+          local-hostname: csqtt-arm64-liveness-test
+          EOF
+          cloud-localds vm/seed.iso vm/user-data vm/meta-data
+          qemu-img resize vm/guest.qcow2 8G
+          test -f /usr/share/AAVMF/AAVMF_CODE.fd
+          cp /usr/share/AAVMF/AAVMF_CODE.fd vm/firmware-code.fd
+          cp /usr/share/AAVMF/AAVMF_VARS.fd vm/firmware-vars.fd
+
+      - name: Boot full ARM64 Linux system VM
+        run: |
+          set -euxo pipefail
+          qemu-system-aarch64 \
+            -machine virt -cpu max -m 4096 -smp 4 -accel tcg \
+            -drive if=pflash,format=raw,readonly=on,file=vm/firmware-code.fd \
+            -drive if=pflash,format=raw,file=vm/firmware-vars.fd \
+            -drive if=none,file=vm/guest.qcow2,format=qcow2,id=hd0 \
+            -device virtio-blk-device,drive=hd0 \
+            -drive file=vm/seed.iso,if=none,format=raw,id=seed \
+            -device virtio-blk-device,drive=seed \
+            -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2223-:22 \
+            -device virtio-net-pci,netdev=net0 \
+            -display none -monitor none -daemonize -pidfile vm/qemu.pid -serial file:vm/serial.log
+          for attempt in $(seq 1 120); do
+            if ssh -i vm/id_ed25519 -p 2223 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=3 tester@127.0.0.1 'uname -m' 2>/dev/null | grep -qx aarch64; then
+              break
+            fi
+            sleep 5
+          done
+          ssh -i vm/id_ed25519 -p 2223 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'set -e; test "$(uname -m)" = aarch64; sudo cloud-init status --wait; sudo modprobe tun || true; test -c /dev/net/tun'
+
+      - name: Run experimental negotiated liveness with real ARM64 TUN dataplane and server restart
+        run: |
+          set -euxo pipefail
+          SSH=(ssh -i vm/id_ed25519 -p 2223 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1)
+          SCP=(scp -i vm/id_ed25519 -P 2223 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+          "${SCP[@]}" experimental-arm64/csqtt-client-arm64-liveness-experimental experimental-arm64/csqtt-server-arm64-liveness-experimental scripts/ci/run-csqtt-arm64-liveness-vm.sh scripts/ci/csqtt-test-tun-udp-bridge.py tester@127.0.0.1:/home/tester/
+          "${SSH[@]}" 'chmod 0755 /home/tester/csqtt-client-arm64-liveness-experimental /home/tester/csqtt-server-arm64-liveness-experimental /home/tester/run-csqtt-arm64-liveness-vm.sh; sudo bash /home/tester/run-csqtt-arm64-liveness-vm.sh'
+          echo "PASS: experimental AArch64 client and server negotiated liveness in a full ARM64 system VM; quiet tunnel survived multiple probe periods; same client process re-registered workers and restored bidirectional TUN IPv4 after server restart."
+
+      - name: Collect ARM64 VM diagnostics
+        if: always()
+        run: |
+          set +e
+          if [ -f vm/id_ed25519 ] && ssh -i vm/id_ed25519 -p 2223 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=3 tester@127.0.0.1 'true' 2>/dev/null; then
+            ssh -i vm/id_ed25519 -p 2223 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo tar -czf /tmp/csqtt-arm64-liveness-diagnostics.tar.gz /tmp/csqtt-arm64-liveness-vm 2>/dev/null || true'
+            scp -i vm/id_ed25519 -P 2223 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1:/tmp/csqtt-arm64-liveness-diagnostics.tar.gz vm/diagnostics.tar.gz 2>/dev/null || true
+          fi
+          if [ -f vm/serial.log ]; then tail -n 100 vm/serial.log; fi
+
+      - name: Upload ARM64 VM diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: experimental-arm64-liveness-vm-diagnostics
+          path: vm/diagnostics.tar.gz
+          if-no-files-found: ignore
+          retention-days: 7
