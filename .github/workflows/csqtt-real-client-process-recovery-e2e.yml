@@ -393,3 +393,63 @@ jobs:
           else
             echo "NATIVE_RUST_CLIENT_NO_WATCHDOG_DIAGNOSTIC_PASS"
           fi
+
+  experimental-arm64-liveness-build:
+    name: Build separate experimental ARM64 liveness client (not production)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ARM64 cross toolchain and Rust target
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Fetch pinned client and server sources
+        run: |
+          set -euxo pipefail
+          git clone https://github.com/Endlad2/csqtt-core.git client-source
+          git -C client-source checkout --detach 3eafb7ee868f5f2690edf3b0326153813f88eb5f
+          git clone --depth 1 --branch v2.1.9 https://github.com/amurcanov/csqtt.git server-source
+          test "$(git -C client-source rev-parse HEAD)" = "3eafb7ee868f5f2690edf3b0326153813f88eb5f"
+          test "$(git -C server-source describe --tags --exact-match)" = "v2.1.9"
+          cmp client-source/shared/wire_protocol.rs server-source/shared/wire_protocol.rs
+          python3 scripts/ci/patch-csqtt-process-e2e-auth.py
+          python3 scripts/ci/patch-csqtt-negotiated-liveness.py
+          grep -F 'CSQTT_LIVENESS_V1' client-source/rust-client/session.rs
+          grep -F 'CSQTT_LIVENESS_V1' server-source/rust-server/protocol.rs
+
+      - name: Cross-compile isolated experimental ARM64 binaries
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: |
+          set -euxo pipefail
+          cargo build --locked --target aarch64-unknown-linux-gnu --manifest-path client-source/rust-client/Cargo.toml --bin client
+          cargo build --locked --target aarch64-unknown-linux-gnu --manifest-path server-source/rust-server/Cargo.toml --bin csqtt
+          client=client-source/rust-client/target/aarch64-unknown-linux-gnu/debug/client
+          server=server-source/rust-server/target/aarch64-unknown-linux-gnu/debug/csqtt
+          test -x "$client"
+          test -x "$server"
+          readelf -h "$client" | grep -Fq 'AArch64'
+          readelf -h "$server" | grep -Fq 'AArch64'
+          strings -a "$client" | grep -Fq 'CSQTT_LIVENESS_V1'
+          strings -a "$server" | grep -Fq 'CSQTT_LIVENESS_V1'
+          mkdir -p experimental-arm64
+          install -m 0755 "$client" experimental-arm64/csqtt-client-arm64-liveness-experimental
+          install -m 0755 "$server" experimental-arm64/csqtt-server-arm64-liveness-experimental
+          printf '%s\n' 'NOT FOR PRODUCTION: CI-only credentials hook; pinned source + test-only negotiated liveness patch.' > experimental-arm64/README.txt
+          (cd experimental-arm64 && sha256sum * > SHA256SUMS && sha256sum -c SHA256SUMS)
+          echo "EXPERIMENTAL_ARM64_LIVENESS_CROSS_COMPILE_PASS"
+
+      - name: Upload separate experimental ARM64 binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: experimental-csqtt-arm64-negotiated-liveness
+          path: experimental-arm64/
+          if-no-files-found: error
+          retention-days: 14
