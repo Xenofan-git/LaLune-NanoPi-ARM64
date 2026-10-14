@@ -705,6 +705,114 @@ jobs:
             sudo grep -Fxq CSQTT-LALUNE-MANAGED-V1 /etc/csqtt-lalune/.managed-by-lalune
             echo ARM64_SYSTEM_VM_LIFECYCLE_PASS'
           
+      - name: End-to-end test of the actual Deploy button API against disposable ARM64 VM
+        timeout-minutes: 12
+        run: |
+          set -Eeuo pipefail
+          mkdir -p vm/deploy-e2e-home
+          export HOME="$GITHUB_WORKSPACE/vm/deploy-e2e-home"
+          export XDG_CONFIG_HOME="$HOME/.config"
+          cd vm/real/deploy-e2e
+          ./lalune-original-linux-amd64 > "$GITHUB_WORKSPACE/vm/deploy-e2e-backend.log" 2>&1 &
+          BACKEND_PID=$!
+          cleanup_backend() { kill "$BACKEND_PID" 2>/dev/null || true; wait "$BACKEND_PID" 2>/dev/null || true; }
+          trap cleanup_backend EXIT
+          cd "$GITHUB_WORKSPACE"
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:1062/deploy/status >/dev/null; then break; fi
+            if ! kill -0 "$BACKEND_PID" 2>/dev/null; then cat vm/deploy-e2e-backend.log; exit 1; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:1062/deploy/status >/dev/null
+          python3 - <<'PY'
+          import json, os, urllib.request
+          payload = {
+              "protocol": "CSQTT",
+              "host": "127.0.0.1",
+              "sshPort": 2222,
+              "user": "tester",
+              "usePassword": False,
+              "password": "",
+              "keyPath": os.path.abspath("vm/id_ed25519"),
+              "manualPorts": False,
+              "corePort": 47000,
+              "warpPort": 47002,
+              "listenPort": 0,
+              "mainPassword": "deployMain123",
+              "webUser": "deployWeb123",
+              "webPassword": "deployPass123",
+              "dockerInstall": False,
+              "uninstall": False,
+          }
+          req = urllib.request.Request(
+              "http://127.0.0.1:1062/deploy",
+              data=json.dumps(payload).encode(),
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=15) as response:
+              result = json.load(response)
+          if not result.get("ok"):
+              raise SystemExit("Deploy button API refused the deployment request")
+          print("DEPLOY_BUTTON_API_ACCEPTED")
+          PY
+          deploy_done=0
+          for attempt in $(seq 1 180); do
+            status="$(curl -fsS http://127.0.0.1:1062/deploy/status)"
+            if python3 -c 'import json,sys; raise SystemExit(0 if not json.load(sys.stdin).get("deploying", True) else 1)' <<<"$status"; then
+              deploy_done=1
+              break
+            fi
+            sleep 2
+          done
+          [[ "$deploy_done" == 1 ]] || { cat vm/deploy-e2e-backend.log; exit 1; }
+          deploy_log="$(curl -fsS http://127.0.0.1:1062/deploy/log | python3 -c 'import json,sys; print(json.load(sys.stdin))')"
+          printf '%s\n' "$deploy_log"
+          grep -Fq 'CSQTT_LALUNE_DEPLOY_OK' <<<"$deploy_log"
+          ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo systemctl is-active --quiet csqtt-lalune.service && sudo systemctl is-active --quiet csqtt.service && sudo systemctl is-active --quiet csqtt-47000.service && sudo systemctl is-active --quiet csqtt-47000-netns.service && sudo ss -H -lun "sport = :47000" | grep -q . && sudo ss -H -ltn "sport = :47002" | grep -q . && sudo systemctl show -p ActiveState -p SubState csqtt.service csqtt-47000.service csqtt-47000-netns.service > /tmp/production-states.after-button-install && diff -u /tmp/production-states.before /tmp/production-states.after-button-install && sudo ip -4 route show table main | grep -vF "10.67.68.0/24 dev csqtt-lalune0" > /tmp/main-routes.after-button-install.unrelated && diff -u /tmp/main-routes.before /tmp/main-routes.after-button-install.unrelated'
+          python3 - <<'PY'
+          import json, os, urllib.request
+          payload = {
+              "protocol": "CSQTT",
+              "host": "127.0.0.1",
+              "sshPort": 2222,
+              "user": "tester",
+              "usePassword": False,
+              "password": "",
+              "keyPath": os.path.abspath("vm/id_ed25519"),
+              "manualPorts": False,
+              "corePort": 47000,
+              "warpPort": 47002,
+              "listenPort": 0,
+              "uninstall": True,
+          }
+          req = urllib.request.Request(
+              "http://127.0.0.1:1062/deploy",
+              data=json.dumps(payload).encode(),
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=15) as response:
+              result = json.load(response)
+          if not result.get("ok"):
+              raise SystemExit("Deploy button API refused the isolated uninstall request")
+          print("DEPLOY_BUTTON_UNINSTALL_API_ACCEPTED")
+          PY
+          uninstall_done=0
+          for attempt in $(seq 1 120); do
+            status="$(curl -fsS http://127.0.0.1:1062/deploy/status)"
+            if python3 -c 'import json,sys; raise SystemExit(0 if not json.load(sys.stdin).get("deploying", True) else 1)' <<<"$status"; then
+              uninstall_done=1
+              break
+            fi
+            sleep 2
+          done
+          [[ "$uninstall_done" == 1 ]] || { cat vm/deploy-e2e-backend.log; exit 1; }
+          uninstall_log="$(curl -fsS http://127.0.0.1:1062/deploy/log | python3 -c 'import json,sys; print(json.load(sys.stdin))')"
+          printf '%s\n' "$uninstall_log"
+          grep -Fq 'CSQTT_LALUNE_UNINSTALL_OK' <<<"$uninstall_log"
+          ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo systemctl is-active --quiet csqtt.service && sudo systemctl is-active --quiet csqtt-47000.service && sudo systemctl is-active --quiet csqtt-47000-netns.service && ! sudo systemctl is-active --quiet csqtt-lalune.service && sudo ip -4 route show table main > /tmp/main-routes.after-button-uninstall && diff -u /tmp/main-routes.before /tmp/main-routes.after-button-uninstall && sudo test -f /etc/csqtt-lalune/.managed-by-lalune'
+          echo DEPLOY_BUTTON_INSTALL_UNINSTALL_E2E_PASS
       - name: Upload guest diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
