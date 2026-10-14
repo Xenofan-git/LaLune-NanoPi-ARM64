@@ -288,7 +288,7 @@ case "$(uname -m)" in
 esac
 sudo -n env CSQTT_LALUNE_UDP_PORT='{peer_port}' CSQTT_LALUNE_WEB_PORT='{web_port}' bash "$BUNDLE/install-csqtt-lalune.sh" --secrets-file "$BUNDLE/server-secrets.txt"
 for attempt in $(seq 1 30); do
-  systemctl is-active --quiet csqtt-lalune.service || { sleep 1; continue; }
+  systemctl is-active --quiet csqtt-lalune.service || {{ sleep 1; continue; }}
   if ss -H -lun "sport = :{peer_port}" | grep -q . && ss -H -ltn "sport = :{web_port}" | grep -q .; then
     echo "CSQTT_LALUNE_DEPLOY_OK"
     exit 0
