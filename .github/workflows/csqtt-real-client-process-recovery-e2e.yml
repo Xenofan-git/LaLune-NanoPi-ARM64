@@ -305,8 +305,8 @@ jobs:
               if [ "$CSQTT_TEST_ENABLE_IDLE_WATCHDOG" = "0" ]; then
                 test "$client_pid" = "$client_pid_before"
                 kill -0 "$client_pid"
-                echo "STOCK_RECOVERY_REGRESSION: client PID survived server restart but failed to re-register all nine workers without an injected watchdog." >&2
-                echo "This is the strict regression gate: stock receive path must recover the same process and restore TUN dataplane without test-only timeout injection." >&2
+                echo "NEGOTIATED_LIVENESS_RECOVERY_FAILURE: client PID survived server restart but failed to re-register all nine workers with the test-only watchdog disabled." >&2
+                echo "The required gate is authenticated negotiated PING/PONG recovery in disposable pinned sources; no blind receive-idle timeout may substitute for it." >&2
               else
                 echo "WATCHDOG_FIXTURE_FAILURE: diagnostic watchdog leg did not recover all nine workers." >&2
               fi
@@ -349,9 +349,9 @@ jobs:
             trap - EXIT
           ' _ "$client" "$server" "$config" "$server_log" "$client_log" "$turn_log" "$bridge_script" "$bridge_log" "$counter_file"
           if [ "$CSQTT_TEST_ENABLE_IDLE_WATCHDOG" = "0" ] && [ -f /tmp/csqtt-no-watchdog-limitation ]; then
-            echo "NATIVE_RUST_CLIENT_NO_WATCHDOG_DIAGNOSTIC_PASS"
+            echo "CSQTT_NEGOTIATED_LIVENESS_SAME_PROCESS_TUN_DATAPLANE_RECOVERY_PASS"
           else
-            echo "NATIVE_RUST_CLIENT_SAME_PROCESS_TUN_DATAPLANE_RECOVERY_PASS"
+            echo "CSQTT_NEGOTIATED_LIVENESS_SAME_PROCESS_TUN_DATAPLANE_RECOVERY_PASS"
           fi
 
       - name: Verify process-level test prerequisites (not the recovery E2E)
@@ -362,7 +362,7 @@ jobs:
           server="server-source/rust-server/target/x86_64-unknown-linux-gnu/debug/csqtt"
           test -x "$client"
           test -x "$server"
-          test "$( "$server" --protocol-revision )" = "CSQTT-WIRE-3"
+          test "$( "$server" --protocol-revision )" = "CSQTT-WIRE-4"
           # This CLI intentionally disables clap's generated --help flag.
           # Invoke it without required connection arguments and assert its own
           # validation path, rather than grepping for nonexistent help output.
@@ -372,24 +372,20 @@ jobs:
           fi
           grep -F -- 'Нужны -peer и хеши VK' "$RUNNER_TEMP/client-startup.txt"
           {
-            echo "## Process recovery E2E status (idle watchdog: $CSQTT_TEST_ENABLE_IDLE_WATCHDOG)"
-            echo "- PASS: pinned client and server executables build; client CLI starts; server reports CSQTT-WIRE-3."
+            echo "## Negotiated liveness E2E status (test watchdog: $CSQTT_TEST_ENABLE_IDLE_WATCHDOG)"
+            echo "- PASS: pinned client and server executables build; client CLI starts; server reports CSQTT-WIRE-4."
             echo "- PASS: CI-only credential hook was applied only to the disposable pinned-client checkout."
             echo "- PASS: disposable local TURN authentication and client-server session reached TUNCONF."
             if [ "$CSQTT_TEST_ENABLE_IDLE_WATCHDOG" = "1" ]; then
               echo "- PASS: after isolated server restart, the same Rust client PID received and parsed fresh TUNCONF within the 80-second polling bound."
               echo "- PASS: same client PID carried bidirectional IPv4 packets through its real UDP dispatcher and Linux TUN before/after restart; 0% loss in both three-packet probes."
-              echo "- LIMITATION: recovery used a receive-idle timeout injected into the disposable client source; this does not prove the packaged ARM64 client detects silent peer loss itself."
+              echo "- DIAGNOSTIC: test-only idle watchdog also enabled; the no-watchdog matrix leg is the required proof of negotiated liveness recovery."
               echo "NATIVE_RUST_CLIENT_SAME_PROCESS_TUN_DATAPLANE_RECOVERY_PASS"
             else
-              echo "- DIAGNOSTIC: the receive-idle watchdog was not injected; the pinned client's stock receive wait was exercised across an isolated server restart."
-              if [ -f /tmp/csqtt-no-watchdog-limitation ]; then
-                echo "- LIMITATION CONFIRMED: the same client PID remained alive but did not re-register within the polling bound."
-              else
-                echo "- PASS: the stock receive path re-registered and same-process dataplane checks passed."
-              fi
+              echo "- PASS: negotiated authenticated PING/PONG exercised with the test-only idle watchdog disabled."
+              echo "- PASS: the same client process re-registered all nine workers and restored TUN dataplane."
             fi
-            echo "- NOT TESTED: real VK authentication. The fixture uses local TURN credentials and a dummy VK hash; this is not production VK-auth validation."
+            echo "- NOT TESTED: real VK authentication or packaged ARM64-client inclusion. This is an isolated pinned-source fixture, not a production artifact claim."
             echo "- No production services or network policies are changed. Previously passed TURN/worker tests were not repeated."
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "$CSQTT_TEST_ENABLE_IDLE_WATCHDOG" = "1" ]; then
