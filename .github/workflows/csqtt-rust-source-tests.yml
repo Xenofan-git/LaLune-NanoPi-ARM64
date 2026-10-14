@@ -38,7 +38,7 @@ jobs:
         working-directory: upstream-csqtt-core/rust-client
         env:
           CARGO_TERM_COLOR: never
-        run: cargo test --locked --bin client
+        run: cargo test --locked --bin client -- --test-threads=1
 
       - name: Record scope of this test
         run: |
