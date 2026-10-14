@@ -278,7 +278,6 @@ official = r'''fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Res
         let remote_bundle = format!("{remote_stage}/{bundle_name}");
         let peer_port = ports.core.unwrap_or(47000);
         let web_port = ports.warp.unwrap_or(47002);
-        let mode = if args.install_in_docker { "docker" } else { "systemd" };
         let script = format!(r#"set -Eeuo pipefail
 STAGE='{remote_stage}'
 BUNDLE='{remote_bundle}'
@@ -377,7 +376,7 @@ replace_once(
 replace_once(
     deploy,
     "fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {",
-    "fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {\n    if args.uninstall { return uninstall_official_csqtt(args, ports); }",
+    "fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {\n    if args.install_in_docker { anyhow::bail!(\"Docker mode is not supported for the isolated LaLune service; no remote changes were made.\"); }\n    if args.uninstall { return uninstall_official_csqtt(args, ports); }",
 )
 uninstall = r'''fn uninstall_official_csqtt(args: &DeployArgs, _ports: &Ports) -> Result<()> {
     let source = args.local_binary_dir.as_deref()
