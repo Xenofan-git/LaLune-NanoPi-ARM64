@@ -170,10 +170,18 @@ grep -q 'LaLune policy identifiers already exist' "$ROOT/out"
 [[ ! -e "$ROOT/host/etc/csqtt-lalune" ]]
 
 # Case 3: successful isolated install in the temporary root.
-SS_MODE=clear IP_RULES= IP_ROUTE_PRESENT=0 IP_TUN_PRESENT=0 IPTABLES_RULES= "$ROOT/package/install.sh" >"$ROOT/out"
+printf 'mainPass123\nwebUser123\nwebPass123\n0123456789abcdef\n' > "$ROOT/package/server-secrets.txt"
+chmod 0600 "$ROOT/package/server-secrets.txt"
+SS_MODE=clear IP_RULES= IP_ROUTE_PRESENT=0 IP_TUN_PRESENT=0 IPTABLES_RULES= "$ROOT/package/install.sh" --secrets-file "$ROOT/package/server-secrets.txt" >"$ROOT/out"
 grep -q 'CSQTT_LALUNE_INSTALL_OK' "$ROOT/out"
 [[ -x "$ROOT/host/usr/local/bin/csqtt-lalune" ]]
 grep -Fq 'Description=CSQTT LaLune isolated dataplane' "$ROOT/host/etc/systemd/system/csqtt-lalune.service"
+grep -Fq 'EnvironmentFile=/etc/csqtt-lalune/server.env' "$ROOT/host/etc/systemd/system/csqtt-lalune.service"
+grep -Fq 'CSQTT_MAIN_PASSWORD=mainPass123' "$ROOT/host/etc/csqtt-lalune/server.env"
+grep -Fq 'CSQTT_WEB_USER=webUser123' "$ROOT/host/etc/csqtt-lalune/server.env"
+grep -Fq 'CSQTT_LALUNE_UDP_PORT=47000' "$ROOT/host/etc/csqtt-lalune/server.env"
+grep -Fq 'CSQTT_LALUNE_WEB_PORT=47002' "$ROOT/host/etc/csqtt-lalune/server.env"
+[[ "$(stat -c %a "$ROOT/host/etc/csqtt-lalune/server.env")" == 600 ]]
 grep -Fq 'CSQTT-LALUNE-MANAGED-V1' "$ROOT/host/etc/csqtt-lalune/.managed-by-lalune"
 
 # An active LaLune unit is not silently stopped for an upgrade/reinstall.
