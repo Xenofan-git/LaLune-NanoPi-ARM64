@@ -264,7 +264,7 @@ official = r'''fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Res
             .context("restrict temporary LaLune server credentials")?;
 
         let remote = format!("{}@{}", args.user, args.host);
-        let remote_stage = format!("/tmp/lalune-csqtt-deploy-{}", std::process::id());
+        let remote_stage = format!("/tmp/lalune-csqtt-deploy-{}-{nonce:x}", std::process::id());
         let prepare = format!("set -euo pipefail; test ! -e '{remote_stage}'; install -d -m 700 '{remote_stage}'");
         let prepared = run_ssh(args, &remote, &prepare).context("prepare remote CSQTT staging directory")?;
         if !prepared.status.success() {
