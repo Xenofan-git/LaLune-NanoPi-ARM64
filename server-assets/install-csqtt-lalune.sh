@@ -110,6 +110,16 @@ printf '%s\n' "$MARKER" > "$ETC/.managed-by-lalune"
 printf '%s\n' "$MARKER" > "$LIB/.managed-by-lalune"
 printf '%s\n' "$MARKER" > "$STATE/.managed-by-lalune"
 printf '%s\n' "$MARKER" > "$LOG/.managed-by-lalune"
+cat > "$ETC/server.env.new" <<ENV
+CSQTT_MAIN_PASSWORD=$MAIN_PASSWORD
+CSQTT_WEB_USER=$WEB_USER
+CSQTT_WEB_PASS=$WEB_PASSWORD
+CSQTT_DEVICE_ID=$DEVICE_ID
+CSQTT_LALUNE_UDP_PORT=$UDP_PORT
+CSQTT_LALUNE_WEB_PORT=$WEB_PORT
+ENV
+chmod 0600 "$ETC/server.env.new"
+mv -f -- "$ETC/server.env.new" "$ETC/server.env"
 install -m 0755 "$SOURCE" "${BIN}.new"
 mv -f -- "${BIN}.new" "$BIN"
 
@@ -125,7 +135,8 @@ ConditionPathIsExecutable=/usr/local/bin/csqtt-lalune
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/csqtt-lalune --listen 0.0.0.0:47000 --web-port 47002 --config-dir /etc/csqtt-lalune
+EnvironmentFile=/etc/csqtt-lalune/server.env
+ExecStart=/usr/local/bin/csqtt-lalune --listen 0.0.0.0:${CSQTT_LALUNE_UDP_PORT} --web-port ${CSQTT_LALUNE_WEB_PORT} --config-dir /etc/csqtt-lalune
 Restart=on-failure
 RestartSec=3
 UMask=0077
