@@ -302,13 +302,11 @@ jobs:
               if [ "$CSQTT_TEST_ENABLE_IDLE_WATCHDOG" = "0" ]; then
                 test "$client_pid" = "$client_pid_before"
                 kill -0 "$client_pid"
-                echo "EXPECTED_LIMITATION: stock receive wait stayed blocked after server restart without injected idle watchdog."
-                echo "LIMITATION_CONFIRMED: stock receive wait did not re-register within the 80-second polling bound without an injected timeout; the same client PID remained alive." > /tmp/csqtt-no-watchdog-limitation
-                cleanup
-                trap - EXIT
-                exit 0
+                echo "STOCK_RECOVERY_REGRESSION: client PID survived server restart but failed to re-register all nine workers without an injected watchdog." >&2
+                echo "This is the strict regression gate: stock receive path must recover the same process and restore TUN dataplane without test-only timeout injection." >&2
+              else
+                echo "WATCHDOG_FIXTURE_FAILURE: diagnostic watchdog leg did not recover all nine workers." >&2
               fi
-              echo "same Rust client process did not receive a fresh TUNCONF after server restart" >&2
               exit 1
             fi
             test "$client_pid" = "$client_pid_before"
