@@ -340,7 +340,11 @@ jobs:
             cleanup
             trap - EXIT
           ' _ "$client" "$server" "$config" "$server_log" "$client_log" "$turn_log" "$bridge_script" "$bridge_log" "$counter_file"
-          echo "NATIVE_RUST_CLIENT_SAME_PROCESS_TUN_DATAPLANE_RECOVERY_PASS"
+          if [ "$CSQTT_TEST_ENABLE_IDLE_WATCHDOG" = "0" ] && [ -f /tmp/csqtt-no-watchdog-limitation ]; then
+            echo "NATIVE_RUST_CLIENT_NO_WATCHDOG_DIAGNOSTIC_PASS"
+          else
+            echo "NATIVE_RUST_CLIENT_SAME_PROCESS_TUN_DATAPLANE_RECOVERY_PASS"
+          fi
 
       - name: Verify process-level test prerequisites (not the recovery E2E)
         shell: bash
