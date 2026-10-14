@@ -169,6 +169,13 @@ fi
 grep -q 'LaLune policy identifiers already exist' "$ROOT/out"
 [[ ! -e "$ROOT/host/etc/csqtt-lalune" ]]
 
+# Case 2b: deployment credentials are mandatory and failure must precede filesystem changes.
+if SS_MODE=clear IP_RULES= IP_ROUTE_PRESENT=0 IP_TUN_PRESENT=0 IPTABLES_RULES= "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
+  echo "FAIL: installer accepted a missing secrets file" >&2; exit 1
+fi
+grep -q 'regular --secrets-file is required' "$ROOT/out"
+[[ ! -e "$ROOT/host/etc/csqtt-lalune" && ! -e "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
+
 # Case 3: successful isolated install in the temporary root.
 printf 'mainPass123\nwebUser123\nwebPass123\n0123456789abcdef\n' > "$ROOT/package/server-secrets.txt"
 chmod 0600 "$ROOT/package/server-secrets.txt"
