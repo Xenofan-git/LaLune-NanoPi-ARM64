@@ -260,7 +260,7 @@ official = r'''fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Res
             format!("{main_password}\n{web_user}\n{web_password}\n{device_id}\n"),
         ).context("write temporary LaLune server credentials")?;
         #[cfg(unix)]
-        fs::set_permissions(bundle.join("server-secrets.txt"), fs::Permissions::from_mode(0o600))
+        fs::set_permissions(bundle.join("server-secrets.txt"), std::os::unix::fs::PermissionsExt::from_mode(0o600))
             .context("restrict temporary LaLune server credentials")?;
 
         let remote = format!("{}@{}", args.user, args.host);
