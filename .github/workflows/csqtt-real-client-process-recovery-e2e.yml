@@ -21,6 +21,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Test proposed liveness frame codec and state-machine edge cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/ci/test-csqtt-liveness-protocol-model.py
+          python3 scripts/ci/test-csqtt-liveness-protocol-model.py
+
       - name: Install pinned Rust toolchain and Linux test tools
         uses: dtolnay/rust-toolchain@1.97.1
         with:
