@@ -287,7 +287,7 @@ case "$(uname -m)" in
   aarch64|arm64|x86_64|amd64) ;;
   *) echo "unsupported LaLune server architecture; no service files changed" >&2; exit 2 ;;
 esac
-CSQTT_LALUNE_UDP_PORT='{peer_port}' CSQTT_LALUNE_WEB_PORT='{web_port}' bash "$BUNDLE/install-csqtt-lalune.sh" --secrets-file "$BUNDLE/server-secrets.txt"
+sudo -n env CSQTT_LALUNE_UDP_PORT='{peer_port}' CSQTT_LALUNE_WEB_PORT='{web_port}' bash "$BUNDLE/install-csqtt-lalune.sh" --secrets-file "$BUNDLE/server-secrets.txt"
 systemctl is-active --quiet csqtt-lalune.service
 ss -H -lun "sport = :{peer_port}" | grep -q .
 ss -H -ltn "sport = :{web_port}" | grep -q .
@@ -410,7 +410,7 @@ uninstall = r'''fn uninstall_official_csqtt(args: &DeployArgs, _ports: &Ports) -
         let script = format!(r#"set -Eeuo pipefail
 STAGE='{remote_stage}'
 trap 'rm -rf -- "$STAGE"' EXIT
-bash '{remote_bundle}/uninstall-csqtt-lalune.sh'
+sudo -n bash '{remote_bundle}/uninstall-csqtt-lalune.sh'
 "#);
         let output = run_ssh(args, &remote, &script).context("run isolated LaLune uninstaller over SSH")?;
         let stdout = String::from_utf8_lossy(&output.stdout);
