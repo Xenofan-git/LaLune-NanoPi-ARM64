@@ -104,8 +104,11 @@ var captchaHandledSession string
 var captchaUpdated time.Time
 
 func captchaRequestIsActive(mode, redirectURI string, now time.Time) bool {
-    // Automatic CAPTCHA events are internal retries and must never trigger UI.
-    if !strings.EqualFold(strings.TrimSpace(mode), "manual") {
+    // "selected" is emitted by the pinned core's explicit WBV mode. On Linux
+    // it must use the same browser bridge as the final manual fallback.
+    // "auto" events remain internal retries and must never trigger UI.
+    mode = strings.ToLower(strings.TrimSpace(mode))
+    if mode != "manual" && mode != "selected" {
         return false
     }
     // VK challenge links include an explicit expiry. Do not resurrect an old
