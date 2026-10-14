@@ -311,11 +311,11 @@ jobs:
           python3 scripts/ci/patch-csqtt-rjs-manual-fallback.py
           grep -F 'RJS: ошибка, fallback на ручную CAPTCHA' client-source/rust-client/captcha.rs
           grep -F 'self.webview(stream_id, captcha, "manual", Duration::from_secs(60))' client-source/rust-client/captcha.rs
-          CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \\
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \\
+          CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
             cargo +1.97.1 build --locked --release --target aarch64-unknown-linux-gnu --manifest-path client-source/rust-client/Cargo.toml --bin client
           install -m 0755 client-source/rust-client/target/aarch64-unknown-linux-gnu/release/client client-assets/client-linux-arm64
-          printf '%s\\n' 'source=Endlad2/csqtt-core@3eafb7ee868f5f2690edf3b0326153813f88eb5f' 'patch=rjs-manual-captcha-fallback-v1' > client-assets/VERSION
+          printf '%s\n' 'source=Endlad2/csqtt-core@3eafb7ee868f5f2690edf3b0326153813f88eb5f' 'patch=rjs-manual-captcha-fallback-v1' > client-assets/VERSION
           file client-assets/client-linux-arm64
           readelf -h client-assets/client-linux-arm64 | grep -Fq 'AArch64'
           strings -a client-assets/client-linux-arm64 | grep -Fq 'fallback на ручную CAPTCHA'
