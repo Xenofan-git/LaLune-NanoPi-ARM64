@@ -488,9 +488,13 @@ jobs:
           file dist/deploy-e2e/deploy-manager | grep -Eq 'x86-64|x86_64'
           cp -a server-assets dist/server-assets
           cp server-assets/LaLune-CAPTCHA-Bridge.zip dist/LaLune-CAPTCHA-Bridge.zip
+          cp adapt/install-original-linux-backend.sh dist/install-original-linux-backend.sh
+          chmod 0755 dist/install-original-linux-backend.sh
+          sh -n dist/install-original-linux-backend.sh
           cp captcha-bridge/README.md dist/CAPTCHA-BRIDGE-README.md
           test -s dist/LaLune-CAPTCHA-Bridge.zip
           test -s dist/CAPTCHA-BRIDGE-README.md
+          test -x dist/install-original-linux-backend.sh
           test -s dist/server-assets/csqtt-lalune-linux-arm64
           test -s dist/server-assets/csqtt-lalune-linux-amd64
           test -s dist/server-assets/csqtt-lalune-help.txt
