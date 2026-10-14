@@ -37,6 +37,14 @@ jobs:
           sha256sum vm/real/client-linux-arm64
           file vm/real/client-linux-arm64
           test -x vm/real/client-tun-tests-arm64
+          test -x vm/real/deploy-e2e/lalune-original-linux-amd64
+          test -x vm/real/deploy-e2e/deploy-manager
+          test -x vm/real/deploy-e2e/server-assets/install-csqtt-lalune.sh
+          test -x vm/real/deploy-e2e/server-assets/uninstall-csqtt-lalune.sh
+          test -x vm/real/deploy-e2e/server-assets/csqtt-lalune-linux-arm64
+          test -x vm/real/deploy-e2e/server-assets/csqtt-lalune-linux-amd64
+          file vm/real/deploy-e2e/lalune-original-linux-amd64 | grep -Eq 'x86-64|x86_64'
+          file vm/real/deploy-e2e/deploy-manager | grep -Eq 'x86-64|x86_64'
           file vm/real/server-assets/csqtt-lalune-linux-arm64
           sha256sum vm/real/server-assets/csqtt-lalune-linux-arm64
 
