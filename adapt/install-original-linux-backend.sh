@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 
-BIN="${1:-/tmp/lalune-original-linux-arm64}"
+BIN="${1:-./lalune-original-linux-arm64}"
+if [ ! -x "$BIN" ] && [ -x /tmp/lalune-original-linux-arm64 ]; then BIN=/tmp/lalune-original-linux-arm64; fi
 if [ ! -x "$BIN" ] && [ -x /tmp/lalune-backend-linux-arm64 ]; then BIN=/tmp/lalune-backend-linux-arm64; fi
 BUNDLE_DIR="${2:-$(CDPATH= cd -- "$(dirname -- "$BIN")" && pwd -P)}"
 INSTALL=/usr/local/bin/lalune-backend
