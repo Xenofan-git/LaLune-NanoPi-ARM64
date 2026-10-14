@@ -168,8 +168,21 @@ fi
 test "$client_pid" = "$client_pid_before"
 kill -0 "$client_pid"
 
-echo "ARM64_LIVENESS_VM: bidirectional dataplane after restart"
-ip netns exec "$CLIENT_NS" ping -I csqtt-client0 -c 3 -W 3 10.66.67.1 | tee "$ROOT/ping-after.log"
+echo "ARM64_LIVENESS_VM: dataplane recovery after restart (bounded warm-up)"
+# A first packet can be lost while the server's newly registered TUN workers
+# finish reconnecting. Bound that transient separately, then require a clean
+# measured burst so the test does not mask persistent packet loss.
+warmed=0
+for attempt in $(seq 1 5); do
+  if ip netns exec "$CLIENT_NS" ping -I csqtt-client0 -c 1 -W 3 10.66.67.1 >"$ROOT/ping-warmup-$attempt.log" 2>&1; then
+    warmed=1
+    break
+  fi
+  sleep 1
+done
+test "$warmed" -eq 1 || { cat "$ROOT"/ping-warmup-*.log >&2; echo "TUN dataplane did not recover during bounded warm-up" >&2; exit 1; }
+echo "ARM64_LIVENESS_VM: stable dataplane after warm-up"
+ip netns exec "$CLIENT_NS" ping -I csqtt-client0 -c 5 -W 3 10.66.67.1 | tee "$ROOT/ping-after.log"
 grep -Eq '0% packet loss|0 packets lost' "$ROOT/ping-after.log"
 echo "CSQTT_EXPERIMENTAL_ARM64_VM_LIVENESS_TUN_RECOVERY_PASS"
 echo "--- CLIENT LOG TAIL ---"; tail -n 80 "$CLIENT_LOG"
