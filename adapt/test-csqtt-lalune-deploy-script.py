@@ -59,6 +59,9 @@ for value in [
 need('csqtt_process_owns_peer_port "$pid"')
 need('TCP/${WEB_PORT} is occupied by unrelated PID')
 need('Порт UDP/${PEER_PORT} занят посторонним процессом; конфликтующий процесс не изменён')
+install_branch = script.split('install|--install|-i)', 1)[1]
+if install_branch.index('assert_deployment_ports_not_foreign') > install_branch.index('run_timed "sysctl" setup_sysctl'):
+    raise SystemExit("foreign-port preflight must run before sysctl mutation")
 cleanup = script.split("cleanup_legacy_proxy_interfaces() {", 1)[1].split("\n}", 1)[0]
 if "ip link del" in cleanup:
     raise SystemExit("LaLune cleanup still deletes generic legacy proxy interfaces")
