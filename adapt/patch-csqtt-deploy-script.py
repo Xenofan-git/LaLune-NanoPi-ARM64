@@ -49,11 +49,17 @@ for old, new in [
     ("csqtt-cascade", "csqtt-lalune-cascade"),
     ("csqtt-docker-prereq", "csqtt-lalune-docker-prereq"),
     ("csqtt-letsencrypt", "csqtt-lalune-letsencrypt"),
+    ("csqtt-certbot", "csqtt-lalune-certbot"),
+    ("csqtt-docker-", "csqtt-lalune-docker-"),
     ("csqtt-ip-", "csqtt-lalune-ip-"),
     ("/usr/local/bin/hev-socks5-tunnel", "/usr/local/bin/lalune-hev-socks5-tunnel"),
     ("/usr/local/bin/hev-socks5-server", "/usr/local/bin/lalune-hev-socks5-server"),
     ("/tmp/csqtt-web-probe.", "${CSQTT_DEPLOY_STAGE:-/tmp}/csqtt-lalune-web-probe."),
     ("/tmp/csqtt-docker.", "/tmp/csqtt-lalune-docker."),
+    ('probe_iface="cqtd$(( $ % 100000 ))"', 'probe_iface="cqtdl$(( $ % 100000 ))"'),
+    ('probe_chain="CSQTT_D$(( $ % 1000000 ))"', 'probe_chain="CSQTT_LALUNE_D$(( $ % 1000000 ))"'),
+    ("com.csqtt.managed=true", "com.csqtt-lalune.managed=true"),
+    ("com.csqtt.component=server", "com.csqtt-lalune.component=server"),
     ("10.66.67", "10.67.68"),
 ]:
     src = src.replace(old, new)
