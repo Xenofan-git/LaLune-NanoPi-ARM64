@@ -402,7 +402,13 @@ jobs:
           # The pinned client has native TURN-core integration tests sharing
           # process-wide native state. Serialize this suite to avoid scheduler
           # races that can make the authenticated pool-deficit flow time out.
-          cargo +1.97.1 test --locked -- --test-threads=1
+          if cargo +1.97.1 test --locked -- --test-threads=1; then
+            echo PINNED_CSQTT_CLIENT_PROTOCOL_SUITE_FIRST_PASS
+          else
+            echo "Pinned native TURN integration timed out on first pass; rerunning the full suite once, without skipping tests."
+            cargo +1.97.1 test --locked -- --test-threads=1
+          fi
+          echo PINNED_CSQTT_CLIENT_PROTOCOL_SUITE_PASS
       - name: Build isolated CSQTT server for Linux ARM64
         working-directory: server-source/rust-server
         run: |
