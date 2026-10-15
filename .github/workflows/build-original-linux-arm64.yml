@@ -493,6 +493,16 @@ jobs:
           file dist/deploy-e2e/lalune-original-linux-amd64 | grep -Eq 'x86-64|x86_64'
           file dist/deploy-e2e/deploy-manager | grep -Eq 'x86-64|x86_64'
           cp -a server-assets dist/server-assets
+          # Ship only the patched, namespaced deployment flow and server binaries.
+          # Keep the raw upstream deploy.sh and generic CSQTT assets in the CI
+          # workspace for provenance/tests, but never put them in the app bundle.
+          rm -f dist/server-assets/deploy.sh \
+            dist/server-assets/install-csqtt-lalune.sh \
+            dist/server-assets/uninstall-csqtt-lalune.sh \
+            dist/server-assets/csqtt-linux-arm64 \
+            dist/server-assets/csqtt-linux-amd64 \
+            dist/server-assets/csqtt-linux-armv7
+          (cd dist/server-assets && find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
           cp server-assets/LaLune-CAPTCHA-Bridge.zip dist/LaLune-CAPTCHA-Bridge.zip
           cp adapt/install-original-linux-backend.sh dist/install-original-linux-backend.sh
           chmod 0755 dist/install-original-linux-backend.sh
