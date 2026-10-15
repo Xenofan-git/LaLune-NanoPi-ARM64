@@ -584,6 +584,17 @@ jobs:
             sudo systemctl is-active --quiet csqtt.service
             sudo systemctl is-active --quiet csqtt-47000.service
             sudo systemctl is-active --quiet csqtt-47000-netns.service
+            # Seed original CSQTT global sysctl settings to ensure the isolated install does not overwrite them.
+            sudo tee /etc/sysctl.d/99-csqtt.conf >/dev/null <<'ORIGINAL_SYSCTL'
+            net.ipv4.ip_forward = 1
+            ORIGINAL_SYSCTL
+            sudo tee /etc/sysctl.d/99-csqtt-udp-buffers.conf >/dev/null <<'ORIGINAL_UDP_SYSCTL'
+            net.core.rmem_max = 33554432
+            net.core.wmem_max = 33554432
+            ORIGINAL_UDP_SYSCTL
+            sudo sysctl -p /etc/sysctl.d/99-csqtt.conf >/dev/null
+            sudo sysctl -p /etc/sysctl.d/99-csqtt-udp-buffers.conf >/dev/null
+            sudo sha256sum /etc/sysctl.d/99-csqtt.conf /etc/sysctl.d/99-csqtt-udp-buffers.conf > /tmp/production-sysctl.before
             # Simulate an unrelated HTTP service on port 80. The original
             # optional certificate stage must defer rather than kill it.
             sudo bash -c "nohup python3 -m http.server 80 --bind 0.0.0.0 >/tmp/lalune-test-port80.log 2>&1 </dev/null & echo \$! >/run/lalune-test-port80.pid"
@@ -695,6 +706,7 @@ jobs:
             sudo systemctl is-active --quiet csqtt-47000-netns.service
             sudo systemctl show -p ActiveState -p SubState csqtt.service csqtt-47000.service csqtt-47000-netns.service > /tmp/production-states.after-install
             diff -u /tmp/production-states.before /tmp/production-states.after-install
+            sudo sha256sum -c /tmp/production-sysctl.before
             sudo ip -4 route show table 42424 > /tmp/foreign-routes.after-install
             diff -u /tmp/foreign-routes.before /tmp/foreign-routes.after-install
             sudo ip -4 route show table 470010 > /tmp/near-miss-routes.after-install
@@ -785,6 +797,7 @@ jobs:
             sudo sha256sum -c /tmp/production-units.before
             sudo systemctl show -p ActiveState -p SubState csqtt.service csqtt-47000.service csqtt-47000-netns.service > /tmp/production-states.after-uninstall
             diff -u /tmp/production-states.before /tmp/production-states.after-uninstall
+            sudo sha256sum -c /tmp/production-sysctl.before
             sudo ip -4 route show table 42424 > /tmp/foreign-routes.after-uninstall
             diff -u /tmp/foreign-routes.before /tmp/foreign-routes.after-uninstall
             sudo ip -4 route show table 470010 > /tmp/near-miss-routes.after-uninstall
