@@ -743,6 +743,7 @@ jobs:
               "mainPassword": "deployMain123",
               "webUser": "deployWeb123",
               "webPassword": "deployPass123",
+              "deviceId": "01234567-89ab-cdef-0123-456789abcdef",
               "dockerInstall": False,
               "uninstall": False,
           }
