@@ -2,14 +2,17 @@
 
 Status: protocol remains **CI-fixture-only / not production-ready**. No production wire behavior, runtime binary, or production timeout has been changed.
 
-## Evidence from the isolated CI fixture (2026-10-14)
+## Verified isolated CI evidence (2026-10-15; commit `bac67d662877b49a5e4a8b7aa007eb38e7575cde`)
 
-The disposable pinned Rust client/server clones have a test-only implementation of the negotiated exchange. It is applied by `scripts/ci/patch-csqtt-negotiated-liveness.py` only after checking out the pinned client commit and server tag. This is evidence about that fixture, not an upstream patch or the shipped runtime client.
+The disposable pinned Rust client/server clones receive a test-only negotiated-liveness patch from `scripts/ci/patch-csqtt-negotiated-liveness.py`. This is evidence about the fixture, not an upstream-reviewed patch or the shipped runtime client.
 
-- The E2E matrix passes with the injected idle watchdog enabled and disabled; the disabled leg is the required evidence that recovery did not depend on that watchdog.
-- The separate experimental AArch64 client and server cross-compile, contain the liveness marker, and pass QEMU user-mode startup smoke checks. The server reports `CSQTT-WIRE-4`; the client reaches its normal missing-arguments validation path.
-- The stock runtime ARM64 client audit did **not** find `CSQTT_LIVENESS_V1`. The experimental artifact is separate and uses a CI-only credential hook; it must not be installed as a replacement or treated as VK-auth validated.
-- These tests do not yet establish upstream-reviewed wire compatibility, full ARM64 system-VM dataplane operation of the experimental binaries, or production readiness.
+- [Real Rust-client recovery E2E, run #235](https://github.com/Xenofan-git/LaLune-NanoPi-ARM64/actions/runs/38801699589): both `process-recovery (disabled)` and `process-recovery (enabled)` matrix jobs passed. In the no-watchdog leg, the same Rust client PID survived the isolated server restart, parsed fresh TUNCONF, re-registered all nine workers, and restored bidirectional IPv4 through the real client UDP dispatcher and Linux TUN. Both three-packet ping probes reported 0% packet loss.
+- The no-watchdog leg exercises the test-only negotiated authenticated PING/PONG exchange; it does **not** mean the untouched stock receive loop independently recovers. The disposable pinned sources are patched for this experiment.
+- The separate experimental AArch64 client/server artifacts were checked for architecture, provenance and the `CSQTT_LIVENESS_V1` marker, then run in a full Debian ARM64 system VM. The quiet tunnel survived multiple PING/PONG periods; after server restart the same client process restored TUN traffic. The pre-restart probe received 3/3 packets and the post-restart probe received 5/5 (0% loss). See [run #235, ARM64 VM job](https://github.com/Xenofan-git/LaLune-NanoPi-ARM64/actions/runs/38801699589).
+- [Pinned original LaLune ARM64 build and deployment E2E, run #700](https://github.com/Xenofan-git/LaLune-NanoPi-ARM64/actions/runs/38801700145) passed separately, including the real packaged artifact's ARM64 VM lifecycle and Deploy API install/uninstall checks.
+- The stock packaged ARM64 runtime client audit did **not** find `CSQTT_LIVENESS_V1`. The experimental artifact is separate and uses CI-only credentials. Real VK authentication and end-to-end recovery for Manual, Auto API and Auto VK hash-acquisition modes have not been demonstrated by this run.
+
+**Interpretation:** same-process recovery with negotiated liveness is demonstrated in patched disposable pinned sources, including a full ARM64 system VM. Production readiness, stock-artifact behavior and VK-auth compatibility remain unproven.
 
 ## What the pinned sources establish
 
@@ -58,8 +61,8 @@ Keep the production/runtime artifact, deployment workflow, production services, 
 
 1. Port the protocol to the actual maintained client/server source trees (not a scripted disposable-clone patch) and obtain code review for the wire encoding and negotiation.
 2. Add endpoint-level unit tests for malformed frames, nonce/sequence matching, replay, overflow, timeout/cancellation and WIRE-3 fallback; keep the model tests as supplemental coverage.
-3. Run the experimental ARM64 binaries in a real ARM64 system VM with the same restart/TUN dataplane scenario, not only QEMU startup smoke tests.
+3. The experimental ARM64 system-VM restart/TUN dataplane scenario has passed in CI run #235. Preserve it as regression coverage; it does not replace protocol review or tests against the final packaged runtime artifact.
 4. Validate the real VK authentication path and packaged-artifact provenance independently of the CI-only credential hook.
 5. Produce a new explicitly versioned artifact only after all gates pass. Do not overwrite the pinned runtime asset or install/deploy automatically.
 
-Until then, the CI fixture and its experimental artifact are diagnostics only.
+Until then, the CI fixture and its experimental artifact are diagnostics only. Do not deploy them or infer that the pinned production runtime has been updated.
