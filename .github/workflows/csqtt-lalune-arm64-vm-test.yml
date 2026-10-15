@@ -746,7 +746,7 @@ jobs:
             sudo chmod 0600 /opt/lalune-package/.csqtt-lalune-upload-web.env /opt/lalune-package/.csqtt-lalune-upload-overrides.json
             sudo env CSQTT_DEPLOY_STAGE=/opt/lalune-package CSQTT_PEER_PORT=47000 CSQTT_WEB_PORT=47002 CSQTT_SSH_PORT=2222 CSQTT_DEPLOY_MODE=systemd CSQTT_START_STABILITY_SECONDS=1 bash /opt/lalune-package/deploy-csqtt-lalune.sh install
             sudo systemctl is-active --quiet csqtt-lalune.service
-            login_code="$(curl -k -sS -o /tmp/csqtt-lalune-login-after-redeploy.json -w '%{http_code}' -c "$cookie" --connect-timeout 2 --max-time 4 -H 'content-type: application/json' --data "{\\"user\\":\\"wire-user\\",\\"pass\\":\\"wire-web-password\\"}" https://127.0.0.1:47002/api/login)"
+            login_code="$(curl -k -sS -o /tmp/csqtt-lalune-login-after-redeploy.json -w '%{http_code}' -c "$cookie" --connect-timeout 2 --max-time 4 -H "content-type: application/json" --data "{\"user\":\"wire-user\",\"pass\":\"wire-web-password\"}" https://127.0.0.1:47002/api/login)"
             test "$login_code" = 200
             sudo systemctl show -p ActiveState -p SubState csqtt.service csqtt-47000.service csqtt-47000-netns.service > /tmp/production-states.after-redeploy
             diff -u /tmp/production-states.before /tmp/production-states.after-redeploy
