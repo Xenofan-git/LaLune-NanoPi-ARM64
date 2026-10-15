@@ -559,7 +559,6 @@ jobs:
             grep -Fq -- "Нужны -peer и хеши VK" /tmp/csqtt-client-argument-smoke.log
             echo REAL_RUNTIME_CSQTT_CLIENT_ARM64_EXECUTABLE_PASS
             sudo install -m 0755 /home/tester/csqtt-lalune-linux-arm64 /opt/lalune-package/.csqtt-lalune-upload-server
-            sudo install -m 0755 /opt/lalune-package/deploy-csqtt-lalune.sh /opt/lalune-package/deploy-csqtt-lalune.sh
             sudo install -m 0755 /home/tester/client-tun-tests-arm64 /usr/local/bin/client-tun-tests-arm64
             /usr/local/bin/client-tun-tests-arm64 -test.v
             file /opt/lalune-package/.csqtt-lalune-upload-server
@@ -574,7 +573,7 @@ jobs:
             sudo systemctl is-active --quiet csqtt-47000.service
             sudo systemctl is-active --quiet csqtt-47000-netns.service
             # Simulate an unrelated HTTP service on port 80. The original
-            # optional Let'''s Encrypt stage must defer rather than kill it.
+            # optional certificate stage must defer rather than kill it.
             sudo bash -c "nohup python3 -m http.server 80 --bind 0.0.0.0 >/tmp/lalune-test-port80.log 2>&1 </dev/null & echo \$! >/run/lalune-test-port80.pid"
             for attempt in $(seq 1 20); do sudo ss -H -ltn "sport = :80" | grep -q . && break; sleep 0.2; done
             sudo ss -H -ltn "sport = :80" | grep -q .
@@ -614,6 +613,7 @@ jobs:
             sudo env CSQTT_DEPLOY_STAGE=/opt/lalune-package CSQTT_PEER_PORT=47000 CSQTT_WEB_PORT=47002 CSQTT_SSH_PORT=2222 CSQTT_DEPLOY_MODE=systemd CSQTT_START_STABILITY_SECONDS=1 bash /opt/lalune-package/deploy-csqtt-lalune.sh install
             sudo systemctl is-active --quiet csqtt-lalune.service
             sudo grep -Fq "CSQTT_WEB_USER=wire-user" /etc/csqtt-lalune/csqtt.env
+            sudo grep -aFq "wire-device" /etc/csqtt-lalune/csqtt.db
             sudo test -s /etc/csqtt-lalune/csqtt.db
             sudo systemctl is-active --quiet csqtt.service
             sudo systemctl is-active --quiet csqtt-47000.service
@@ -689,7 +689,6 @@ jobs:
             while IFS= read -r rule; do grep -Fqx -- "$rule" /tmp/iptables.after-uninstall; done < /tmp/iptables.before
             sudo test -f /etc/csqtt-lalune/csqtt.db
             sudo test -f /etc/csqtt-lalune/csqtt.env
-            sudo kill "$(cat /run/lalune-test-port80.pid)" || true
             echo ORIGINAL_DEPLOY_SH_ARM64_SYSTEM_VM_LIFECYCLE_PASS'
       - name: End-to-end test of the actual Deploy button API against disposable ARM64 VM
         timeout-minutes: 12
@@ -759,7 +758,7 @@ jobs:
           printf '%s\n' "$deploy_log"
           grep -Fq 'CSQTT_LALUNE_DEPLOY_OK' <<<"$deploy_log"
           grep -Fq 'PANEL_URL=https://127.0.0.1:47002' <<<"$deploy_log"
-          ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo systemctl is-active --quiet csqtt-lalune.service && sudo grep -Fq "CSQTT_WEB_USER=deployWeb123" /etc/csqtt-lalune/csqtt.env && sudo python3 -c "import sqlite3; c=sqlite3.connect(\"/etc/csqtt-lalune/csqtt.db\"); assert c.execute(\"select value from meta where key=?\", (\"main_device_id\",)).fetchone()[0] == \"01234567-89ab-cdef-0123-456789abcdef\" " && sudo systemctl is-active --quiet csqtt.service && sudo systemctl is-active --quiet csqtt-47000.service && sudo systemctl is-active --quiet csqtt-47000-netns.service && sudo ss -H -lun "sport = :47000" | grep -q . && sudo ss -H -ltn "sport = :47002" | grep -q . && sudo systemctl show -p ActiveState -p SubState csqtt.service csqtt-47000.service csqtt-47000-netns.service > /tmp/production-states.after-button-install && diff -u /tmp/production-states.before /tmp/production-states.after-button-install && sudo ip -4 route show table main | grep -vF "10.67.68.0/24 dev csqtt-lalune0" > /tmp/main-routes.after-button-install.unrelated && diff -u /tmp/main-routes.before /tmp/main-routes.after-button-install.unrelated'
+          ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo systemctl is-active --quiet csqtt-lalune.service && sudo grep -Fq "CSQTT_WEB_USER=deployWeb123" /etc/csqtt-lalune/csqtt.env && sudo grep -aFq "01234567-89ab-cdef-0123-456789abcdef" /etc/csqtt-lalune/csqtt.db && sudo systemctl is-active --quiet csqtt.service && sudo systemctl is-active --quiet csqtt-47000.service && sudo systemctl is-active --quiet csqtt-47000-netns.service && sudo ss -H -lun "sport = :47000" | grep -q . && sudo ss -H -ltn "sport = :47002" | grep -q . && sudo systemctl show -p ActiveState -p SubState csqtt.service csqtt-47000.service csqtt-47000-netns.service > /tmp/production-states.after-button-install && diff -u /tmp/production-states.before /tmp/production-states.after-button-install && sudo ip -4 route show table main | grep -vF "10.67.68.0/24 dev csqtt-lalune0" > /tmp/main-routes.after-button-install.unrelated && diff -u /tmp/main-routes.before /tmp/main-routes.after-button-install.unrelated'
           python3 - <<'PY'
           import json, os, urllib.request
           payload = {
