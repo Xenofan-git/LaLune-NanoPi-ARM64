@@ -637,7 +637,7 @@ jobs:
             }
             # UDP/47000 conflict: the original-derived script must refuse before cutover
             # and leave the unrelated listener and pre-existing services untouched.
-            sudo bash -c "nohup python3 /home/tester/port-blocker.py udp 47000 >/tmp/lalune-test-udp47000.log 2>&1 </dev/null & echo \\$! >/run/lalune-test-udp47000.pid"
+            sudo bash -c "nohup python3 /home/tester/port-blocker.py udp 47000 >/tmp/lalune-test-udp47000.log 2>&1 </dev/null & echo \$! >/run/lalune-test-udp47000.pid"
             for attempt in $(seq 1 20); do sudo ss -H -lun "sport = :47000" | grep -q . && break; sleep 0.2; done
             sudo ss -H -lun "sport = :47000" | grep -q .
             sudo kill -0 "$(sudo cat /run/lalune-test-udp47000.pid)"
@@ -651,7 +651,7 @@ jobs:
             sudo kill "$(sudo cat /run/lalune-test-udp47000.pid)"
             assert_preflight_preserved_host
             # TCP/47002 conflict must receive the same fail-closed treatment.
-            sudo bash -c "nohup python3 /home/tester/port-blocker.py tcp 47002 >/tmp/lalune-test-tcp47002.log 2>&1 </dev/null & echo \\$! >/run/lalune-test-tcp47002.pid"
+            sudo bash -c "nohup python3 /home/tester/port-blocker.py tcp 47002 >/tmp/lalune-test-tcp47002.log 2>&1 </dev/null & echo \$! >/run/lalune-test-tcp47002.pid"
             for attempt in $(seq 1 20); do sudo ss -H -ltn "sport = :47002" | grep -q . && break; sleep 0.2; done
             sudo ss -H -ltn "sport = :47002" | grep -q .
             sudo kill -0 "$(sudo cat /run/lalune-test-tcp47002.pid)"
