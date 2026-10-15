@@ -29,8 +29,7 @@ jobs:
           mkdir -p vm/real
           tar -xzf vm/artifact/lalune-original-linux-arm64.tar.gz -C vm/real
           test -s vm/real/server-assets/csqtt-lalune-linux-arm64
-          test -x vm/real/server-assets/install-csqtt-lalune.sh
-          test -x vm/real/server-assets/uninstall-csqtt-lalune.sh
+          test -x vm/real/server-assets/deploy-csqtt-lalune.sh
           test -s vm/real/client-linux-arm64
           grep -Fq 'source=Endlad2/csqtt-core@3eafb7ee868f5f2690edf3b0326153813f88eb5f' vm/real/CSQTT_CLIENT_VERSION
           grep -Fq 'patch=rjs-manual-captcha-fallback-v1' vm/real/CSQTT_CLIENT_VERSION
@@ -39,8 +38,7 @@ jobs:
           test -x vm/real/client-tun-tests-arm64
           test -x vm/real/deploy-e2e/lalune-original-linux-amd64
           test -x vm/real/deploy-e2e/deploy-manager
-          test -x vm/real/deploy-e2e/server-assets/install-csqtt-lalune.sh
-          test -x vm/real/deploy-e2e/server-assets/uninstall-csqtt-lalune.sh
+          test -x vm/real/deploy-e2e/server-assets/deploy-csqtt-lalune.sh
           test -x vm/real/deploy-e2e/server-assets/csqtt-lalune-linux-arm64
           test -x vm/real/deploy-e2e/server-assets/csqtt-lalune-linux-amd64
           file vm/real/deploy-e2e/lalune-original-linux-amd64 | grep -Eq 'x86-64|x86_64'
@@ -519,16 +517,16 @@ jobs:
           
           python3 -m py_compile vm/csqtt-same-process-recovery.py
 
-      - name: Test installer isolation and lifecycle in ARM64 system guest
+      - name: Test original namespaced deploy.sh lifecycle in ARM64 system guest
         run: |
           set -euxo pipefail
           SSH="ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1"
           SCP="scp -i vm/id_ed25519 -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-          echo "Using the real ARM64 CSQTT server from this workflow's build artifact"
-          INSTALLER=vm/real/server-assets/install-csqtt-lalune.sh
-          UNINSTALLER=vm/real/server-assets/uninstall-csqtt-lalune.sh
+          echo "Using the real ARM64 CSQTT server and namespaced original v2.1.9 deploy.sh"
+          DEPLOY_SCRIPT=vm/real/server-assets/deploy-csqtt-lalune.sh
           BINARY=vm/real/server-assets/csqtt-lalune-linux-arm64
           test -s "$BINARY"
+          test -x "$DEPLOY_SCRIPT"
           for unit in csqtt.service csqtt-47000.service csqtt-47000-netns.service; do
             cat > "vm/$unit" <<EOF
           [Unit]
@@ -543,15 +541,13 @@ jobs:
           EOF
           done
           $SCP vm/real/client-linux-arm64 tester@127.0.0.1:/home/tester/
-          $SCP "$INSTALLER" "$UNINSTALLER" "$BINARY" vm/real/client-tun-tests-arm64 vm/csqtt.service vm/csqtt-47000.service vm/csqtt-47000-netns.service vm/csqtt-vm-probe.py vm/csqtt-same-process-recovery.py tester@127.0.0.1:/home/tester/
+          $SCP "$DEPLOY_SCRIPT" "$BINARY" vm/real/client-tun-tests-arm64 vm/csqtt.service vm/csqtt-47000.service vm/csqtt-47000-netns.service vm/csqtt-vm-probe.py vm/csqtt-same-process-recovery.py tester@127.0.0.1:/home/tester/
           $SSH 'set -eux
-            sudo install -d -m 0755 /opt/lalune-package
-            sudo install -m 0755 /home/tester/install-csqtt-lalune.sh /opt/lalune-package/install-csqtt-lalune.sh
-            sudo install -m 0755 /home/tester/uninstall-csqtt-lalune.sh /opt/lalune-package/uninstall-csqtt-lalune.sh
+            sudo install -d -m 0700 /opt/lalune-package
+            sudo install -m 0755 /home/tester/deploy-csqtt-lalune.sh /opt/lalune-package/deploy-csqtt-lalune.sh
             test -s /home/tester/csqtt-lalune-linux-arm64
             # Exercise the exact runtime CSQTT core that the pinned LaLune
-            # release selector downloads. This is an executable/CLI smoke only;
-            # it does not claim an authenticated VK/TURN session or recovery.
+            # release selector downloads. This is an executable/CLI smoke only.
             sudo install -m 0755 /home/tester/client-linux-arm64 /usr/local/bin/csqtt-client
             test "$(uname -m)" = aarch64
             file /usr/local/bin/csqtt-client
@@ -562,10 +558,11 @@ jobs:
             test "$client_status" -ne 0
             grep -Fq -- "Нужны -peer и хеши VK" /tmp/csqtt-client-argument-smoke.log
             echo REAL_RUNTIME_CSQTT_CLIENT_ARM64_EXECUTABLE_PASS
-            sudo install -m 0755 /home/tester/csqtt-lalune-linux-arm64 /opt/lalune-package/csqtt-lalune-linux-arm64
+            sudo install -m 0755 /home/tester/csqtt-lalune-linux-arm64 /opt/lalune-package/.csqtt-lalune-upload-server
+            sudo install -m 0755 /opt/lalune-package/deploy-csqtt-lalune.sh /opt/lalune-package/deploy-csqtt-lalune.sh
             sudo install -m 0755 /home/tester/client-tun-tests-arm64 /usr/local/bin/client-tun-tests-arm64
             /usr/local/bin/client-tun-tests-arm64 -test.v
-            file /opt/lalune-package/csqtt-lalune-linux-arm64
+            file /opt/lalune-package/.csqtt-lalune-upload-server
             sudo install -m 0644 /home/tester/csqtt.service /etc/systemd/system/csqtt.service
             sudo install -m 0644 /home/tester/csqtt-47000.service /etc/systemd/system/csqtt-47000.service
             sudo install -m 0644 /home/tester/csqtt-47000-netns.service /etc/systemd/system/csqtt-47000-netns.service
@@ -576,14 +573,15 @@ jobs:
             sudo systemctl is-active --quiet csqtt.service
             sudo systemctl is-active --quiet csqtt-47000.service
             sudo systemctl is-active --quiet csqtt-47000-netns.service
-            # Seed explicitly foreign resources, not just whatever defaults happen
-            # to exist in the guest. LaLune must preserve them through install AND removal.
+            # Simulate an unrelated HTTP service on port 80. The original
+            # optional Let'''s Encrypt stage must defer rather than kill it.
+            sudo bash -c "nohup python3 -m http.server 80 --bind 0.0.0.0 >/tmp/lalune-test-port80.log 2>&1 </dev/null & echo \$! >/run/lalune-test-port80.pid"
+            for attempt in $(seq 1 20); do sudo ss -H -ltn "sport = :80" | grep -q . && break; sleep 0.2; done
+            sudo ss -H -ltn "sport = :80" | grep -q .
+            # Seed explicitly foreign resources; LaLune must preserve them through install AND removal.
             sudo ip route add blackhole 198.18.77.0/24 table 42424
             sudo ip rule add priority 42424 to 198.18.77.0/24 lookup 42424
             sudo iptables -I OUTPUT 1 -d 198.18.77.0/24 -m comment --comment FOREIGN_TEST_RULE_KEEP -j ACCEPT
-            # Adversarial near-miss resources: values deliberately share LaLune
-            # identifiers as prefixes but are not exact owned IDs/markers. Cleanup
-            # must not match them by substring or numeric prefix.
             sudo ip route add blackhole 198.18.78.0/24 table 470010
             sudo ip rule add priority 470010 to 198.18.78.0/24 lookup 470010
             sudo ip rule add priority 470011 fwmark 0x67410/0xffff lookup 470010
@@ -594,27 +592,29 @@ jobs:
             sudo ip -4 route show table main > /tmp/main-routes.before
             sudo ip -4 route show table 42424 > /tmp/foreign-routes.before
             sudo ip -4 rule show > /tmp/ip-rules.before
-            sudo iptables-save | sed "/^# Generated by iptables-save/d; /^# Completed on /d; s/\\[[0-9:]*\\]/[COUNTERS]/g" > /tmp/iptables.before
+            sudo iptables-save | sed "/^# Generated by iptables-save/d; /^# Completed on /d; s/\[[0-9:]*\]/[COUNTERS]/g" > /tmp/iptables.before
             grep -Fq "blackhole 198.18.77.0/24" /tmp/foreign-routes.before
-            grep -Eq "^42424:.*to 198\\.18\\.77\\.0/24.*lookup 42424$" /tmp/ip-rules.before
-            grep -Fq 'FOREIGN_TEST_RULE_KEEP' /tmp/iptables.before
+            grep -Eq "^42424:.*to 198\.18\.77\.0/24.*lookup 42424$" /tmp/ip-rules.before
+            grep -Fq "FOREIGN_TEST_RULE_KEEP" /tmp/iptables.before
             sudo ip -4 route show table 470010 > /tmp/near-miss-routes.before
             sudo ip -4 rule show > /tmp/all-ip-rules.before
             grep -Fq "blackhole 198.18.78.0/24" /tmp/near-miss-routes.before
-            grep -Eq "^470010:.*to 198\\.18\\.78\\.0/24.*lookup 470010$" /tmp/all-ip-rules.before
+            grep -Eq "^470010:.*to 198\.18\.78\.0/24.*lookup 470010$" /tmp/all-ip-rules.before
             grep -Eq "^470011:.*fwmark 0x67410/0xffff lookup 470010$" /tmp/all-ip-rules.before
-            grep -Fq 'CSQTT_LALUNE-FOREIGN_RULE_KEEP' /tmp/iptables.before
-            grep -Fq 'CSQTT_LALUNEISH_FOREIGN_KEEP' /tmp/iptables.before
-            cat <<'SECRETS' | sudo tee /opt/lalune-package/server-secrets.txt >/dev/null
-            wire-password
-            wire-user
-            wire-web-password
-            wire-device
-            SECRETS
-            sudo chmod 0600 /opt/lalune-package/server-secrets.txt
-            sudo env CSQTT_LALUNE_UDP_PORT=47000 CSQTT_LALUNE_WEB_PORT=47002 bash /opt/lalune-package/install-csqtt-lalune.sh --secrets-file /opt/lalune-package/server-secrets.txt
+            grep -Fq "CSQTT_LALUNE-FOREIGN_RULE_KEEP" /tmp/iptables.before
+            grep -Fq "CSQTT_LALUNEISH_FOREIGN_KEEP" /tmp/iptables.before
+            cat > /opt/lalune-package/.csqtt-lalune-upload-web.env <<'WEBENV'
+          CSQTT_WEB_USER=wire-user
+          CSQTT_WEB_PASS=wire-web-password
+          WEBENV
+            cat > /opt/lalune-package/.csqtt-lalune-upload-overrides.json <<'OVERRIDES'
+          {"main_password":"wire-password","device_id":"wire-device"}
+          OVERRIDES
+            sudo chmod 0600 /opt/lalune-package/.csqtt-lalune-upload-web.env /opt/lalune-package/.csqtt-lalune-upload-overrides.json
+            sudo env CSQTT_DEPLOY_STAGE=/opt/lalune-package CSQTT_PEER_PORT=47000 CSQTT_WEB_PORT=47002 CSQTT_SSH_PORT=2222 CSQTT_DEPLOY_MODE=systemd CSQTT_START_STABILITY_SECONDS=1 bash /opt/lalune-package/deploy-csqtt-lalune.sh install
             sudo systemctl is-active --quiet csqtt-lalune.service
-            sudo grep -Fq 'CSQTT_DEVICE_ID=01234567-89ab-cdef-0123-456789abcdef' /etc/csqtt-lalune/server.env
+            sudo grep -Fq "CSQTT_WEB_USER=wire-user" /etc/csqtt-lalune/csqtt.env
+            sudo test -s /etc/csqtt-lalune/csqtt.db
             sudo systemctl is-active --quiet csqtt.service
             sudo systemctl is-active --quiet csqtt-47000.service
             sudo systemctl is-active --quiet csqtt-47000-netns.service
@@ -626,27 +626,20 @@ jobs:
             diff -u /tmp/near-miss-routes.before /tmp/near-miss-routes.after-install
             sudo ip -4 rule show > /tmp/all-ip-rules.after-install
             while IFS= read -r rule; do grep -Fqx -- "$rule" /tmp/all-ip-rules.after-install; done < /tmp/all-ip-rules.before
-            sudo iptables-save | sed "/^# Generated by iptables-save/d; /^# Completed on /d; s/\\[[0-9:]*\\]/[COUNTERS]/g" > /tmp/iptables.after-install
-            grep -Fq 'CSQTT_LALUNE-FOREIGN_RULE_KEEP' /tmp/iptables.after-install
-            grep -Fq 'CSQTT_LALUNEISH_FOREIGN_KEEP' /tmp/iptables.after-install
-            # The packaged service must bind only its dedicated ports.
+            sudo iptables-save | sed "/^# Generated by iptables-save/d; /^# Completed on /d; s/\[[0-9:]*\]/[COUNTERS]/g" > /tmp/iptables.after-install
+            grep -Fq "CSQTT_LALUNE-FOREIGN_RULE_KEEP" /tmp/iptables.after-install
+            grep -Fq "CSQTT_LALUNEISH_FOREIGN_KEEP" /tmp/iptables.after-install
             for attempt in $(seq 1 20); do
-              if sudo ss -H -lun 'sport = :47000' | grep -q . && sudo ss -H -ltn 'sport = :47002' | grep -q .; then break; fi
+              if sudo ss -H -lun "sport = :47000" | grep -q . && sudo ss -H -ltn "sport = :47002" | grep -q .; then break; fi
               sleep 1
             done
-            sudo ss -H -lun 'sport = :47000' | grep -q .
-            sudo ss -H -ltn 'sport = :47002' | grep -q .
-            # Credentials are supplied by the protected EnvironmentFile generated by the installer.
-            # Keep the real installer-generated systemd unit, without a CI-only ExecStart override.
-
+            sudo ss -H -lun "sport = :47000" | grep -q .
+            sudo ss -H -ltn "sport = :47002" | grep -q .
             for attempt in $(seq 1 20); do
-              if sudo ss -H -lun 'sport = :47000' | grep -q . && sudo ss -H -ltn 'sport = :47002' | grep -q .; then break; fi
+              if sudo ss -H -lun "sport = :47000" | grep -q . && sudo ss -H -ltn "sport = :47002" | grep -q .; then break; fi
               sleep 1
             done
             sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-before-probe.log
-            # First independent probe process completed an authenticated server exchange
-            # and bidirectional TUN packet test. Now force a server process restart and
-            # launch a fresh OS process with a fresh UDP socket to verify recovery.
             python3 /home/tester/csqtt-vm-probe.py
             sudo systemctl is-active --quiet csqtt-lalune.service
             sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-after-probe.log
@@ -655,36 +648,23 @@ jobs:
             sudo systemctl is-active --quiet csqtt-lalune.service
             sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-after-probe.log
             diff -u /tmp/csqtt-lalune-before-probe.log /tmp/csqtt-lalune-after-probe.log > /tmp/csqtt-lalune-probe-diff.log || true
-
-            # Same-process recovery check: keep one Python client process and one UDP
-            # socket alive while restarting only the disposable server. Authenticate
-            # and decrypt TUNCONF both before and after restart. This tests protocol
-            # re-establishment in a persistent client process, not the Go app supervisor.
             python3 /home/tester/csqtt-same-process-recovery.py | tee /tmp/csqtt-same-process-recovery.log
-            grep -q '^SAME_PROCESS_TUNCONF before_restart ' /tmp/csqtt-same-process-recovery.log
-            grep -q '^SAME_PROCESS_TUNCONF after_restart ' /tmp/csqtt-same-process-recovery.log
-            grep -q '^CSQTT_SAME_PROCESS_PROTOCOL_RECOVERY_PASS ' /tmp/csqtt-same-process-recovery.log
-            # Re-run the existing authenticated bidirectional IPv4/TUN dataplane
-            # probe after the restart. This is deliberately a fresh probe process:
-            # it proves dataplane service is restored, while the preceding test
-            # separately proves same-process protocol recovery. It does NOT claim
-            # same-process dataplane continuity for the real Go/Rust client.
+            grep -q "^SAME_PROCESS_TUNCONF before_restart " /tmp/csqtt-same-process-recovery.log
+            grep -q "^SAME_PROCESS_TUNCONF after_restart " /tmp/csqtt-same-process-recovery.log
+            grep -q "^CSQTT_SAME_PROCESS_PROTOCOL_RECOVERY_PASS " /tmp/csqtt-same-process-recovery.log
             python3 /home/tester/csqtt-vm-probe.py | tee /tmp/csqtt-vm-probe-after-restart.log
-            grep -q '^LIVE_TUN_BIDIRECTIONAL_IPV4_PASS ' /tmp/csqtt-vm-probe-after-restart.log
+            grep -q "^LIVE_TUN_BIDIRECTIONAL_IPV4_PASS " /tmp/csqtt-vm-probe-after-restart.log
             sudo systemctl is-active --quiet csqtt-lalune.service
-            # Installing the isolated service must not change the main/default route table.
             sudo ip -4 route show table main > /tmp/main-routes.after-install
-            # The dedicated TUN subnet route is expected while the isolated service is running.
             grep -Fq "10.67.68.0/24 dev csqtt-lalune0" /tmp/main-routes.after-install
             grep -vF "10.67.68.0/24 dev csqtt-lalune0" /tmp/main-routes.after-install > /tmp/main-routes.unrelated-after-install
             sudo diff -u /tmp/main-routes.before /tmp/main-routes.unrelated-after-install
-            # Every pre-existing policy rule and firewall rule must survive installation.
             sudo ip -4 rule show > /tmp/ip-rules.after-install
-            sudo iptables-save | sed "/^# Generated by iptables-save/d; /^# Completed on /d; s/\\[[0-9:]*\\]/[COUNTERS]/g" > /tmp/iptables.after-install
+            sudo iptables-save | sed "/^# Generated by iptables-save/d; /^# Completed on /d; s/\[[0-9:]*\]/[COUNTERS]/g" > /tmp/iptables.after-install
             while IFS= read -r rule; do grep -Fqx -- "$rule" /tmp/ip-rules.after-install; done < /tmp/ip-rules.before
             while IFS= read -r rule; do grep -Fqx -- "$rule" /tmp/iptables.after-install; done < /tmp/iptables.before
             sudo sha256sum -c /tmp/production-units.before
-            sudo /opt/lalune-package/uninstall-csqtt-lalune.sh
+            sudo env CSQTT_DEPLOY_STAGE=/opt/lalune-package CSQTT_PEER_PORT=47000 CSQTT_WEB_PORT=47002 CSQTT_SSH_PORT=2222 CSQTT_DEPLOY_MODE=systemd bash /opt/lalune-package/deploy-csqtt-lalune.sh uninstall
             ! sudo systemctl is-active --quiet csqtt-lalune.service
             sudo systemctl is-active --quiet csqtt.service
             sudo systemctl is-active --quiet csqtt-47000.service
@@ -698,19 +678,19 @@ jobs:
             diff -u /tmp/near-miss-routes.before /tmp/near-miss-routes.after-uninstall
             sudo ip -4 rule show > /tmp/all-ip-rules.after-uninstall
             while IFS= read -r rule; do grep -Fqx -- "$rule" /tmp/all-ip-rules.after-uninstall; done < /tmp/all-ip-rules.before
-            sudo iptables-save | sed "/^# Generated by iptables-save/d; /^# Completed on /d; s/\\[[0-9:]*\\]/[COUNTERS]/g" > /tmp/iptables.after-uninstall
-            grep -Fq 'CSQTT_LALUNE-FOREIGN_RULE_KEEP' /tmp/iptables.after-uninstall
-            grep -Fq 'CSQTT_LALUNEISH_FOREIGN_KEEP' /tmp/iptables.after-uninstall
+            sudo iptables-save | sed "/^# Generated by iptables-save/d; /^# Completed on /d; s/\[[0-9:]*\]/[COUNTERS]/g" > /tmp/iptables.after-uninstall
+            grep -Fq "CSQTT_LALUNE-FOREIGN_RULE_KEEP" /tmp/iptables.after-uninstall
+            grep -Fq "CSQTT_LALUNEISH_FOREIGN_KEEP" /tmp/iptables.after-uninstall
             sudo ip -4 route show table main > /tmp/main-routes.after-uninstall
             sudo diff -u /tmp/main-routes.before /tmp/main-routes.after-uninstall
             sudo ip -4 rule show > /tmp/ip-rules.after-uninstall
-            sudo iptables-save | sed "/^# Generated by iptables-save/d; /^# Completed on /d; s/\\[[0-9:]*\\]/[COUNTERS]/g" > /tmp/iptables.after-uninstall
+            sudo iptables-save | sed "/^# Generated by iptables-save/d; /^# Completed on /d; s/\[[0-9:]*\]/[COUNTERS]/g" > /tmp/iptables.after-uninstall
             while IFS= read -r rule; do grep -Fqx -- "$rule" /tmp/ip-rules.after-uninstall; done < /tmp/ip-rules.before
             while IFS= read -r rule; do grep -Fqx -- "$rule" /tmp/iptables.after-uninstall; done < /tmp/iptables.before
-            sudo test -f /etc/csqtt-lalune/.managed-by-lalune
-            sudo grep -Fxq CSQTT-LALUNE-MANAGED-V1 /etc/csqtt-lalune/.managed-by-lalune
-            echo ARM64_SYSTEM_VM_LIFECYCLE_PASS'
-          
+            sudo test -f /etc/csqtt-lalune/csqtt.db
+            sudo test -f /etc/csqtt-lalune/csqtt.env
+            sudo kill "$(cat /run/lalune-test-port80.pid)" || true
+            echo ORIGINAL_DEPLOY_SH_ARM64_SYSTEM_VM_LIFECYCLE_PASS'
       - name: End-to-end test of the actual Deploy button API against disposable ARM64 VM
         timeout-minutes: 12
         run: |
@@ -779,7 +759,7 @@ jobs:
           printf '%s\n' "$deploy_log"
           grep -Fq 'CSQTT_LALUNE_DEPLOY_OK' <<<"$deploy_log"
           grep -Fq 'PANEL_URL=https://127.0.0.1:47002' <<<"$deploy_log"
-          ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo systemctl is-active --quiet csqtt-lalune.service && sudo grep -Fq "CSQTT_DEVICE_ID=01234567-89ab-cdef-0123-456789abcdef" /etc/csqtt-lalune/server.env && sudo systemctl is-active --quiet csqtt.service && sudo systemctl is-active --quiet csqtt-47000.service && sudo systemctl is-active --quiet csqtt-47000-netns.service && sudo ss -H -lun "sport = :47000" | grep -q . && sudo ss -H -ltn "sport = :47002" | grep -q . && sudo systemctl show -p ActiveState -p SubState csqtt.service csqtt-47000.service csqtt-47000-netns.service > /tmp/production-states.after-button-install && diff -u /tmp/production-states.before /tmp/production-states.after-button-install && sudo ip -4 route show table main | grep -vF "10.67.68.0/24 dev csqtt-lalune0" > /tmp/main-routes.after-button-install.unrelated && diff -u /tmp/main-routes.before /tmp/main-routes.after-button-install.unrelated'
+          ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo systemctl is-active --quiet csqtt-lalune.service && sudo grep -Fq "CSQTT_WEB_USER=deployWeb123" /etc/csqtt-lalune/csqtt.env && sudo python3 -c "import sqlite3; c=sqlite3.connect(\"/etc/csqtt-lalune/csqtt.db\"); assert c.execute(\"select value from meta where key=?\", (\"main_device_id\",)).fetchone()[0] == \"01234567-89ab-cdef-0123-456789abcdef\" " && sudo systemctl is-active --quiet csqtt.service && sudo systemctl is-active --quiet csqtt-47000.service && sudo systemctl is-active --quiet csqtt-47000-netns.service && sudo ss -H -lun "sport = :47000" | grep -q . && sudo ss -H -ltn "sport = :47002" | grep -q . && sudo systemctl show -p ActiveState -p SubState csqtt.service csqtt-47000.service csqtt-47000-netns.service > /tmp/production-states.after-button-install && diff -u /tmp/production-states.before /tmp/production-states.after-button-install && sudo ip -4 route show table main | grep -vF "10.67.68.0/24 dev csqtt-lalune0" > /tmp/main-routes.after-button-install.unrelated && diff -u /tmp/main-routes.before /tmp/main-routes.after-button-install.unrelated'
           python3 - <<'PY'
           import json, os, urllib.request
           payload = {
@@ -821,7 +801,7 @@ jobs:
           uninstall_log="$(curl -fsS http://127.0.0.1:1062/deploy/log | python3 -c 'import json,sys; print(json.load(sys.stdin))')"
           printf '%s\n' "$uninstall_log"
           grep -Fq 'CSQTT_LALUNE_UNINSTALL_OK' <<<"$uninstall_log"
-          ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo systemctl is-active --quiet csqtt.service && sudo systemctl is-active --quiet csqtt-47000.service && sudo systemctl is-active --quiet csqtt-47000-netns.service && ! sudo systemctl is-active --quiet csqtt-lalune.service && sudo ip -4 route show table main > /tmp/main-routes.after-button-uninstall && diff -u /tmp/main-routes.before /tmp/main-routes.after-button-uninstall && sudo test -f /etc/csqtt-lalune/.managed-by-lalune'
+          ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo systemctl is-active --quiet csqtt.service && sudo systemctl is-active --quiet csqtt-47000.service && sudo systemctl is-active --quiet csqtt-47000-netns.service && ! sudo systemctl is-active --quiet csqtt-lalune.service && sudo ip -4 route show table main > /tmp/main-routes.after-button-uninstall && diff -u /tmp/main-routes.before /tmp/main-routes.after-button-uninstall && sudo test -s /etc/csqtt-lalune/csqtt.db && sudo test -f /etc/csqtt-lalune/csqtt.env'
           ip -4 route show table main > vm/runner-main-routes.after
           ip -4 rule show > vm/runner-ip-rules.after
           diff -u vm/runner-main-routes.before vm/runner-main-routes.after
