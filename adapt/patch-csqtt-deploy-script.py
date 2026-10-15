@@ -237,6 +237,18 @@ if src.count(old) != 1:
     raise SystemExit("expected exactly one systemd service-manager environment line")
 src = src.replace(old, new, 1)
 
+# Give the DeployManager an explicit namespaced success contract for both lifecycle operations.
+old = 'echo "CSQTT_DEPLOY_OK"'
+if src.count(old) != 2:
+    raise SystemExit(f"expected exactly two upstream install success markers, found {src.count(old)}")
+src = src.replace(old, 'echo "CSQTT_LALUNE_DEPLOY_OK"')
+
+old = '    log_info "CSQTT удалён. SQLite state и конфигурация сохранены в ${CSQTT_CONFIG_DIR}"\n}'
+new = '    log_info "CSQTT удалён. SQLite state и конфигурация сохранены в ${CSQTT_CONFIG_DIR}"\n    echo "CSQTT_LALUNE_UNINSTALL_OK"\n}'
+if src.count(old) != 1:
+    raise SystemExit("expected exactly one end of upstream uninstall function")
+src = src.replace(old, new, 1)
+
 # Optional CI switch: keep the upstream TLS setup flow in normal use, while
 # avoiding an outbound Let's Encrypt request in a disposable test VM.
 old = "setup_letsencrypt_ip_tls() {"
