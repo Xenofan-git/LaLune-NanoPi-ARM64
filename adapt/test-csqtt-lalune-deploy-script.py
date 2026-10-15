@@ -46,6 +46,9 @@ for value in [
     'readonly CSQTT_DATABASE_WAL_FILE="csqtt.db-wal"',
     'readonly CSQTT_DATABASE_SHM_FILE="csqtt.db-shm"',
     'readonly CSQTT_ENV_FILE="${CSQTT_CONFIG_DIR}/csqtt.env"',
+    '/etc/csqtt-lalune/csqtt.db',
+    '/etc/csqtt-lalune/csqtt.db-wal',
+    '/etc/csqtt-lalune/csqtt.db-shm',
     'assert_deployment_ports_not_foreign()', 'web_port_listeners()', 'assert_web_port_is_available()',
     'probe_iface="cqtdl', 'probe_chain="CSQTT_LALUNE_D',
 ]:
