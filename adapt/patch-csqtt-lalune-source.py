@@ -72,6 +72,10 @@ replacements = [
     ("web", "46000", "47000", "panel DTLS client defaults", 7),
     ("web", "46001", "47001", "panel WG client defaults", 6),
     ("web", "46002", "47002", "panel HTTPS redirect fallback", 1),
+    ("main", "46003", "47003", "DPI local listener port", 2),
+    ("main", "46004", "47004", "syscalls local listener port", 6),
+    ("protocol", "46003", "47003", "DPI listener port", 1),
+    ("protocol", "46004", "47004", "syscalls listener port", 1),
     ("tproxy", "const TPROXY_BASE_PORT: u16 = 10666;", "const TPROXY_BASE_PORT: u16 = 62000;", "isolated internal TPROXY base port", 1),
     ("tproxy", "TPROXY_BASE_PORT + (runtime_id % 50_000) as u16", "TPROXY_BASE_PORT + (runtime_id % 3_000) as u16", "isolated internal TPROXY range", 1),
 ]
@@ -452,7 +456,7 @@ if 'command.args([action, "csqtt"])' in sources["main"] or '.args(["--no-block",
     raise SystemExit("main.rs still contains a hard-coded original CSQTT service action")
 
 for key in ("main", "web"):
-    for old_port in ("46000", "46001", "46002"):
+    for old_port in ("46000", "46001", "46002", "46003", "46004"):
         if old_port in sources[key]:
             raise SystemExit(f"{key}.rs still contains original CSQTT port {old_port}")
 if 'default_value = "0.0.0.0:47000"' not in sources["main"] or "default_value_t = 47002" not in sources["main"]:
