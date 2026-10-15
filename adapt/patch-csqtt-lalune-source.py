@@ -8,6 +8,7 @@ paths = {
     "net": root / "net_setup.rs",
     "tun": root / "tun_device.rs",
     "proxy": root / "proxy_route.rs",
+    "tproxy": root / "tproxy.rs",
     "model": root / "model.rs",
     "protocol": root / "protocol.rs",
     "main": root / "main.rs",
@@ -71,12 +72,25 @@ replacements = [
     ("web", "46000", "47000", "panel DTLS client defaults", 7),
     ("web", "46001", "47001", "panel WG client defaults", 6),
     ("web", "46002", "47002", "panel HTTPS redirect fallback", 1),
+    ("tproxy", "const TPROXY_BASE_PORT: u16 = 10666;", "const TPROXY_BASE_PORT: u16 = 62000;", "isolated internal TPROXY base port", 1),
+    ("tproxy", "TPROXY_BASE_PORT + (runtime_id % 50_000) as u16", "TPROXY_BASE_PORT + (runtime_id % 3_000) as u16", "isolated internal TPROXY range", 1),
 ]
 for key, old, new, label, expected_count in replacements:
     count = sources[key].count(old)
     if count != expected_count:
         raise SystemExit(f"{label}: expected {expected_count} source occurrence(s), found {count}")
     sources[key] = sources[key].replace(old, new)
+
+tproxy_test_old = """        assert!(first >= 10666);
+        assert_eq!(tproxy_port(1), first);"""
+tproxy_test_new = """        assert!((62000..=64999).contains(&first));
+        assert!((62000..=64999).contains(&second));
+        assert!((62000..=64999).contains(&tproxy_port(u64::MAX)));
+        assert!(!(10666..=60665).contains(&first));
+        assert_eq!(tproxy_port(1), first);"""
+if sources["tproxy"].count(tproxy_test_old) != 1:
+    raise SystemExit("tproxy.rs: expected one upstream internal port range assertion")
+sources["tproxy"] = sources["tproxy"].replace(tproxy_test_old, tproxy_test_new, 1)
 
 # Bind the pinned client parser into the server's test module. This is test-only:
 # it lets a real server-produced encrypted response pass through the exact client parser
@@ -456,6 +470,10 @@ for path in root.glob("*.rs"):
     text = path.read_text()
     if "csqtt1" in text or "10.66.67" in text:
         raise SystemExit(f"unpatched shared interface/subnet reference remains in {path}")
+if 'const TPROXY_BASE_PORT: u16 = 62000;' not in sources["tproxy"] or "TPROXY_BASE_PORT + (runtime_id % 3_000) as u16" not in sources["tproxy"]:
+    raise SystemExit("internal TPROXY listener ports are not isolated from the original CSQTT range")
+if 'assert!((62000..=64999).contains(&first));' not in sources["tproxy"]:
+    raise SystemExit("isolated TPROXY range regression test is missing")
 if 'pub const TUN_IFACE: &str = "csqtt-lalune0";' not in sources["net"]:
     raise SystemExit("dedicated interface missing from net_setup.rs")
 if 'pub const TUN_IFACE: &str = "csqtt-lalune0";' not in sources["tun"]:
