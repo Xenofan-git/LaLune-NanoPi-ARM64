@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """Static regression tests for the namespaced original CSQTT v2.1.9 deploy.sh."""
 from pathlib import Path
+import hashlib
 
-upstream = Path("server-assets/deploy.sh").read_text()
+EXPECTED_UPSTREAM_SHA256 = "6c94fb8dd033a4f1bab2961e7a1f6edfc1bdc532129d4e9cbf459684ba61ef5a"
+upstream_path = Path("server-assets/deploy.sh")
+upstream_bytes = upstream_path.read_bytes()
+if hashlib.sha256(upstream_bytes).hexdigest() != EXPECTED_UPSTREAM_SHA256:
+    raise SystemExit("upstream deploy.sh does not match the pinned CSQTT v2.1.9 source")
+upstream = upstream_bytes.decode("utf-8")
 script = Path("server-assets/deploy-csqtt-lalune.sh").read_text()
 
 def need(fragment: str) -> None:
