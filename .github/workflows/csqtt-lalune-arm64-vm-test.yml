@@ -615,11 +615,13 @@ jobs:
             grep -Eq "^470011:.*fwmark 0x67410/0xffff lookup 470010$" /tmp/all-ip-rules.before
             grep -Fq "CSQTT_LALUNE-FOREIGN_RULE_KEEP" /tmp/iptables.before
             grep -Fq "CSQTT_LALUNEISH_FOREIGN_KEEP" /tmp/iptables.before
-            cat > /opt/lalune-package/.csqtt-lalune-upload-web.env <<'WEBENV'
+            sudo install -m 0600 /dev/null /opt/lalune-package/.csqtt-lalune-upload-web.env
+            sudo tee /opt/lalune-package/.csqtt-lalune-upload-web.env >/dev/null <<'WEBENV'
           CSQTT_WEB_USER=wire-user
           CSQTT_WEB_PASS=wire-web-password
           WEBENV
-            cat > /opt/lalune-package/.csqtt-lalune-upload-overrides.json <<'OVERRIDES'
+            sudo install -m 0600 /dev/null /opt/lalune-package/.csqtt-lalune-upload-overrides.json
+            sudo tee /opt/lalune-package/.csqtt-lalune-upload-overrides.json >/dev/null <<'OVERRIDES'
           {"main_password":"wire-password","device_id":"wire-device"}
           OVERRIDES
             sudo chmod 0600 /opt/lalune-package/.csqtt-lalune-upload-web.env /opt/lalune-package/.csqtt-lalune-upload-overrides.json
@@ -665,11 +667,13 @@ jobs:
             # Failed preflight deliberately removes staged upload files; recreate them
             # before the real install so only a clean preflight can reach cutover.
             sudo install -m 0755 /home/tester/csqtt-lalune-linux-arm64 /opt/lalune-package/.csqtt-lalune-upload-server
-            cat > /opt/lalune-package/.csqtt-lalune-upload-web.env <<'WEBENV'
+            sudo install -m 0600 /dev/null /opt/lalune-package/.csqtt-lalune-upload-web.env
+            sudo tee /opt/lalune-package/.csqtt-lalune-upload-web.env >/dev/null <<'WEBENV'
           CSQTT_WEB_USER=wire-user
           CSQTT_WEB_PASS=wire-web-password
           WEBENV
-            cat > /opt/lalune-package/.csqtt-lalune-upload-overrides.json <<'OVERRIDES'
+            sudo install -m 0600 /dev/null /opt/lalune-package/.csqtt-lalune-upload-overrides.json
+            sudo tee /opt/lalune-package/.csqtt-lalune-upload-overrides.json >/dev/null <<'OVERRIDES'
           {"main_password":"wire-password","device_id":"wire-device"}
           OVERRIDES
             sudo chmod 0600 /opt/lalune-package/.csqtt-lalune-upload-web.env /opt/lalune-package/.csqtt-lalune-upload-overrides.json
@@ -737,11 +741,13 @@ jobs:
             curl -k -fsS -b "$cookie" --connect-timeout 2 --max-time 4 https://127.0.0.1:47002/api/settings > /tmp/csqtt-lalune-dns-before-redeploy.json
             python3 -c "import json; s=json.load(open(\"/tmp/csqtt-lalune-dns-before-redeploy.json\")); assert (s.get(\"dns_primary\"),s.get(\"dns_secondary\")) == (\"111.88.96.50\",\"111.88.96.51\"), s"
             sudo install -m 0755 /home/tester/csqtt-lalune-linux-arm64 /opt/lalune-package/.csqtt-lalune-upload-server
-            cat > /opt/lalune-package/.csqtt-lalune-upload-web.env <<'WEBENV'
+            sudo install -m 0600 /dev/null /opt/lalune-package/.csqtt-lalune-upload-web.env
+            sudo tee /opt/lalune-package/.csqtt-lalune-upload-web.env >/dev/null <<'WEBENV'
           CSQTT_WEB_USER=wire-user
           CSQTT_WEB_PASS=wire-web-password
           WEBENV
-            cat > /opt/lalune-package/.csqtt-lalune-upload-overrides.json <<'OVERRIDES'
+            sudo install -m 0600 /dev/null /opt/lalune-package/.csqtt-lalune-upload-overrides.json
+            sudo tee /opt/lalune-package/.csqtt-lalune-upload-overrides.json >/dev/null <<'OVERRIDES'
           {"main_password":"wire-password","device_id":"wire-device"}
           OVERRIDES
             sudo chmod 0600 /opt/lalune-package/.csqtt-lalune-upload-web.env /opt/lalune-package/.csqtt-lalune-upload-overrides.json
