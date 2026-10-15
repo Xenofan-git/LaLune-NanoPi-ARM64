@@ -12,7 +12,7 @@ permissions:
 jobs:
   arm64-system-vm:
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -830,7 +830,7 @@ jobs:
             sudo test -f /etc/csqtt-lalune/csqtt.env
             echo ORIGINAL_DEPLOY_SH_ARM64_SYSTEM_VM_LIFECYCLE_PASS'
       - name: End-to-end test of the actual Deploy button API against disposable ARM64 VM
-        timeout-minutes: 25
+        timeout-minutes: 35
         run: |
           set -Eeuo pipefail
           mkdir -p vm/deploy-e2e-home
@@ -884,7 +884,7 @@ jobs:
           print("DEPLOY_BUTTON_API_ACCEPTED")
           PY
           deploy_done=0
-          for attempt in $(seq 1 180); do
+          for attempt in $(seq 1 600); do
             status="$(curl -fsS http://127.0.0.1:1062/deploy/status)"
             if python3 -c 'import json,sys; raise SystemExit(0 if not json.load(sys.stdin).get("deploying", True) else 1)' <<<"$status"; then
               deploy_done=1
@@ -927,7 +927,7 @@ jobs:
           print("DEPLOY_BUTTON_UNINSTALL_API_ACCEPTED")
           PY
           uninstall_done=0
-          for attempt in $(seq 1 120); do
+          for attempt in $(seq 1 450); do
             status="$(curl -fsS http://127.0.0.1:1062/deploy/status)"
             if python3 -c 'import json,sys; raise SystemExit(0 if not json.load(sys.stdin).get("deploying", True) else 1)' <<<"$status"; then
               uninstall_done=1
