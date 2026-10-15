@@ -605,7 +605,12 @@ jobs:
             grep -Eq "^470011:.*fwmark 0x67410/0xffff lookup 470010$" /tmp/all-ip-rules.before
             grep -Fq 'CSQTT_LALUNE-FOREIGN_RULE_KEEP' /tmp/iptables.before
             grep -Fq 'CSQTT_LALUNEISH_FOREIGN_KEEP' /tmp/iptables.before
-            printf '%s\\n' 'wire-password' 'wire-user' 'wire-web-password' 'wire-device' | sudo tee /opt/lalune-package/server-secrets.txt >/dev/null
+            cat <<'SECRETS' | sudo tee /opt/lalune-package/server-secrets.txt >/dev/null
+            wire-password
+            wire-user
+            wire-web-password
+            wire-device
+            SECRETS
             sudo chmod 0600 /opt/lalune-package/server-secrets.txt
             sudo env CSQTT_LALUNE_UDP_PORT=47000 CSQTT_LALUNE_WEB_PORT=47002 bash /opt/lalune-package/install-csqtt-lalune.sh --secrets-file /opt/lalune-package/server-secrets.txt
             sudo systemctl is-active --quiet csqtt-lalune.service
