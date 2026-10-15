@@ -589,6 +589,7 @@ jobs:
             sudo bash -c "nohup python3 -m http.server 80 --bind 0.0.0.0 >/tmp/lalune-test-port80.log 2>&1 </dev/null & echo \$! >/run/lalune-test-port80.pid"
             for attempt in $(seq 1 20); do sudo ss -H -ltn "sport = :80" | grep -q . && break; sleep 0.2; done
             sudo ss -H -ltn "sport = :80" | grep -q .
+            sudo kill -0 "$(sudo cat /run/lalune-test-port80.pid)"
             # Seed explicitly foreign resources; LaLune must preserve them through install AND removal.
             sudo ip route add blackhole 198.18.77.0/24 table 42424
             sudo ip rule add priority 42424 to 198.18.77.0/24 lookup 42424
