@@ -228,9 +228,14 @@ official = r'''fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Res
     let main_password = secret_lines.next().unwrap_or("").trim();
     let web_user = secret_lines.next().unwrap_or("").trim();
     let web_password = secret_lines.next().unwrap_or("").trim();
+    let device_id = secret_lines.next().unwrap_or("").trim();
     let valid = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric());
+    let valid_device_id = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
     if !valid(main_password) || !valid(web_user) || !valid(web_password) {
         anyhow::bail!("tunnel password and web credentials must contain only Latin letters and digits");
+    }
+    if !valid_device_id(device_id) {
+        anyhow::bail!("LaLune device ID is missing or invalid; reopen the panel and retry");
     }
 
     let source = args.local_binary_dir.as_deref()
@@ -254,7 +259,6 @@ official = r'''fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Res
             fs::copy(source.join(name), bundle.join(name))
                 .with_context(|| format!("stage official asset {name}"))?;
         }
-        let device_id = format!("{:016x}{:016x}", nonce, std::process::id() as u128);
         fs::write(
             bundle.join("server-secrets.txt"),
             format!("{main_password}\n{web_user}\n{web_password}\n{device_id}\n"),
@@ -327,17 +331,17 @@ deploy_go = ROOT / "Desktop/Libs/deploy.go"
 replace_once(
     deploy_go,
     '\tListenPort  int    `json:"listenPort"`',
-    '\tListenPort  int    `json:"listenPort"`\n\tMainPassword string `json:"mainPassword"`\n\tWebUser string `json:"webUser"`\n\tWebPassword string `json:"webPassword"`\n\tDockerInstall bool `json:"dockerInstall"`\n\tUninstall bool `json:"uninstall"`',
+    '\tListenPort  int    `json:"listenPort"`\n\tMainPassword string `json:"mainPassword"`\n\tWebUser string `json:"webUser"`\n\tWebPassword string `json:"webPassword"`\n\tDeviceID string `json:"deviceId"`\n\tDockerInstall bool `json:"dockerInstall"`\n\tUninstall bool `json:"uninstall"`',
 )
 replace_once(
     deploy_go,
     '\tif strings.TrimSpace(req.Host) == "" {',
-    '\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") && !req.Uninstall {\n\t\tif !validCSQTTSecret(req.MainPassword) || !validCSQTTSecret(req.WebUser) || !validCSQTTSecret(req.WebPassword) {\n\t\t\tdeployAppend("[deploy] CSQTT: задайте пароль туннеля, логин и пароль WEB только латиницей и цифрами")\n\t\t\treturn false\n\t\t}\n\t}\n\tif strings.TrimSpace(req.Host) == "" {',
+    '\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") && !req.Uninstall {\n\t\tif !validCSQTTSecret(req.MainPassword) || !validCSQTTSecret(req.WebUser) || !validCSQTTSecret(req.WebPassword) {\n\t\t\tdeployAppend("[deploy] CSQTT: задайте пароль туннеля, логин и пароль WEB только латиницей и цифрами")\n\t\t\treturn false\n\t\t}\n\t\tif !validCSQTTDeviceID(req.DeviceID) { deployAppend("[deploy] не удалось получить ID устройства LaLune"); return false }\n\t}\n\tif strings.TrimSpace(req.Host) == "" {',
 )
 replace_once(
     deploy_go,
     'func DeployProtocol(reqJSON string) bool {',
-    'func validCSQTTSecret(value string) bool {\n\tif value == "" { return false }\n\tfor _, r := range value { if !((r >= \'a\' && r <= \'z\') || (r >= \'A\' && r <= \'Z\') || (r >= \'0\' && r <= \'9\')) { return false } }\n\treturn true\n}\n\nfunc DeployProtocol(reqJSON string) bool {',
+    'func validCSQTTSecret(value string) bool {\n\tif value == "" { return false }\n\tfor _, r := range value { if !((r >= \'a\' && r <= \'z\') || (r >= \'A\' && r <= \'Z\') || (r >= \'0\' && r <= \'9\')) { return false } }\n\treturn true\n}\n\nfunc validCSQTTDeviceID(value string) bool {\n\tif value == "" { return false }\n\tfor _, r := range value { if !((r >= \'a\' && r <= \'z\') || (r >= \'A\' && r <= \'Z\') || (r >= \'0\' && r <= \'9\') || r == \'-\') { return false } }\n\treturn true\n}\n\nfunc DeployProtocol(reqJSON string) bool {',
 )
 replace_once(
     deploy_go,
@@ -352,7 +356,7 @@ replace_once(
 		f, err := os.CreateTemp("", "csqtt-deploy-secrets-*.txt")
 		if err != nil { deployAppend("[deploy] не удалось создать временный файл авторизации"); return false }
 		_ = f.Chmod(0600)
-		_, writeErr := f.WriteString(req.MainPassword + "\\n" + req.WebUser + "\\n" + req.WebPassword + "\\n")
+		_, writeErr := f.WriteString(req.MainPassword + "\\n" + req.WebUser + "\\n" + req.WebPassword + "\\n" + req.DeviceID + "\\n")
 		closeErr := f.Close()
 		if writeErr != nil || closeErr != nil { _ = os.Remove(f.Name()); deployAppend("[deploy] не удалось сохранить временные данные авторизации"); return false }
 		secretsFile = f.Name()
