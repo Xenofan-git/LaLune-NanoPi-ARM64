@@ -118,7 +118,7 @@ src = src.replace(old, new, 1)
 # remove rules carrying its own IPT_COMMENT; the original service may still
 # rely on CSQTT_MIRRORED/TPROXY/SOCKS/CASCADE rules.
 old = 'for marker in "$IPT_COMMENT" CSQTT_MIRRORED CSQTT_TPROXY CSQTT_LOCAL_SOCKS CSQTT_LOCAL_SOCKS_MARK CSQTT_SOCKS CSQTT_CASCADE_NO_QUIC; do'
-new = 'for marker in "$IPT_COMMENT"; do'
+new = 'for marker in "$IPT_COMMENT" CSQTT_LALUNE_MIRRORED CSQTT_LALUNE_TPROXY CSQTT_LALUNE_LOCAL_SOCKS CSQTT_LALUNE_LOCAL_SOCKS_MARK CSQTT_LALUNE_SOCKS CSQTT_LALUNE_CASCADE_NO_QUIC; do'
 if src.count(old) != 1:
     raise SystemExit("expected exactly one shared netfilter-marker cleanup loop")
 src = src.replace(old, new, 1)
