@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Patch pinned LaLune DeployManager to stage the bundled CSQTT 2.1.9 asset safely.
+"""Adapt pinned LaLune DeployManager to use the original CSQTT v2.1.9 deploy.sh.
 
-Run after apply-pinned-original-linux-arm64-policy.py, against the pinned upstream
-source checkout. This is source adaptation only; it does not deploy to any server.
+CSQTT keeps upstream's SSH -> deploy.sh install/uninstall and health checks.
+Only bundled assets, ports, secrets transport, and namespaced runtime ownership
+are adapted. No remote host is changed by this source patcher.
 """
 from pathlib import Path
 
@@ -19,40 +20,41 @@ main = ROOT / "Core/DeployManager/src/main.rs"
 replace_once(
     main,
     "    pub listen_port: Option<u16>,",
-    "    pub listen_port: Option<u16>,\n\n    /// Local directory containing the bundled CSQTT server assets.\n    #[arg(long)]\n    pub local_binary_dir: Option<String>,",
+    """    pub listen_port: Option<u16>,
+
+    /// Local directory containing the pinned, namespaced CSQTT v2.1.9 assets.
+    #[arg(long)]
+    pub local_binary_dir: Option<String>,
+
+    /// One-shot local file containing the tunnel/web credentials.
+    #[arg(long)]
+    pub secrets_file: Option<String>,
+
+    /// Docker mode is rejected for the isolated LaLune service.
+    #[arg(long, default_value_t = false)]
+    pub install_in_docker: bool,
+
+    /// Remove only the namespaced LaLune CSQTT runtime.
+    #[arg(long, default_value_t = false)]
+    pub uninstall: bool,""",
 )
 
 protocol = ROOT / "Core/DeployManager/src/protocol.rs"
 replace_once(protocol, '            Protocol::Csqtt => "csqtt-core",', '            Protocol::Csqtt => "csqtt-lalune",')
-replace_once(protocol, "            Protocol::Csqtt => (443, 0, 1080),", "            Protocol::Csqtt => (47000, 47002, 1080),")
+replace_once(protocol, "            Protocol::Csqtt => (443, 0, 1080),", "            Protocol::Csqtt => (47000, 47002, 0),")
 
 deploy = ROOT / "Core/DeployManager/src/deploy.rs"
 replace_once(
     deploy,
-    "    let script = install_script(proto, ports);",
-    '''    // Stage bundled CSQTT assets in a unique temporary directory. The target is
-    // prepared over SSH first so scp has deterministic directory semantics.
-    let remote_tmp = format!("/tmp/lalune-deploy-{}", std::process::id());
-    let has_local_csqtt = proto == Protocol::Csqtt && args.local_binary_dir.is_some();
-    if has_local_csqtt {
-        let prepare = format!("set -e\\nmkdir -p -- '{remote_tmp}'\\nchmod 700 -- '{remote_tmp}'\\n");
-        let prepared = run_ssh(args, &remote, &prepare)?;
-        if !prepared.status.success() {
-            anyhow::bail!("could not prepare remote staging directory: {}", String::from_utf8_lossy(&prepared.stderr));
-        }
-        let local_dir = args.local_binary_dir.as_deref().expect("checked above");
-        if let Err(error) = run_scp(args, &remote, local_dir, &remote_tmp) {
-            let cleanup = format!("rm -rf -- '{remote_tmp}'\\n");
-            let _ = run_ssh(args, &remote, &cleanup);
-            return Err(error);
-        }
+    "pub fn deploy(args: &DeployArgs, proto: Protocol, ports: &Ports) -> Result<()> {\n    let remote =",
+    """pub fn deploy(args: &DeployArgs, proto: Protocol, ports: &Ports) -> Result<()> {
+    if proto == Protocol::Csqtt {
+        return deploy_official_csqtt(args, ports);
     }
-    let local_dir = if has_local_csqtt { Some(remote_tmp.as_str()) } else { None };
-    let script = install_script(proto, ports, local_dir);''',
+    let remote =""",
 )
 
-run_ssh_marker = "fn run_ssh(args: &DeployArgs, remote: &str, script: &str) -> Result<std::process::Output> {"
-run_scp = '''fn run_scp(args: &DeployArgs, remote: &str, local: &str, remote_stage: &str) -> Result<()> {
+run_scp = r'''fn run_scp(args: &DeployArgs, remote: &str, local: &str, remote_stage: &str) -> Result<()> {
     let mut scp_args = vec![
         "-r".to_string(),
         "-o".to_string(),
@@ -111,226 +113,164 @@ run_scp = '''fn run_scp(args: &DeployArgs, remote: &str, local: &str, remote_sta
 }
 
 '''
-replace_once(deploy, run_ssh_marker, run_scp + run_ssh_marker)
-replace_once(
-    deploy,
-    "fn install_script(proto: Protocol, ports: &Ports) -> String {",
-    "fn install_script(proto: Protocol, ports: &Ports, local_dir: Option<&str>) -> String {",
-)
-replace_once(
-    deploy,
-    "    let flags = ports.flags();",
-    '''    let flags = if proto == Protocol::Csqtt {
-        format!(" --listen {} --web-port {} --config-dir /etc/csqtt-lalune", ports.core.unwrap_or(47000), ports.warp.unwrap_or(47002))
-    } else {
-        ports.flags()
-    };
-    let local_dir = local_dir.unwrap_or("");''',
-)
-replace_once(
-    deploy,
-    'echo "[install] protocol={proto}"',
-    '''echo "[install] protocol={proto}"
-LOCAL_STAGE="{local_dir}"
-if [ -n "$LOCAL_STAGE" ]; then trap 'rm -rf -- "$LOCAL_STAGE"' EXIT; fi''',
-)
-replace_once(
-    deploy,
-    'echo "[install] protocol={proto}"',
-    r'''echo "[install] protocol={proto}"
-LOCAL_STAGE="{local_dir}"
-if [ -n "$LOCAL_STAGE" ]; then trap 'rm -rf -- "$LOCAL_STAGE"' EXIT; fi
-if [ "{proto}" = "csqtt" ] && systemctl list-unit-files csqtt-47000.service --no-legend 2>/dev/null | grep -q '^csqtt-47000.service'; then
-  echo "[install] refusing to overwrite an existing CSQTT service (csqtt-47000.service)" >&2
-  exit 1
-fi''',
-)
-start = 'echo "[install] downloading $URL"'
-end = 'if command -v systemctl >/dev/null 2>&1; then'
-source = deploy.read_text()
-if source.count(start) != 1 or source.count(end) != 1:
-    raise SystemExit("could not identify unique download/install block in deploy.rs")
-a = source.index(start)
-b = source.index(end, a)
-replacement = '''if [ -n "$LOCAL_STAGE" ] && [ "{proto}" = "csqtt" ]; then
-  SOURCE="$LOCAL_STAGE/server-assets/csqtt-linux-$ASSET_ARCH"
-  if [ ! -s "$SOURCE" ]; then echo "[install] bundled CSQTT asset missing: $SOURCE" >&2; exit 1; fi
-  TMP_DEST="${{DEST}}.new.$$"
-  install -m 0755 "$SOURCE" "$TMP_DEST"
-  mv -f "$TMP_DEST" "$DEST"
-  echo "[install] installed bundled CSQTT asset for $ASSET_ARCH"
-else
-  echo "[install] downloading $URL"
-  TMP_DEST="${{DEST}}.new.$$"
-  if command -v curl >/dev/null 2>&1; then
-    curl -fSL --retry 3 "$URL" -o "$TMP_DEST"
-  elif command -v wget >/dev/null 2>&1; then
-    wget -O "$TMP_DEST" "$URL"
-  else
-    echo "[install] error: neither curl nor wget available" >&2; exit 1
-  fi
-  if [ ! -s "$TMP_DEST" ]; then echo "[install] error: download empty" >&2; rm -f "$TMP_DEST"; exit 1; fi
-  chmod 0755 "$TMP_DEST"
-  mv -f "$TMP_DEST" "$DEST"
-fi
-if [ ! -s "$DEST" ]; then echo "[install] error: installed file is empty" >&2; exit 1; fi
-chmod +x "$DEST"
-echo "[install] installed $DEST ($(stat -c %s "$DEST" 2>/dev/null || echo '?') bytes)"
+replace_once(deploy, "fn run_ssh(args: &DeployArgs, remote: &str, script: &str) -> Result<std::process::Output> {", run_scp + "fn run_ssh(args: &DeployArgs, remote: &str, script: &str) -> Result<std::process::Output> {")
 
-'''
-source = source[:a] + replacement + source[b:]
-deploy.write_text(source)
-
-# Keep the deployed service separate from an existing service of the same core.
-replace_once(deploy, 'cat >/etc/systemd/system/{bin}.service <<UNIT', 'cat >/etc/systemd/system/{bin}-deployed.service <<UNIT')
-replace_once(deploy, 'systemctl enable {bin}.service', 'systemctl enable {bin}-deployed.service')
-replace_once(deploy, 'systemctl restart {bin}.service', 'systemctl restart {bin}-deployed.service')
-replace_once(deploy, 'systemctl is-active --quiet {bin}.service', 'systemctl is-active --quiet {bin}-deployed.service')
-replace_once(deploy, '{bin}.service failed to start', '{bin}-deployed.service failed to start')
-replace_once(deploy, 'status {bin}.service >&2', 'status {bin}-deployed.service >&2')
-replace_once(deploy, 'journalctl -u {bin}.service -n 40', 'journalctl -u {bin}-deployed.service -n 40')
-replace_once(deploy, 'systemd service {bin}.service started', 'systemd service {bin}-deployed.service started')
-
-
-# CSQTT must use the official v2.1.9 deploy.sh protocol, not the generic
-# LaLune installer. Secrets arrive in a short-lived mode-0600 file, never argv.
-replace_once(
-    main,
-    "    pub local_binary_dir: Option<String>,",
-    "    pub local_binary_dir: Option<String>,\n\n    /// One-shot local file containing tunnel/web credentials.\n    #[arg(long)]\n    pub secrets_file: Option<String>,",
-)
-replace_once(
-    main,
-    "    pub listen_port: Option<u16>,",
-    "    pub listen_port: Option<u16>,\n\n    /// Install official CSQTT into Docker rather than systemd.\n    #[arg(long, default_value_t = false)]\n    pub install_in_docker: bool,",
-)
-replace_once(
-    protocol,
-    "            Protocol::Csqtt => (47000, 47002, 1080),",
-    "            Protocol::Csqtt => (47000, 47002, 0),",
-)
-replace_once(
-    deploy,
-    "use std::process::Command;",
-    "use std::process::Command;\nuse std::fs;\nuse std::path::Path;\nuse std::time::{SystemTime, UNIX_EPOCH};",
-)
-replace_once(
-    deploy,
-    "pub fn deploy(args: &DeployArgs, proto: Protocol, ports: &Ports) -> Result<()> {\n    let remote =",
-    "pub fn deploy(args: &DeployArgs, proto: Protocol, ports: &Ports) -> Result<()> {\n    if proto == Protocol::Csqtt {\n        return deploy_official_csqtt(args, ports);\n    }\n    let remote =",
-)
 official = r'''fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {
-    let secrets_path = args.secrets_file.as_deref()
-        .ok_or_else(|| anyhow::anyhow!("CSQTT requires the one-shot secrets file"))?;
-    let secret_text = fs::read_to_string(secrets_path).context("read CSQTT deployment secrets")?;
-    let _ = fs::remove_file(secrets_path);
-    let mut secret_lines = secret_text.lines();
-    let main_password = secret_lines.next().unwrap_or("").trim();
-    let web_user = secret_lines.next().unwrap_or("").trim();
-    let web_password = secret_lines.next().unwrap_or("").trim();
-    let device_id = secret_lines.next().unwrap_or("").trim();
-    let valid = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric());
-    let valid_device_id = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
-    if !valid(main_password) || !valid(web_user) || !valid(web_password) {
-        anyhow::bail!("tunnel password and web credentials must contain only Latin letters and digits");
-    }
-    if !valid_device_id(device_id) {
-        anyhow::bail!("LaLune device ID is missing or invalid; reopen the panel and retry");
+    if args.install_in_docker {
+        anyhow::bail!("Docker mode is disabled for the isolated LaLune service; no remote changes were made.");
     }
 
-    let source = args.local_binary_dir.as_deref()
-        .ok_or_else(|| anyhow::anyhow!("official CSQTT assets are not bundled"))?;
-    let source = Path::new(source);
-    for name in ["install-csqtt-lalune.sh", "uninstall-csqtt-lalune.sh", "csqtt-lalune-linux-arm64", "csqtt-lalune-linux-amd64"] {
-        if !source.join(name).is_file() {
-            anyhow::bail!("required official CSQTT 2.1.9 asset is missing: {}", source.join(name).display());
+    let source_dir = args.local_binary_dir.as_deref()
+        .ok_or_else(|| anyhow::anyhow!("bundled LaLune CSQTT assets directory was not found"))?;
+    let source = std::path::Path::new(source_dir);
+    let deploy_script = source.join("deploy-csqtt-lalune.sh");
+    if !deploy_script.is_file() {
+        anyhow::bail!("namespaced original CSQTT 2.1.9 deploy script is missing: {}", deploy_script.display());
+    }
+
+    let mut main_password = String::new();
+    let mut web_user = String::new();
+    let mut web_password = String::new();
+    let mut device_id = String::new();
+    if !args.uninstall {
+        let secrets_path = args.secrets_file.as_deref()
+            .ok_or_else(|| anyhow::anyhow!("CSQTT requires the one-shot secrets file"))?;
+        let secret_text = std::fs::read_to_string(secrets_path)
+            .context("read CSQTT deployment credentials")?;
+        let _ = std::fs::remove_file(secrets_path);
+        let mut lines = secret_text.lines();
+        main_password = lines.next().unwrap_or("").trim().to_owned();
+        web_user = lines.next().unwrap_or("").trim().to_owned();
+        web_password = lines.next().unwrap_or("").trim().to_owned();
+        device_id = lines.next().unwrap_or("").trim().to_owned();
+        let valid_secret = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric());
+        let valid_device = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+        if !valid_secret(&main_password) || !valid_secret(&web_user) || !valid_secret(&web_password) {
+            anyhow::bail!("tunnel password and web credentials must contain only Latin letters and digits");
+        }
+        if !valid_device(&device_id) {
+            anyhow::bail!("LaLune device ID is missing or invalid; reopen the panel and retry");
         }
     }
 
-    let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-    let bundle_name = format!("csqtt-bundle-{}-{nonce:x}", std::process::id());
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos();
+    let bundle_name = format!("lalune-csqtt-deploy-{}-{nonce:x}", std::process::id());
     let bundle = std::env::temp_dir().join(&bundle_name);
-    fs::create_dir(&bundle).context("create temporary CSQTT bundle")?;
+    std::fs::create_dir(&bundle).context("create temporary CSQTT deploy bundle")?;
     #[cfg(unix)]
-    fs::set_permissions(&bundle, std::os::unix::fs::PermissionsExt::from_mode(0o700))
-        .context("restrict temporary CSQTT bundle permissions")?;
+    std::fs::set_permissions(&bundle, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+        .context("restrict temporary CSQTT bundle")?;
+
     let result = (|| -> Result<()> {
-        for name in ["install-csqtt-lalune.sh", "uninstall-csqtt-lalune.sh", "csqtt-lalune-linux-arm64", "csqtt-lalune-linux-amd64"] {
-            fs::copy(source.join(name), bundle.join(name))
-                .with_context(|| format!("stage official asset {name}"))?;
+        std::fs::copy(&deploy_script, bundle.join("deploy-csqtt-lalune.sh"))
+            .context("stage the adapted original deploy.sh")?;
+        if !args.uninstall {
+            for name in ["csqtt-lalune-linux-arm64", "csqtt-lalune-linux-amd64"] {
+                let path = source.join(name);
+                if !path.is_file() {
+                    anyhow::bail!("required pinned CSQTT server asset is missing: {}", path.display());
+                }
+                std::fs::copy(path, bundle.join(name))
+                    .with_context(|| format!("stage pinned server asset {name}"))?;
+            }
+            std::fs::write(
+                bundle.join(".csqtt-lalune-upload-web.env"),
+                format!("CSQTT_WEB_USER={web_user}\nCSQTT_WEB_PASS={web_password}\n"),
+            ).context("write temporary web credentials")?;
+            std::fs::write(
+                bundle.join(".csqtt-lalune-upload-overrides.json"),
+                format!("{{\"main_password\":\"{main_password}\",\"device_id\":\"{device_id}\"}}\n"),
+            ).context("write temporary CSQTT deploy overrides")?;
+            #[cfg(unix)]
+            for name in [".csqtt-lalune-upload-web.env", ".csqtt-lalune-upload-overrides.json"] {
+                std::fs::set_permissions(
+                    bundle.join(name),
+                    std::os::unix::fs::PermissionsExt::from_mode(0o600),
+                ).context("restrict temporary CSQTT credentials")?;
+            }
         }
-        fs::write(
-            bundle.join("server-secrets.txt"),
-            format!("{main_password}\n{web_user}\n{web_password}\n{device_id}\n"),
-        ).context("write temporary LaLune server credentials")?;
-        #[cfg(unix)]
-        fs::set_permissions(bundle.join("server-secrets.txt"), std::os::unix::fs::PermissionsExt::from_mode(0o600))
-            .context("restrict temporary LaLune server credentials")?;
 
         let remote = format!("{}@{}", args.user, args.host);
         let remote_stage = format!("/tmp/lalune-csqtt-deploy-{}-{nonce:x}", std::process::id());
-        let prepare = format!("set -euo pipefail; test ! -e '{remote_stage}'; install -d -m 700 '{remote_stage}'");
-        let prepared = run_ssh(args, &remote, &prepare).context("prepare remote CSQTT staging directory")?;
+        let prepare = format!("set -eu; test ! -e '{remote_stage}'; install -d -m 700 '{remote_stage}'");
+        let prepared = run_ssh(args, &remote, &prepare)
+            .context("prepare unique remote CSQTT staging directory")?;
         if !prepared.status.success() {
-            anyhow::bail!("could not prepare remote CSQTT staging directory: {}", String::from_utf8_lossy(&prepared.stderr));
+            anyhow::bail!("could not prepare remote staging directory: {}", String::from_utf8_lossy(&prepared.stderr));
         }
         if let Err(error) = run_scp(args, &remote, bundle.to_str().unwrap_or(""), &remote_stage) {
             let _ = run_ssh(args, &remote, &format!("rm -rf -- '{remote_stage}'"));
-            return Err(error).context("upload official CSQTT installer and credentials");
+            return Err(error).context("upload original CSQTT deploy bundle");
         }
 
         let remote_bundle = format!("{remote_stage}/{bundle_name}");
         let peer_port = ports.core.unwrap_or(47000);
         let web_port = ports.warp.unwrap_or(47002);
-        let script = format!(r#"set -Eeuo pipefail
+        let ssh_port = args.ssh_port;
+        let script = if args.uninstall {
+            format!(r#"set -Eeuo pipefail
+STAGE='{remote_stage}'
+BUNDLE='{remote_bundle}'
+trap 'rm -rf -- "$STAGE"' EXIT
+if [ "$(id -u)" -eq 0 ]; then
+  env CSQTT_DEPLOY_STAGE="$BUNDLE" CSQTT_PEER_PORT='{peer_port}' CSQTT_WEB_PORT='{web_port}' CSQTT_SSH_PORT='{ssh_port}' CSQTT_DEPLOY_MODE=systemd bash "$BUNDLE/deploy-csqtt-lalune.sh" uninstall
+else
+  sudo -n env CSQTT_DEPLOY_STAGE="$BUNDLE" CSQTT_PEER_PORT='{peer_port}' CSQTT_WEB_PORT='{web_port}' CSQTT_SSH_PORT='{ssh_port}' CSQTT_DEPLOY_MODE=systemd bash "$BUNDLE/deploy-csqtt-lalune.sh" uninstall
+fi
+if systemctl is-active --quiet csqtt-lalune.service; then
+  echo "LaLune CSQTT service remains active after uninstall" >&2
+  exit 1
+fi
+if ip link show csqtt-lalune0 >/dev/null 2>&1; then
+  echo "LaLune TUN interface remains after uninstall" >&2
+  exit 1
+fi
+echo CSQTT_LALUNE_UNINSTALL_OK
+"#, peer_port=peer_port, web_port=web_port, ssh_port=ssh_port)
+        } else {
+            format!(r#"set -Eeuo pipefail
 STAGE='{remote_stage}'
 BUNDLE='{remote_bundle}'
 trap 'rm -rf -- "$STAGE"' EXIT
 case "$(uname -m)" in
-  aarch64|arm64|x86_64|amd64) ;;
-  *) echo "unsupported LaLune server architecture; no service files changed" >&2; exit 2 ;;
+  aarch64|arm64) ASSET="$BUNDLE/csqtt-lalune-linux-arm64" ;;
+  x86_64|amd64) ASSET="$BUNDLE/csqtt-lalune-linux-amd64" ;;
+  *) echo "unsupported server architecture; no runtime files changed" >&2; exit 2 ;;
 esac
+install -m 0755 "$ASSET" "$BUNDLE/.csqtt-lalune-upload-server"
+chmod 0600 "$BUNDLE/.csqtt-lalune-upload-web.env" "$BUNDLE/.csqtt-lalune-upload-overrides.json"
 if [ "$(id -u)" -eq 0 ]; then
-  env CSQTT_LALUNE_UDP_PORT='{peer_port}' CSQTT_LALUNE_WEB_PORT='{web_port}' bash "$BUNDLE/install-csqtt-lalune.sh" --secrets-file "$BUNDLE/server-secrets.txt"
+  env CSQTT_DEPLOY_STAGE="$BUNDLE" CSQTT_PEER_PORT='{peer_port}' CSQTT_WEB_PORT='{web_port}' CSQTT_SSH_PORT='{ssh_port}' CSQTT_DEPLOY_MODE=systemd bash "$BUNDLE/deploy-csqtt-lalune.sh" install
 else
-  sudo -n env CSQTT_LALUNE_UDP_PORT='{peer_port}' CSQTT_LALUNE_WEB_PORT='{web_port}' bash "$BUNDLE/install-csqtt-lalune.sh" --secrets-file "$BUNDLE/server-secrets.txt"
+  sudo -n env CSQTT_DEPLOY_STAGE="$BUNDLE" CSQTT_PEER_PORT='{peer_port}' CSQTT_WEB_PORT='{web_port}' CSQTT_SSH_PORT='{ssh_port}' CSQTT_DEPLOY_MODE=systemd bash "$BUNDLE/deploy-csqtt-lalune.sh" install
 fi
-for attempt in $(seq 1 30); do
-  systemctl is-active --quiet csqtt-lalune.service || {{ sleep 1; continue; }}
-  if ss -H -lun "sport = :{peer_port}" | grep -q . && ss -H -ltn "sport = :{web_port}" | grep -q .; then
-    echo "CSQTT_LALUNE_DEPLOY_OK"
-    exit 0
-  fi
-  sleep 1
-done
-echo "LaLune service did not become healthy on UDP {peer_port}/TCP {web_port}" >&2
-systemctl status csqtt-lalune.service --no-pager >&2 || true
-journalctl -u csqtt-lalune.service -n 80 --no-pager >&2 || true
-exit 1
-"#, peer_port=peer_port, web_port=web_port);
-        let output = run_ssh(args, &remote, &script).context("run isolated LaLune CSQTT installer")?;
+systemctl is-active --quiet csqtt-lalune.service
+ip link show csqtt-lalune0 >/dev/null
+ss -H -lun "sport = :{peer_port}" | grep -q .
+ss -H -ltn "sport = :{web_port}" | grep -q .
+echo CSQTT_LALUNE_DEPLOY_OK
+echo "PANEL_URL=https://{host_for_url}:{web_port}"
+"#, peer_port=peer_port, web_port=web_port, ssh_port=ssh_port, host_for_url=if args.host.contains(':') && !args.host.starts_with('[') { format!("[{}]", args.host) } else { args.host.clone() })
+        };
+        let output = run_ssh(args, &remote, &script).context("run namespaced original CSQTT deploy.sh over SSH")?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
         for line in stdout.lines() { println!("[remote] {line}"); }
         for line in stderr.lines() { println!("[remote:err] {line}"); }
-        if !output.status.success() || !stdout.lines().any(|line| line.trim() == "CSQTT_LALUNE_DEPLOY_OK") {
-            anyhow::bail!("isolated LaLune installer failed (exit {}); see remote output above", output.status);
+        let expected = if args.uninstall { "CSQTT_LALUNE_UNINSTALL_OK" } else { "CSQTT_LALUNE_DEPLOY_OK" };
+        if !output.status.success() || !stdout.lines().any(|line| line.trim() == expected) {
+            anyhow::bail!("namespaced original CSQTT deployment did not confirm {expected}");
         }
-        println!("CSQTT_LALUNE_DEPLOY_OK");
-        let panel_host = if args.host.contains(':') && !args.host.starts_with('[') { format!("[{}]", args.host) } else { args.host.clone() };
-        println!("PANEL_URL=https://{}:{}", panel_host, web_port);
+        println!("{expected}");
         Ok(())
     })();
-    let _ = fs::remove_dir_all(&bundle);
+    let _ = std::fs::remove_dir_all(&bundle);
     result
 }
 
 '''
 replace_once(deploy, "fn write_askpass_helper() -> Result<std::path::PathBuf> {", official + "fn write_askpass_helper() -> Result<std::path::PathBuf> {")
 
-
-# Preserve the CSQTT 2.1.9 authorization dialog contract in the native API:
-# credentials are sent to DeployManager through a short-lived 0600 file.
 deploy_go = ROOT / "Desktop/Libs/deploy.go"
 replace_once(
     deploy_go,
@@ -340,35 +280,54 @@ replace_once(
 replace_once(
     deploy_go,
     '\tif strings.TrimSpace(req.Host) == "" {',
-    '\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") && !req.Uninstall {\n\t\tif !validCSQTTSecret(req.MainPassword) || !validCSQTTSecret(req.WebUser) || !validCSQTTSecret(req.WebPassword) {\n\t\t\tdeployAppend("[deploy] CSQTT: задайте пароль туннеля, логин и пароль WEB только латиницей и цифрами")\n\t\t\treturn false\n\t\t}\n\t\tif !validCSQTTDeviceID(req.DeviceID) { deployAppend("[deploy] не удалось получить ID устройства LaLune"); return false }\n\t}\n\tif strings.TrimSpace(req.Host) == "" {',
+    '''\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") && !req.Uninstall {
+\t\tif !validCSQTTSecret(req.MainPassword) || !validCSQTTSecret(req.WebUser) || !validCSQTTSecret(req.WebPassword) {
+\t\t\tdeployAppend("[deploy] CSQTT: задайте пароль туннеля, логин и пароль WEB только латиницей и цифрами")
+\t\t\treturn false
+\t\t}
+\t\tif !validCSQTTDeviceID(req.DeviceID) { deployAppend("[deploy] не удалось получить ID устройства LaLune"); return false }
+\t}
+\tif strings.TrimSpace(req.Host) == "" {''',
 )
 replace_once(
     deploy_go,
     'func DeployProtocol(reqJSON string) bool {',
-    'func validCSQTTSecret(value string) bool {\n\tif value == "" { return false }\n\tfor _, r := range value { if !((r >= \'a\' && r <= \'z\') || (r >= \'A\' && r <= \'Z\') || (r >= \'0\' && r <= \'9\')) { return false } }\n\treturn true\n}\n\nfunc validCSQTTDeviceID(value string) bool {\n\tif value == "" { return false }\n\tfor _, r := range value { if !((r >= \'a\' && r <= \'z\') || (r >= \'A\' && r <= \'Z\') || (r >= \'0\' && r <= \'9\') || r == \'-\') { return false } }\n\treturn true\n}\n\nfunc DeployProtocol(reqJSON string) bool {',
+    '''func validCSQTTSecret(value string) bool {
+\tif value == "" { return false }
+\tfor _, r := range value { if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) { return false } }
+\treturn true
+}
+
+func validCSQTTDeviceID(value string) bool {
+\tif value == "" { return false }
+\tfor _, r := range value { if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-') { return false } }
+\treturn true
+}
+
+func DeployProtocol(reqJSON string) bool {''',
 )
 replace_once(
     deploy_go,
     '\tif req.SSHPort > 0 {',
-    '''	assetsDir := filepath.Join(filepath.Dir(binPath), "server-assets")
-	if st, err := os.Stat(assetsDir); err != nil || !st.IsDir() {
-		assetsDir = filepath.Join("/usr/local/lib/lalune", "server-assets")
-	}
-	args = append(args, "--local-binary-dir", assetsDir)
-	secretsFile := ""
-	if strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") && !req.Uninstall {
-		f, err := os.CreateTemp("", "csqtt-deploy-secrets-*.txt")
-		if err != nil { deployAppend("[deploy] не удалось создать временный файл авторизации"); return false }
-		_ = f.Chmod(0600)
-		_, writeErr := f.WriteString(req.MainPassword + "\\n" + req.WebUser + "\\n" + req.WebPassword + "\\n" + req.DeviceID + "\\n")
-		closeErr := f.Close()
-		if writeErr != nil || closeErr != nil { _ = os.Remove(f.Name()); deployAppend("[deploy] не удалось сохранить временные данные авторизации"); return false }
-		secretsFile = f.Name()
-		args = append(args, "--secrets-file", secretsFile)
-		if req.DockerInstall { args = append(args, "--install-in-docker") }
-	}
-	if req.Uninstall { args = append(args, "--uninstall") }
-	if req.SSHPort > 0 {''',
+    '''\tassetsDir := filepath.Join(filepath.Dir(binPath), "server-assets")
+\tif st, err := os.Stat(assetsDir); err != nil || !st.IsDir() {
+\t\tassetsDir = filepath.Join("/usr/local/lib/lalune", "server-assets")
+\t}
+\targs = append(args, "--local-binary-dir", assetsDir)
+\tsecretsFile := ""
+\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") && !req.Uninstall {
+\t\tf, err := os.CreateTemp("", "csqtt-deploy-secrets-*.txt")
+\t\tif err != nil { deployAppend("[deploy] не удалось создать временный файл авторизации"); return false }
+\t\t_ = f.Chmod(0600)
+\t\t_, writeErr := f.WriteString(req.MainPassword + "\\n" + req.WebUser + "\\n" + req.WebPassword + "\\n" + req.DeviceID + "\\n")
+\t\tcloseErr := f.Close()
+\t\tif writeErr != nil || closeErr != nil { _ = os.Remove(f.Name()); deployAppend("[deploy] не удалось сохранить временные данные авторизации"); return false }
+\t\tsecretsFile = f.Name()
+\t\targs = append(args, "--secrets-file", secretsFile)
+\t\tif req.DockerInstall { args = append(args, "--install-in-docker") }
+\t}
+\tif req.Uninstall { args = append(args, "--uninstall") }
+\tif req.SSHPort > 0 {''',
 )
 replace_once(
     deploy_go,
@@ -391,72 +350,4 @@ replace_once(
     '\t\terr := cmd.Wait()\n\t\tif secretsFile != "" { _ = os.Remove(secretsFile) }\n\t\tif err != nil {',
 )
 
-
-replace_once(
-    main,
-    "    pub install_in_docker: bool,",
-    "    pub install_in_docker: bool,\n\n    /// Uninstall the official CSQTT runtime while preserving its database.\n    #[arg(long, default_value_t = false)]\n    pub uninstall: bool,",
-)
-replace_once(
-    deploy,
-    "fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {",
-    "fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {\n    if args.install_in_docker { anyhow::bail!(\"Docker mode is not supported for the isolated LaLune service; no remote changes were made.\"); }\n    if args.uninstall { return uninstall_official_csqtt(args, ports); }",
-)
-uninstall = r'''fn uninstall_official_csqtt(args: &DeployArgs, _ports: &Ports) -> Result<()> {
-    let source = args.local_binary_dir.as_deref()
-        .ok_or_else(|| anyhow::anyhow!("bundled LaLune server-assets directory was not found"))?;
-    let installer = Path::new(source).join("uninstall-csqtt-lalune.sh");
-    if !installer.is_file() {
-        anyhow::bail!("isolated LaLune uninstaller is missing: {}", installer.display());
-    }
-    let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-    let bundle_name = format!("lalune-csqtt-uninstall-{}-{nonce:x}", std::process::id());
-    let bundle = std::env::temp_dir().join(&bundle_name);
-    fs::create_dir(&bundle).context("create temporary uninstaller bundle")?;
-    #[cfg(unix)]
-    fs::set_permissions(&bundle, std::os::unix::fs::PermissionsExt::from_mode(0o700))?;
-    let result = (|| -> Result<()> {
-        fs::copy(&installer, bundle.join("uninstall-csqtt-lalune.sh"))
-            .context("stage isolated LaLune uninstaller")?;
-        let remote = format!("{}@{}", args.user, args.host);
-        let remote_stage = format!("/tmp/lalune-csqtt-uninstall-{}-{nonce:x}", std::process::id());
-        let prepare = format!("set -euo pipefail\ntest ! -e '{remote_stage}'\ninstall -d -m 700 '{remote_stage}'");
-        let prepared = run_ssh(args, &remote, &prepare)?;
-        if !prepared.status.success() {
-            anyhow::bail!("could not prepare remote uninstaller staging directory");
-        }
-        if let Err(error) = run_scp(args, &remote, bundle.to_str().unwrap_or(""), &remote_stage) {
-            let _ = run_ssh(args, &remote, &format!("rm -rf -- '{remote_stage}'"));
-            return Err(error).context("upload isolated LaLune uninstaller");
-        }
-        let remote_bundle = format!("{remote_stage}/{bundle_name}");
-        let script = format!(r#"set -Eeuo pipefail
-STAGE='{remote_stage}'
-trap 'rm -rf -- "$STAGE"' EXIT
-if [ "$(id -u)" -eq 0 ]; then
-  bash '{remote_bundle}/uninstall-csqtt-lalune.sh'
-else
-  sudo -n bash '{remote_bundle}/uninstall-csqtt-lalune.sh'
-fi
-"#);
-        let output = run_ssh(args, &remote, &script).context("run isolated LaLune uninstaller over SSH")?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        for line in stdout.lines() { println!("[remote] {line}"); }
-        for line in stderr.lines() { println!("[remote:err] {line}"); }
-        if !output.status.success() || !stdout.lines().any(|line| line.trim() == "CSQTT_LALUNE_UNINSTALL_OK") {
-            anyhow::bail!("isolated LaLune uninstall failed or was not confirmed");
-        }
-        println!("CSQTT_LALUNE_UNINSTALL_OK");
-        Ok(())
-    })();
-    let _ = fs::remove_dir_all(&bundle);
-    result
-}
-
-'''
-
-
-replace_once(deploy, "fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {", uninstall + "fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Result<()> {")
-
-print("CSQTT DeployManager adaptation applied")
+print("CSQTT DeployManager now stages and invokes the namespaced original deploy.sh")
