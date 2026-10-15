@@ -51,7 +51,7 @@ for value in [
     '/etc/csqtt-lalune/csqtt.db-shm',
     'assert_deployment_ports_not_foreign()', 'web_port_listeners()', 'assert_web_port_is_available()',
     'probe_iface="cqtdl', 'probe_chain="CSQTT_LALUNE_D',
-    'for marker in "$IPT_COMMENT"; do',
+    'for marker in "$IPT_COMMENT" CSQTT_LALUNE_MIRRORED CSQTT_LALUNE_TPROXY CSQTT_LALUNE_LOCAL_SOCKS CSQTT_LALUNE_LOCAL_SOCKS_MARK CSQTT_LALUNE_SOCKS CSQTT_LALUNE_CASCADE_NO_QUIC; do',
 ]:
     need(value)
 
