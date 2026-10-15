@@ -29,7 +29,7 @@ for function in [
     "prepare_uploaded_release()", "run_platform_preflight()", "setup_nat_and_firewall()",
     "setup_csqtt_environment()", "setup_csqtt_service()", "start_csqtt()",
     "verify_configured_network()", "verify_web_panel()", "do_uninstall()",
-    "cleanup_deploy_uploads()", "CSQTT_DEPLOY_OK",
+    "cleanup_deploy_uploads()", "CSQTT_LALUNE_DEPLOY_OK",
 ]:
     need(function)
 
@@ -57,6 +57,7 @@ for value in [
 
 # Refuse unrelated listeners and leave the original CSQTT legacy interfaces alone.
 need('csqtt_process_owns_peer_port "$pid"')
+need('CSQTT_LALUNE_UNINSTALL_OK')
 need('TCP/${WEB_PORT} is occupied by unrelated PID')
 need('Порт UDP/${PEER_PORT} занят посторонним процессом; конфликтующий процесс не изменён')
 install_branch = script.split('install|--install|-i)', 1)[1]
@@ -80,7 +81,7 @@ for value in [
     '/opt/csqtt-certbot', "'|csqtt-docker-'*", 'csqtt-certbot', 'csqtt-docker-',
     'csqtt-ip-', 'csqtt-udp-buffers', 'csqtt-upload-server', 'csqtt-upload-web',
     'csqtt-upload-overrides', 'csqtt-web-probe', '/usr/local/bin/hev-socks5-tunnel',
-    '/usr/local/bin/hev-socks5-server', 'CSQTT_MANAGED', '10.66.67', 'ip route flush cache',
+    '/usr/local/bin/hev-socks5-server', 'CSQTT_MANAGED', 'CSQTT_DEPLOY_OK', '10.66.67', 'ip route flush cache',
     'ip route flush table main', 'ip route replace default',
 ]:
     forbid(value)
