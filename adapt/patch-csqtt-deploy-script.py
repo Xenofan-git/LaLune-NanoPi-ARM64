@@ -237,6 +237,13 @@ if src.count(old) != 1:
     raise SystemExit("expected exactly one systemd service-manager environment line")
 src = src.replace(old, new, 1)
 
+# Reject a foreign UDP/TCP listener before any sysctl, firewall, or runtime changes.
+old = '            require_runtime_tools\n            if [ "$DEPLOY_MODE" = "docker" ]; then'
+new = '            require_runtime_tools\n            assert_deployment_ports_not_foreign\n            if [ "$DEPLOY_MODE" = "docker" ]; then'
+if src.count(old) != 1:
+    raise SystemExit("expected exactly one install preflight before sysctl")
+src = src.replace(old, new, 1)
+
 # Optional CI switch: keep the upstream TLS setup flow in normal use, while
 # avoiding an outbound Let's Encrypt request in a disposable test VM.
 old = "setup_letsencrypt_ip_tls() {"
