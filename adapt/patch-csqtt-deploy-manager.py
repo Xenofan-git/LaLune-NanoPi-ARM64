@@ -194,7 +194,12 @@ official = r'''fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Res
             }
         }
 
-        let remote = format!("{}@{}", args.user, args.host);
+        let remote_host = if args.host.contains(':') && !args.host.starts_with('[') {
+            format!("[{}]", args.host)
+        } else {
+            args.host.clone()
+        };
+        let remote = format!("{}@{}", args.user, remote_host);
         let remote_stage = format!("/tmp/lalune-csqtt-deploy-{}-{nonce:x}", std::process::id());
         let prepare = format!("set -eu; test ! -e '{remote_stage}'; install -d -m 700 '{remote_stage}'");
         let prepared = run_ssh(args, &remote, &prepare)
