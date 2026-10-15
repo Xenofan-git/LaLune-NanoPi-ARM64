@@ -36,11 +36,13 @@ for value in [
     'CSQTT_LALUNE_MANAGED', '10.67.68.0/24',
     'Environment=CSQTT_SYSTEMD_UNIT=csqtt-lalune.service',
     'CSQTT_LALUNE_SKIP_LETSENCRYPT',
+    'assert_deployment_ports_not_foreign()', 'web_port_listeners()', 'assert_web_port_is_available()',
 ]:
     need(value)
 
 # Refuse unrelated listeners and leave the original CSQTT legacy interfaces alone.
 need('csqtt_process_owns_peer_port "$pid"')
+need('TCP/${WEB_PORT} is occupied by unrelated PID')
 need('Порт UDP/${PEER_PORT} занят посторонним процессом; конфликтующий процесс не изменён')
 cleanup = script.split("cleanup_legacy_proxy_interfaces() {", 1)[1].split("\n}", 1)[0]
 if "ip link del" in cleanup:
