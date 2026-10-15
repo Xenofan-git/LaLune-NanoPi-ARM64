@@ -516,6 +516,10 @@ jobs:
           test -s dist/server-assets/csqtt-lalune-help.txt
           test -s dist/server-assets/csqtt-lalune-amd64-help.txt
           test -x dist/server-assets/deploy-csqtt-lalune.sh
+          test ! -e dist/server-assets/deploy.sh
+          test ! -e dist/server-assets/install-csqtt-lalune.sh
+          test ! -e dist/server-assets/uninstall-csqtt-lalune.sh
+          test ! -e dist/server-assets/csqtt-linux-arm64
           bash -n dist/server-assets/deploy-csqtt-lalune.sh
           python3 adapt/test-csqtt-lalune-deploy-script.py
           (cd "$GITHUB_WORKSPACE" && sha256sum -c server-assets/SHA256SUMS)
@@ -579,6 +583,9 @@ jobs:
             sha256sum csqtt-lalune-linux-arm64 deploy-csqtt-lalune.sh README.txt > SHA256SUMS
             sha256sum -c SHA256SUMS
             test -x deploy-csqtt-lalune.sh
+             test ! -e deploy.sh
+             test ! -e install-csqtt-lalune.sh
+             test ! -e uninstall-csqtt-lalune.sh
             ! find . -maxdepth 1 -iname '*deploy-manager*' | grep -q .
           )
           tar -C dist-csqtt-lalune -czf csqtt-lalune-nanopi-arm64-isolated.tar.gz .
