@@ -32,11 +32,12 @@ for value in [
     'CSQTT_PEER_PORT:-47000', 'CSQTT_WEB_PORT:-47002',
     'CSQTT_IFACE="csqtt-lalune0"', 'CSQTT_CONFIG_DIR="/etc/csqtt-lalune"',
     '/usr/local/bin/csqtt-lalune', '/usr/local/lib/csqtt-lalune',
-    '/var/log/csqtt-lalune-install.log', 'csqtt-lalune.service',
+    '/var/log/csqtt-lalune-install.log', '/opt/csqtt-lalune-certbot', 'csqtt-lalune.service',
     'CSQTT_LALUNE_MANAGED', '10.67.68.0/24',
     'Environment=CSQTT_SYSTEMD_UNIT=csqtt-lalune.service',
     'CSQTT_LALUNE_SKIP_LETSENCRYPT',
     'assert_deployment_ports_not_foreign()', 'web_port_listeners()', 'assert_web_port_is_available()',
+    'probe_iface="cqtdl', 'probe_chain="CSQTT_LALUNE_D',
 ]:
     need(value)
 
@@ -53,7 +54,7 @@ for value in [
     'CSQTT_IFACE="csqtt1"', 'CSQTT_CONFIG_DIR="/etc/csqtt"',
     '/usr/local/bin/csqtt ', '/usr/local/lib/csqtt/',
     'csqtt.service', 'csqtt-letsencrypt.service', 'csqtt-cascade.service',
-    'CSQTT_MANAGED', '10.66.67', 'ip route flush cache',
+    '/opt/csqtt-certbot', "'|csqtt-docker-'*", 'CSQTT_MANAGED', '10.66.67', 'ip route flush cache',
     'ip route flush table main', 'ip route replace default',
 ]:
     forbid(value)
