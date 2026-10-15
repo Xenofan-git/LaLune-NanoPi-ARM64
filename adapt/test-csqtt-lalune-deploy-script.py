@@ -42,6 +42,10 @@ for value in [
     'CSQTT_LALUNE_MANAGED', '10.67.68.0/24',
     'Environment=CSQTT_SYSTEMD_UNIT=csqtt-lalune.service',
     'CSQTT_LALUNE_SKIP_LETSENCRYPT',
+    'readonly CSQTT_DATABASE_FILE="csqtt.db"',
+    'readonly CSQTT_DATABASE_WAL_FILE="csqtt.db-wal"',
+    'readonly CSQTT_DATABASE_SHM_FILE="csqtt.db-shm"',
+    'readonly CSQTT_ENV_FILE="${CSQTT_CONFIG_DIR}/csqtt.env"',
     'assert_deployment_ports_not_foreign()', 'web_port_listeners()', 'assert_web_port_is_available()',
     'probe_iface="cqtdl', 'probe_chain="CSQTT_LALUNE_D',
 ]:
@@ -56,6 +60,10 @@ if "ip link del" in cleanup:
     raise SystemExit("LaLune cleanup still deletes generic legacy proxy interfaces")
 
 for value in [
+    'readonly CSQTT_DATABASE_FILE="csqtt-lalune.db"',
+    'readonly CSQTT_DATABASE_WAL_FILE="csqtt-lalune.db-wal"',
+    'readonly CSQTT_DATABASE_SHM_FILE="csqtt-lalune.db-shm"',
+    'readonly CSQTT_ENV_FILE="${CSQTT_CONFIG_DIR}/csqtt-lalune.env"',
     'CSQTT_PEER_PORT:-46000', 'CSQTT_WEB_PORT:-46002',
     'CSQTT_IFACE="csqtt1"', 'CSQTT_CONFIG_DIR="/etc/csqtt"',
     '/usr/local/bin/csqtt ', '/usr/local/lib/csqtt/',
