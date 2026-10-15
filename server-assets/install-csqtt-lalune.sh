@@ -105,9 +105,10 @@ MAIN_PASSWORD="${secret_values[0]}"
 WEB_USER="${secret_values[1]}"
 WEB_PASSWORD="${secret_values[2]}"
 DEVICE_ID="${secret_values[3]}"
-for value in "$MAIN_PASSWORD" "$WEB_USER" "$WEB_PASSWORD" "$DEVICE_ID"; do
-  [[ -n "$value" && "$value" =~ ^[A-Za-z0-9]+$ ]] || die "credentials/device ID must be non-empty ASCII letters or digits"
+for value in "$MAIN_PASSWORD" "$WEB_USER" "$WEB_PASSWORD"; do
+  [[ -n "$value" && "$value" =~ ^[A-Za-z0-9]+$ ]] || die "credentials must be non-empty ASCII letters or digits"
 done
+[[ -n "$DEVICE_ID" && "$DEVICE_ID" =~ ^[A-Za-z0-9-]+$ ]] || die "device ID must be non-empty ASCII letters, digits, or hyphens"
 
 install -d -m 0750 "$ETC" "$STATE" "$LOG" "$LIB"
 printf '%s\n' "$MARKER" > "$ETC/.managed-by-lalune"
