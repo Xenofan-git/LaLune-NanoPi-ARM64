@@ -54,7 +54,10 @@ for value in [
     'CSQTT_IFACE="csqtt1"', 'CSQTT_CONFIG_DIR="/etc/csqtt"',
     '/usr/local/bin/csqtt ', '/usr/local/lib/csqtt/',
     'csqtt.service', 'csqtt-letsencrypt.service', 'csqtt-cascade.service',
-    '/opt/csqtt-certbot', "'|csqtt-docker-'*", 'CSQTT_MANAGED', '10.66.67', 'ip route flush cache',
+    '/opt/csqtt-certbot', "'|csqtt-docker-'*", 'csqtt-certbot', 'csqtt-docker-',
+    'csqtt-ip-', 'csqtt-udp-buffers', 'csqtt-upload-server', 'csqtt-upload-web',
+    'csqtt-upload-overrides', 'csqtt-web-probe', '/usr/local/bin/hev-socks5-tunnel',
+    '/usr/local/bin/hev-socks5-server', 'CSQTT_MANAGED', '10.66.67', 'ip route flush cache',
     'ip route flush table main', 'ip route replace default',
 ]:
     forbid(value)
