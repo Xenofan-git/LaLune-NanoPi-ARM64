@@ -391,6 +391,11 @@ jobs:
           ! grep -Fq '"30001"' server-source/rust-server/proxy_route.rs
           ! grep -Fq '"1066"' server-source/rust-server/proxy_route.rs
           ! grep -Fq 'CSQTT_TPROXY' server-source/rust-server/proxy_route.rs
+          ! grep -nE '46000|46001|46002' server-source/rust-server/main.rs server-source/rust-server/web_panel.rs
+          grep -Fq 'default_value = "0.0.0.0:47000"' server-source/rust-server/main.rs
+          grep -Fq 'default_value_t = 47002' server-source/rust-server/main.rs
+          grep -Fq 'id="peer_port" value="47000"' server-source/rust-server/web_panel.rs
+          grep -Fq 'id="wg_port" value="47001"' server-source/rust-server/web_panel.rs
       - name: Test pinned CSQTT client protocol suite
         working-directory: server-source/rust-client
         run: |
