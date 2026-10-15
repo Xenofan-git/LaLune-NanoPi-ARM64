@@ -173,26 +173,26 @@ jobs:
           set -euxo pipefail
           python3 adapt/patch-csqtt-deploy-manager.py
 
-      - name: Verify CSQTT deploy patch invariants
+      - name: Verify CSQTT DeployManager uses original deployment flow
         run: |
           set -euxo pipefail
-          grep -Fq 'install-csqtt-lalune.sh' upstream-lalune/Core/DeployManager/src/deploy.rs
-          grep -Fq 'uninstall-csqtt-lalune.sh' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'deploy-csqtt-lalune.sh' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'csqtt-lalune-linux-arm64' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'csqtt-lalune-linux-amd64' upstream-lalune/Core/DeployManager/src/deploy.rs
           grep -Fq 'CSQTT_LALUNE_DEPLOY_OK' upstream-lalune/Core/DeployManager/src/deploy.rs
-          grep -Fq 'trap' upstream-lalune/Core/DeployManager/src/deploy.rs
-          grep -Fq 'LOCAL_STAGE' upstream-lalune/Core/DeployManager/src/deploy.rs
-          grep -Fq 'SSH_ASKPASS_REQUIRE' upstream-lalune/Core/DeployManager/src/deploy.rs
-          ! grep -Fq 'rm -f "$DEST"' upstream-lalune/Core/DeployManager/src/deploy.rs
-          grep -Fq 'systemctl restart {bin}-deployed.service' upstream-lalune/Core/DeployManager/src/deploy.rs
-          grep -Fq 'deploy_official_csqtt(args, ports)' upstream-lalune/Core/DeployManager/src/deploy.rs
-          grep -Fq "CSQTT_LALUNE_UDP_PORT='{peer_port}'" upstream-lalune/Core/DeployManager/src/deploy.rs
-          grep -Fq "CSQTT_LALUNE_WEB_PORT='{web_port}'" upstream-lalune/Core/DeployManager/src/deploy.rs
-          grep -Fq 'pub secrets_file: Option<String>' upstream-lalune/Core/DeployManager/src/main.rs
-          grep -Fq 'pub uninstall: bool' upstream-lalune/Core/DeployManager/src/main.rs
-          grep -Fq 'fn uninstall_official_csqtt' upstream-lalune/Core/DeployManager/src/deploy.rs
-          ! grep -Fq 'CSQTT_ISOLATION_REQUIRED' upstream-lalune/Core/DeployManager/src/deploy.rs
           grep -Fq 'CSQTT_LALUNE_UNINSTALL_OK' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'CSQTT_DEPLOY_STAGE' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'SSH_ASKPASS_REQUIRE' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'deploy_official_csqtt(args, ports)' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'bash "$BUNDLE/deploy-csqtt-lalune.sh" install' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'bash "$BUNDLE/deploy-csqtt-lalune.sh" uninstall' upstream-lalune/Core/DeployManager/src/deploy.rs
+          ! grep -Fq 'install-csqtt-lalune.sh' upstream-lalune/Core/DeployManager/src/deploy.rs
+          ! grep -Fq 'CSQTT_LALUNE_UDP_PORT' upstream-lalune/Core/DeployManager/src/deploy.rs
+          ! grep -Fq 'CSQTT_ISOLATION_REQUIRED' upstream-lalune/Core/DeployManager/src/deploy.rs
           ! grep -Fq 'bash /tmp/deploy.sh uninstall' upstream-lalune/Core/DeployManager/src/deploy.rs
+          grep -Fq 'pub secrets_file: Option<String>' upstream-lalune/Core/DeployManager/src/main.rs
+          grep -Fq 'pub local_binary_dir: Option<String>' upstream-lalune/Core/DeployManager/src/main.rs
+          grep -Fq 'pub uninstall: bool' upstream-lalune/Core/DeployManager/src/main.rs
           grep -Fq 'func validCSQTTSecret' upstream-lalune/Desktop/Libs/deploy.go
           grep -Fq 'DeviceID string `json:"deviceId"`' upstream-lalune/Desktop/Libs/deploy.go
           grep -Fq 'validCSQTTDeviceID(req.DeviceID)' upstream-lalune/Desktop/Libs/deploy.go
@@ -298,22 +298,19 @@ jobs:
           unzip -p /tmp/csqtt-v2.1.9-arm64.apk assets/csqtt-linux-armv7 > server-assets/csqtt-linux-armv7
           unzip -p /tmp/csqtt-v2.1.9-arm64.apk assets/csqtt.server-provenance.json > server-assets/csqtt.server-provenance.json
           curl -fL --retry 3 https://raw.githubusercontent.com/amurcanov/csqtt/v2.1.9/app/src/main/assets/deploy.sh -o server-assets/deploy.sh
-          chmod 0755 server-assets/csqtt-linux-arm64 server-assets/csqtt-linux-amd64 server-assets/csqtt-linux-armv7 server-assets/deploy.sh
+          python3 adapt/patch-csqtt-deploy-script.py
+          chmod 0755 server-assets/csqtt-linux-arm64 server-assets/csqtt-linux-amd64 server-assets/csqtt-linux-armv7 server-assets/deploy.sh server-assets/deploy-csqtt-lalune.sh
+          bash -n server-assets/deploy-csqtt-lalune.sh
+          python3 adapt/test-csqtt-lalune-deploy-script.py
+          # The standalone installer remains regression-tested but is not used by Deploy.
           chmod 0755 server-assets/install-csqtt-lalune.sh server-assets/uninstall-csqtt-lalune.sh
           bash -n server-assets/install-csqtt-lalune.sh
           bash -n server-assets/uninstall-csqtt-lalune.sh
-          ! grep -Eq 'bash .*/deploy.sh (install|uninstall)|ip route flush cache|sysctl -w net.ipv4.conf.(all|default)' server-assets/install-csqtt-lalune.sh server-assets/uninstall-csqtt-lalune.sh
-          grep -Fq 'csqtt-lalune.service' server-assets/install-csqtt-lalune.sh
-          grep -Fq 'csqtt-lalune0 already exists' server-assets/install-csqtt-lalune.sh
-          grep -Fq 'LaLune policy identifiers already exist' server-assets/install-csqtt-lalune.sh
-          grep -Fq 'LaLune firewall markers already exist' server-assets/install-csqtt-lalune.sh
-          grep -Fq 'refusing to adopt it' server-assets/install-csqtt-lalune.sh
-          grep -Fq 'systemctl disable --now "$UNIT"' server-assets/uninstall-csqtt-lalune.sh
-          grep -Fq 'LaLune policy rules remain after stop' server-assets/uninstall-csqtt-lalune.sh
-          grep -Fq 'LaLune firewall rules remain after stop' server-assets/uninstall-csqtt-lalune.sh
-          grep -Fq 'preserving binary and service unit' server-assets/uninstall-csqtt-lalune.sh
-          ! grep -Eq 'ip route flush cache|ip route flush table (main|default)|ip route replace default|sysctl -w net.ipv4.conf.(all|default)' server-assets/install-csqtt-lalune.sh server-assets/uninstall-csqtt-lalune.sh
-          grep -Fq '10.67.68.0/24' server-assets/install-csqtt-lalune.sh adapt/CSQTT-LALUNE-INSTALLER.md
+          grep -Fq 'readonly SCRIPT_VERSION="2.1.9"' server-assets/deploy-csqtt-lalune.sh
+          grep -Fq 'csqtt-lalune.service' server-assets/deploy-csqtt-lalune.sh
+          grep -Fq 'CSQTT_LALUNE_DEPLOY_STAGE' server-assets/deploy-csqtt-lalune.sh || grep -Fq 'CSQTT_DEPLOY_STAGE' server-assets/deploy-csqtt-lalune.sh
+          grep -Fq 'CSQTT_LALUNE_MANAGED' server-assets/deploy-csqtt-lalune.sh
+          ! grep -Eq 'ip route flush cache|ip route flush table (main|default)|ip route replace default' server-assets/deploy-csqtt-lalune.sh
           grep -Fq 'rm -rf -- "$ETC" "$STATE" "$LOG"' server-assets/uninstall-csqtt-lalune.sh
           sha256sum server-assets/* | tee server-assets/SHA256SUMS
           grep -Fq '"version":  "2.1.9"' server-assets/csqtt.server-provenance.json
@@ -490,8 +487,7 @@ jobs:
           mkdir -p dist/deploy-e2e/server-assets
           install -m 0755 /tmp/lalune-original-linux-amd64-e2e dist/deploy-e2e/lalune-original-linux-amd64
           install -m 0755 /tmp/deploy-manager-linux-amd64-e2e dist/deploy-e2e/deploy-manager
-          install -m 0755 server-assets/install-csqtt-lalune.sh dist/deploy-e2e/server-assets/install-csqtt-lalune.sh
-          install -m 0755 server-assets/uninstall-csqtt-lalune.sh dist/deploy-e2e/server-assets/uninstall-csqtt-lalune.sh
+          install -m 0755 server-assets/deploy-csqtt-lalune.sh dist/deploy-e2e/server-assets/deploy-csqtt-lalune.sh
           install -m 0755 server-assets/csqtt-lalune-linux-arm64 dist/deploy-e2e/server-assets/csqtt-lalune-linux-arm64
           install -m 0755 server-assets/csqtt-lalune-linux-amd64 dist/deploy-e2e/server-assets/csqtt-lalune-linux-amd64
           file dist/deploy-e2e/lalune-original-linux-amd64 | grep -Eq 'x86-64|x86_64'
@@ -509,10 +505,9 @@ jobs:
           test -s dist/server-assets/csqtt-lalune-linux-amd64
           test -s dist/server-assets/csqtt-lalune-help.txt
           test -s dist/server-assets/csqtt-lalune-amd64-help.txt
-          test -x dist/server-assets/install-csqtt-lalune.sh
-          test -x dist/server-assets/uninstall-csqtt-lalune.sh
-          bash -n dist/server-assets/install-csqtt-lalune.sh
-          bash -n dist/server-assets/uninstall-csqtt-lalune.sh
+          test -x dist/server-assets/deploy-csqtt-lalune.sh
+          bash -n dist/server-assets/deploy-csqtt-lalune.sh
+          python3 adapt/test-csqtt-lalune-deploy-script.py
           (cd "$GITHUB_WORKSPACE" && sha256sum -c server-assets/SHA256SUMS)
           ! grep -Fq 'starts_with("30001:")' server-source/rust-server/proxy_route.rs
           ! grep -Fq 'fwmark 0x7531' server-source/rust-server/proxy_route.rs
@@ -549,36 +544,31 @@ jobs:
           rm -rf dist-csqtt-lalune
           mkdir -p dist-csqtt-lalune
           install -m 0755 server-assets/csqtt-lalune-linux-arm64 dist-csqtt-lalune/
-          install -m 0755 server-assets/install-csqtt-lalune.sh dist-csqtt-lalune/
-          install -m 0755 server-assets/uninstall-csqtt-lalune.sh dist-csqtt-lalune/
+          install -m 0755 server-assets/deploy-csqtt-lalune.sh dist-csqtt-lalune/
           cat > dist-csqtt-lalune/README.txt <<'EOF'
-          CSQTT LaLune isolated ARM64 deployment package
+          CSQTT LaLune isolated ARM64 deployment package, derived from the original CSQTT v2.1.9 deployment flow.
           
           CONTENTS
           - csqtt-lalune-linux-arm64: isolated ARM64 server binary
-          - install-csqtt-lalune.sh: fail-closed installer
-          - uninstall-csqtt-lalune.sh: scoped uninstaller; preserves config/state/logs by default
+          - deploy-csqtt-lalune.sh: namespaced original deploy.sh with the upstream install, health-check and uninstall sequence
           
           SAFETY
-          - Do not run upstream deploy.sh or the full desktop bundle's deploy manager for this service.
-          - This package is for Linux ARM64 with systemd, iproute2, iptables-save and ss.
+          - Run only on a disposable or explicitly authorized Linux ARM64 host with systemd, iproute2 and iptables.
           - Dedicated resources: csqtt-lalune.service, UDP 47000, TCP 47002, TUN csqtt-lalune0,
             subnet 10.67.68.0/24, policy tables 47001/47066, marks 0x6741/0x6742.
-          - Installer refuses occupied ports, existing TUN interfaces, conflicting policy identifiers,
-            and unowned paths. It does not stop or modify generic CSQTT services.
-          - Uninstall without --purge preserves /etc/csqtt-lalune, /var/lib/csqtt-lalune and
-            /var/log/csqtt-lalune.
+          - Config, binary, service, helper/timer names, firewall markers and sysctl filenames are namespaced.
+          - An unrelated process already using UDP/47000 is never killed; deployment fails closed.
+          - Uninstall preserves /etc/csqtt-lalune persistent database/configuration, as the original CSQTT flow does.
           
           VALIDATION STATUS
-          The isolated binary has passed an ARM64 Debian system-VM install/listener/uninstall lifecycle
-          and route-preservation test. This does not prove end-to-end peer authentication or user traffic.
-          Do not deploy to production until those tests and explicit operator approval are complete.
+          The API-to-SSH install/uninstall E2E must pass in the disposable ARM64 system VM before production use.
+          This package does not authorize deployment to NanoPi.
           EOF
           (
             cd dist-csqtt-lalune
-            sha256sum csqtt-lalune-linux-arm64 install-csqtt-lalune.sh uninstall-csqtt-lalune.sh README.txt > SHA256SUMS
+            sha256sum csqtt-lalune-linux-arm64 deploy-csqtt-lalune.sh README.txt > SHA256SUMS
             sha256sum -c SHA256SUMS
-            ! find . -maxdepth 1 -iname '*deploy.sh' | grep -q .
+            test -x deploy-csqtt-lalune.sh
             ! find . -maxdepth 1 -iname '*deploy-manager*' | grep -q .
           )
           tar -C dist-csqtt-lalune -czf csqtt-lalune-nanopi-arm64-isolated.tar.gz .
