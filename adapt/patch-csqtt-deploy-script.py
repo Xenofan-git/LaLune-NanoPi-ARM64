@@ -70,9 +70,9 @@ for old, new in file_contracts:
 # The upstream Docker-state archiver uses absolute paths inside the container.
 # Namespace the directory, but keep the DB basename expected by the Rust binary.
 for old, new in [
-    ("/etc/csqtt-lalune/csqtt-lalune.db", "/etc/csqtt-lalune/csqtt.db"),
-    ("/etc/csqtt-lalune/csqtt-lalune.db-wal", "/etc/csqtt-lalune/csqtt.db-wal"),
-    ("/etc/csqtt-lalune/csqtt-lalune.db-shm", "/etc/csqtt-lalune/csqtt.db-shm"),
+    ("/etc/csqtt-lalune/csqtt-lalune.db ", "/etc/csqtt-lalune/csqtt.db "),
+    ("/etc/csqtt-lalune/csqtt-lalune.db-wal ", "/etc/csqtt-lalune/csqtt.db-wal "),
+    ("/etc/csqtt-lalune/csqtt-lalune.db-shm ", "/etc/csqtt-lalune/csqtt.db-shm "),
 ]:
     if src.count(old) != 1:
         raise SystemExit(f"expected exactly one namespaced Docker DB archive path: {old}")
