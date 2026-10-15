@@ -114,6 +114,15 @@ if src.count(old) != 1:
     raise SystemExit("expected exactly one legacy proxy cleanup function")
 src = src.replace(old, new, 1)
 
+# The upstream cleanup owns several shared CSQTT markers. LaLune must only
+# remove rules carrying its own IPT_COMMENT; the original service may still
+# rely on CSQTT_MIRRORED/TPROXY/SOCKS/CASCADE rules.
+old = 'for marker in "$IPT_COMMENT" CSQTT_MIRRORED CSQTT_TPROXY CSQTT_LOCAL_SOCKS CSQTT_LOCAL_SOCKS_MARK CSQTT_SOCKS CSQTT_CASCADE_NO_QUIC; do'
+new = 'for marker in "$IPT_COMMENT"; do'
+if src.count(old) != 1:
+    raise SystemExit("expected exactly one shared netfilter-marker cleanup loop")
+src = src.replace(old, new, 1)
+
 # Port guards run before service cutover and allow only the already-owned
 # LaLune process during a redeploy. Unrelated or unidentifiable listeners fail closed.
 port_guards = r'''
