@@ -1,34 +1,43 @@
 # LaLune CSQTT isolation gate
 
-Status: DeployManager is now wired to the dedicated LaLune installer; release/production deployment remains gated until the full button-to-SSH VM E2E passes. This file is not permission to deploy to NanoPi.
+**Status (2026-10-15): deployment remains BLOCKED / NOT AUTHORIZED.** The DeployManager is being switched to the original CSQTT v2.1.9 `deploy.sh` flow, derived into `deploy-csqtt-lalune.sh` with namespaced resources. This is not permission to deploy to NanoPi.
 
-## Verified upstream v2.1.9 constraints
+## Source-derived deployment design
 
-The server binary has configurable UDP listen address, web port, and config directory, but its TUN interface is compiled as the constant `csqtt1` in both `rust-server/net_setup.rs` and `rust-server/tun_device.rs`. Changing only CLI ports/configuration therefore does **not** isolate the network dataplane.
+The chosen source is the pinned [CSQTT v2.1.9 deploy.sh](https://github.com/amurcanov/csqtt/blob/v2.1.9/app/src/main/assets/deploy.sh). DeployManager must stage the architecture-matched patched server binary, protected web credentials, and one-shot deployment overrides to a unique remote directory, then invoke the derived script's normal `install` or `uninstall` action. It must never execute the raw upstream script on the target host.
 
-The upstream installer `app/src/main/assets/deploy.sh` also owns shared global resources including:
+The original sequence is retained: validate the uploaded binary and configuration before cutover; preflight the platform; prepare networking/firewall; activate the namespaced service; check runtime and web-panel health; and use the original cleanup/uninstall flow. The standalone `install-csqtt-lalune.sh` and `uninstall-csqtt-lalune.sh` scripts remain regression fixtures only and are not called by the Deploy button.
 
-- `/etc/csqtt`, `/usr/local/bin/csqtt`, `/usr/local/lib/csqtt`, and `/run/csqtt`;
-- `csqtt.service`, `csqtt-letsencrypt.service/timer`, and Docker container/image `csqtt`;
-- fixed TUN `csqtt1`, global sysctl files, and firewall/NAT rules;
-- global log, upload, certificate-renewal and helper paths.
+## Resources that must be namespaced
 
-Changing peer/web ports and config directory alone is not sufficient. In particular, an installer or uninstaller must never call the upstream install/uninstall entry points on a host that may already run Android or production CSQTT.
+- Binary and helpers: `/usr/local/bin/csqtt-lalune`, `/usr/local/lib/csqtt-lalune`
+- Unit: `csqtt-lalune.service`; Let's Encrypt and Docker helper units/containers use unique LaLune names.
+- Configuration/database: `/etc/csqtt-lalune`; runtime/log paths: `/run/csqtt-lalune`, `/var/log/csqtt-lalune-install.log`
+- UDP peer port `47000`; HTTPS web port `47002`
+- TUN `csqtt-lalune0`; subnet `10.67.68.0/24`
+- Policy tables/priorities `47001` and `47066`; packet marks `0x6741` and `0x6742`; firewall comment `CSQTT_LALUNE_MANAGED`
+- The patched server receives `CSQTT_SYSTEMD_UNIT=csqtt-lalune.service`, so panel-triggered restart actions cannot restart `csqtt.service`.
 
-## Required implementation before deployment can be enabled
+The script adaptation must also preserve these safety rules:
 
-1. Build a LaLune-specific server asset from the pinned v2.1.9 source with a dedicated TUN interface (`csqtt-lalune0`) and tunnel subnet (`10.67.68.0/24`). Namespace the proxy-routing policy table/priority, packet marks, and every iptables comment used for cleanup/watchdog; verify the server cannot delete another CSQTT instance's rules or flush a shared policy table. CI must test these source invariants and run the ARM64 binary's `--help` under QEMU.
-2. A first dedicated installer/uninstaller pair now exists at `server-assets/install-csqtt-lalune.sh` and `server-assets/uninstall-csqtt-lalune.sh`. They do not invoke upstream `deploy.sh`, use ownership markers and isolated paths, preflight ports without killing listeners, and preserve config/state by default. The scripts accept a protected one-shot secrets file and explicit ports, write a mode-0600 server environment file, and choose the ARM64 or x86_64 server binary. DeployManager now stages these assets and invokes only the namespaced scripts; the full API-to-SSH button test is being added and must pass before production use.
-3. Keep all persistent data and helpers under `/etc/csqtt-lalune`, `/var/lib/csqtt-lalune`, `/var/log/csqtt-lalune`, and `/usr/local/lib/csqtt-lalune`; use `csqtt-lalune.service` and uniquely named helper/timer units.
-4. Use UDP 47000 and web 47002. Before changes, fail closed if either port is occupied or any LaLune-owned resource has an unexpected type/content. Never kill arbitrary port holders.
-5. Use uniquely named firewall tables/chains and uniquely marked rules; remove only exact LaLune-owned objects on uninstall. The current upstream runtime uses iptables and policy routing, so its cleanup markers, rule priorities, marks, and route tables must be LaLune-specific. Never flush shared tables or remove generic CSQTT rules.
-6. Avoid global sysctl edits where possible. If a sysctl change is required, track the prior value and restore it only if the current value still equals the value LaLune set.
-7. Add CI tests for generated service, paths, TUN/subnet, firewall ownership, preflight refusal, install idempotency, and uninstall isolation. Scan the generated installer for forbidden global paths and upstream installer invocation.
-8. Audit the packaged artifact and test install/uninstall in a disposable ARM64 VM/container with a simulated pre-existing Android/production CSQTT service before authorizing NanoPi installation.
+1. Preflight both UDP/47000 and TCP/47002 before changing the current runtime. An unrelated listener, or a listener whose owner cannot be identified, causes a fail-closed refusal; it is never killed.
+2. Only the LaLune-owned service, files, TUN, firewall markers, sysctl filenames, certificates, and helper processes may be stopped or removed. Generic legacy proxy interfaces and the original CSQTT resources are out of scope.
+3. Use a unique remote staging directory and mode-0600 one-shot credential files; remove the staging directory on success and failure.
+4. Do not flush the main route table or global route cache. The server may add its dedicated TUN subnet route, but the main/default routes and pre-existing policy rules must be identical after removing that expected route from the comparison.
+5. Preserve the persistent database/configuration during uninstall, following the original CSQTT behavior.
 
-## Safety invariant
+## Required end-to-end proof
 
-Until every item above passes, do not use the Deploy button against production NanoPi. The CI path targets a disposable VM and must preserve original CSQTT services, main routes, and unrelated policy/firewall entries. The installer/uninstaller must never call the upstream global deploy.sh. Existing CSQTT services, Android CSQTT, production routing, HydraRoute, and Tailscale are out of scope and must remain untouched.
+The gate opens only after CI passes all of these against a disposable Debian ARM64 system VM:
+
+- Static tests prove the deploy script is derived from the pinned v2.1.9 source and retains upstream validation, activation, health checks, and uninstall.
+- The original namespaced script installs and starts the actual patched ARM64 server on UDP/47000 and TCP/47002, authenticates a real CSQTT protocol exchange, decodes TUNCONF, and passes bidirectional IPv4/TUN packet delivery.
+- A same-process client protocol recovery test passes after restarting only `csqtt-lalune.service`.
+- The actual Deploy button API stages assets over SSH, installs using the same original script, returns `CSQTT_LALUNE_DEPLOY_OK` and the panel URL, then uninstalls via the same script and returns `CSQTT_LALUNE_UNINSTALL_OK`.
+- Pre-existing `csqtt.service`, `csqtt-47000.service`, and `csqtt-47000-netns.service` remain active with unchanged unit files; foreign routes, policy rules, and firewall entries survive install and uninstall; main routes return exactly to baseline.
+- A separate listener on TCP/80 survives both actions, proving the optional Let's Encrypt stage defers instead of killing it.
+
+No production NanoPi, routing, firewall, DNS, Tailscale, HydraRoute, or 3x-ui settings are changed by this work. Passing CI would validate only the disposable-VM lifecycle, not authorize a production deployment.
 
 ## Protocol trace for the next test
 
