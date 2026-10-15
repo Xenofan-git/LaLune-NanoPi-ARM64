@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Fail-closed source audit for the upstream CSQTT 2.1.9 installer and dataplane.
+"""Audit the pinned CSQTT 2.1.9 hazards and the namespaced LaLune deploy flow.
 
-This audit does not make the upstream installer safe. It asserts that the known
-shared-host hazards remain documented and that deployment stays blocked until a
-separate LaLune-specific dataplane and installer exist.
+The Deploy button uses deploy-csqtt-lalune.sh, generated from the pinned
+upstream deploy.sh by the dedicated patcher. Legacy install/uninstall scripts
+are test fixtures only and must not be wired into DeployManager.
 """
 from pathlib import Path
 import sys
@@ -41,13 +41,15 @@ if not deploy_rs.is_file():
     raise SystemExit("patched DeployManager source missing")
 patched = deploy_rs.read_text()
 if "CSQTT_ISOLATION_REQUIRED" in patched or "exit 73" in patched:
-    raise SystemExit("obsolete fail-closed stub remains instead of the isolated installer")
+    raise SystemExit("obsolete fail-closed stub remains instead of the original-derived LaLune deploy flow")
+if "install-csqtt-lalune.sh" in patched or "uninstall-csqtt-lalune.sh" in patched:
+    raise SystemExit("legacy fixture installer must not be wired into DeployManager")
 for marker in (
-    "install-csqtt-lalune.sh",
-    "uninstall-csqtt-lalune.sh",
+    "deploy-csqtt-lalune.sh",
+    "CSQTT_DEPLOY_STAGE",
     "CSQTT_LALUNE_DEPLOY_OK",
     "CSQTT_LALUNE_UNINSTALL_OK",
-    "fn uninstall_official_csqtt",
+    "fn deploy_official_csqtt",
 ):
     if marker not in patched:
         raise SystemExit(f"isolated deployment marker missing: {marker}")
