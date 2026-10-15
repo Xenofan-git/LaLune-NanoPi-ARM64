@@ -51,6 +51,22 @@ for old, new in replacements:
 # such as csqtt_cleanup or uppercase CSQTT_* protocol/environment variables.
 src = re.sub(r"(?<![A-Za-z0-9_-])csqtt(?![A-Za-z0-9_-])", "csqtt-lalune", src)
 
+# Keep filenames that the pinned Rust server binary opens internally.
+# The server's SQLite path is compiled as <config-dir>/csqtt.db; renaming that
+# basename only in the shell installer would split state between two databases.
+# The env file can retain its upstream basename because its parent directory
+# is already namespaced (/etc/csqtt-lalune).
+file_contracts = [
+    ('readonly CSQTT_DATABASE_FILE="csqtt-lalune.db"', 'readonly CSQTT_DATABASE_FILE="csqtt.db"'),
+    ('readonly CSQTT_DATABASE_WAL_FILE="csqtt-lalune.db-wal"', 'readonly CSQTT_DATABASE_WAL_FILE="csqtt.db-wal"'),
+    ('readonly CSQTT_DATABASE_SHM_FILE="csqtt-lalune.db-shm"', 'readonly CSQTT_DATABASE_SHM_FILE="csqtt.db-shm"'),
+    ('readonly CSQTT_ENV_FILE="${CSQTT_CONFIG_DIR}/csqtt-lalune.env"', 'readonly CSQTT_ENV_FILE="${CSQTT_CONFIG_DIR}/csqtt.env"'),
+]
+for old, new in file_contracts:
+    if src.count(old) != 1:
+        raise SystemExit(f"expected exactly one server-compatible filename marker: {old}")
+    src = src.replace(old, new, 1)
+
 for old, new in [
     ("csqtt-cascade", "csqtt-lalune-cascade"),
     ("csqtt-docker-prereq", "csqtt-lalune-docker-prereq"),
