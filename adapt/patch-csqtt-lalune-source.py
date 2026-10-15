@@ -11,6 +11,7 @@ paths = {
     "model": root / "model.rs",
     "protocol": root / "protocol.rs",
     "main": root / "main.rs",
+    "web": root / "web_panel.rs",
 }
 sources = {key: path.read_text() for key, path in paths.items()}
 
@@ -63,6 +64,13 @@ replacements = [
     # The hot tunnel-configuration test formats this address from octets, so
     # rewriting dotted-decimal fixtures alone leaves the runtime test on the old subnet.
     ("protocol", "[10, 66, 67, 42]", "[10, 67, 68, 42]", "hot tunnel configuration numeric subnet fixture", 1),
+    # Isolate the server defaults and all panel-generated client links from the
+    # original CSQTT ports. Keep test fixtures in protocol/model files unchanged.
+    ("main", "46000", "47000", "server UDP defaults/help", 2),
+    ("main", "46002", "47002", "server HTTPS defaults/help", 2),
+    ("web", "46000", "47000", "panel DTLS client defaults", 8),
+    ("web", "46001", "47001", "panel WG client defaults", 4),
+    ("web", "46002", "47002", "panel HTTPS redirect fallback", 1),
 ]
 for key, old, new, label, expected_count in replacements:
     count = sources[key].count(old)
@@ -428,6 +436,15 @@ for old, new, label in service_unit_replacements:
     sources["main"] = sources["main"].replace(old, new, 1)
 if 'command.args([action, "csqtt"])' in sources["main"] or '.args(["--no-block", "restart", "csqtt"])' in sources["main"]:
     raise SystemExit("main.rs still contains a hard-coded original CSQTT service action")
+
+for key in ("main", "web"):
+    for old_port in ("46000", "46001", "46002"):
+        if old_port in sources[key]:
+            raise SystemExit(f"{key}.rs still contains original CSQTT port {old_port}")
+if 'default_value = "0.0.0.0:47000"' not in sources["main"] or "default_value_t = 47002" not in sources["main"]:
+    raise SystemExit("server CLI defaults are not namespaced to UDP/47000 and TCP/47002")
+if 'id="peer_port" value="47000"' not in sources["web"] or 'id="wg_port" value="47001"' not in sources["web"]:
+    raise SystemExit("panel client port defaults are not namespaced")
 
 # Rule cleanup is marker-based, so the TPROXY comment must be unique as well.
 sources["proxy"] = sources["proxy"].replace("CSQTT_TPROXY", "CSQTT_LALUNE_TPROXY")
