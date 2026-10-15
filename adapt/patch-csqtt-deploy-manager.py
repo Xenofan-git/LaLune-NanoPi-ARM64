@@ -79,6 +79,10 @@ run_scp = r'''fn run_scp(args: &DeployArgs, remote: &str, local: &str, remote_st
         if let Some(password) = &args.password {
             let helper = write_askpass_helper()?;
             askpass_env = Some((helper, password.clone()));
+            scp_args.push("-o".to_string());
+            scp_args.push("PreferredAuthentications=password,keyboard-interactive".to_string());
+            scp_args.push("-o".to_string());
+            scp_args.push("PubkeyAuthentication=no".to_string());
         }
         ("scp".to_string(), scp_args.clone())
     };
@@ -249,8 +253,8 @@ ip link show csqtt-lalune0 >/dev/null
 ss -H -lun "sport = :{peer_port}" | grep -q .
 ss -H -ltn "sport = :{web_port}" | grep -q .
 echo CSQTT_LALUNE_DEPLOY_OK
-echo "PANEL_URL=https://{host_for_url}:{web_port}"
-"#, peer_port=peer_port, web_port=web_port, ssh_port=ssh_port, host_for_url=if args.host.contains(':') && !args.host.starts_with('[') { format!("[{}]", args.host) } else { args.host.clone() })
+echo "PANEL_PORT={web_port}"
+"#, peer_port=peer_port, web_port=web_port, ssh_port=ssh_port)
         };
         let output = run_ssh(args, &remote, &script).context("run namespaced original CSQTT deploy.sh over SSH")?;
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -262,6 +266,14 @@ echo "PANEL_URL=https://{host_for_url}:{web_port}"
             anyhow::bail!("namespaced original CSQTT deployment did not confirm {expected}");
         }
         println!("{expected}");
+        if !args.uninstall {
+            let host_for_url = if args.host.contains(':') && !args.host.starts_with('[') {
+                format!("[{}]", args.host)
+            } else {
+                args.host.clone()
+            };
+            println!("PANEL_URL=https://{host_for_url}:{web_port}");
+        }
         Ok(())
     })();
     let _ = std::fs::remove_dir_all(&bundle);
