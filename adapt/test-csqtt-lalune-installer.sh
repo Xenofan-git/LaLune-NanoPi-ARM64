@@ -177,7 +177,7 @@ grep -q 'regular --secrets-file is required' "$ROOT/out"
 [[ ! -e "$ROOT/host/etc/csqtt-lalune" && ! -e "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
 
 # Case 3: successful isolated install in the temporary root.
-printf 'mainPass123\nwebUser123\nwebPass123\n0123456789abcdef\n' > "$ROOT/package/server-secrets.txt"
+printf '%s\n' 'mainPass123' 'webUser123' 'webPass123' '01234567-89ab-cdef-0123-456789abcdef' > "$ROOT/package/server-secrets.txt"
 chmod 0600 "$ROOT/package/server-secrets.txt"
 SS_MODE=clear IP_RULES= IP_ROUTE_PRESENT=0 IP_TUN_PRESENT=0 IPTABLES_RULES= "$ROOT/package/install.sh" --secrets-file "$ROOT/package/server-secrets.txt" >"$ROOT/out"
 grep -q 'CSQTT_LALUNE_INSTALL_OK' "$ROOT/out"
@@ -192,6 +192,7 @@ grep -Fq 'CSQTT_SERVICE_MANAGER=systemd' "$ROOT/host/etc/csqtt-lalune/server.env
 grep -Fq 'CSQTT_SYSTEMD_UNIT=csqtt-lalune.service' "$ROOT/host/etc/csqtt-lalune/server.env"
 grep -Fq 'CSQTT_LALUNE_UDP_PORT=47000' "$ROOT/host/etc/csqtt-lalune/server.env"
 grep -Fq 'CSQTT_LALUNE_WEB_PORT=47002' "$ROOT/host/etc/csqtt-lalune/server.env"
+grep -Fq 'CSQTT_DEVICE_ID=01234567-89ab-cdef-0123-456789abcdef' "$ROOT/host/etc/csqtt-lalune/server.env"
 [[ "$(stat -c %a "$ROOT/host/etc/csqtt-lalune/server.env")" == 600 ]]
 grep -Fq 'CSQTT-LALUNE-MANAGED-V1' "$ROOT/host/etc/csqtt-lalune/.managed-by-lalune"
 
