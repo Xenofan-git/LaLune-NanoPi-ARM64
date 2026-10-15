@@ -599,6 +599,13 @@ jobs:
             sudo ip rule add priority 470011 fwmark 0x67410/0xffff lookup 470010
             sudo iptables -I OUTPUT 1 -d 198.18.78.0/24 -m comment --comment CSQTT_LALUNE-FOREIGN_RULE_KEEP -j ACCEPT
             sudo iptables -I OUTPUT 1 -d 198.18.79.0/24 -m comment --comment CSQTT_LALUNEISH_FOREIGN_KEEP -j ACCEPT
+            # Seed original CSQTT-owned marker families; LaLune cleanup must never delete them.
+            sudo iptables -I OUTPUT 1 -d 198.18.80.0/24 -m comment --comment CSQTT_MIRRORED -j ACCEPT
+            sudo iptables -I OUTPUT 1 -d 198.18.81.0/24 -m comment --comment CSQTT_TPROXY -j ACCEPT
+            sudo iptables -I OUTPUT 1 -d 198.18.82.0/24 -m comment --comment CSQTT_LOCAL_SOCKS -j ACCEPT
+            sudo iptables -I OUTPUT 1 -d 198.18.83.0/24 -m comment --comment CSQTT_LOCAL_SOCKS_MARK -j ACCEPT
+            sudo iptables -I OUTPUT 1 -d 198.18.84.0/24 -m comment --comment CSQTT_SOCKS -j ACCEPT
+            sudo iptables -I OUTPUT 1 -d 198.18.85.0/24 -m comment --comment CSQTT_CASCADE_NO_QUIC -j ACCEPT
             sudo sha256sum /etc/systemd/system/csqtt.service /etc/systemd/system/csqtt-47000.service /etc/systemd/system/csqtt-47000-netns.service > /tmp/production-units.before
             sudo systemctl show -p ActiveState -p SubState csqtt.service csqtt-47000.service csqtt-47000-netns.service > /tmp/production-states.before
             sudo ip -4 route show table main > /tmp/main-routes.before
@@ -615,6 +622,7 @@ jobs:
             grep -Eq "^470011:.*fwmark 0x67410/0xffff lookup 470010$" /tmp/all-ip-rules.before
             grep -Fq "CSQTT_LALUNE-FOREIGN_RULE_KEEP" /tmp/iptables.before
             grep -Fq "CSQTT_LALUNEISH_FOREIGN_KEEP" /tmp/iptables.before
+            for marker in CSQTT_MIRRORED CSQTT_TPROXY CSQTT_LOCAL_SOCKS CSQTT_LOCAL_SOCKS_MARK CSQTT_SOCKS CSQTT_CASCADE_NO_QUIC; do grep -Fq "$marker" /tmp/iptables.before; done
             sudo install -m 0600 /dev/null /opt/lalune-package/.csqtt-lalune-upload-web.env
             sudo tee /opt/lalune-package/.csqtt-lalune-upload-web.env >/dev/null <<'WEBENV'
           CSQTT_WEB_USER=wire-user
