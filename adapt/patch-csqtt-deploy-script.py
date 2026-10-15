@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""Derive an isolated LaLune deploy script from pinned CSQTT v2.1.9 deploy.sh.
+
+This deliberately retains the upstream install/health-check/uninstall flow.
+Only runtime-owned names, ports, the patched TUN subnet, and unsafe port
+conflict behavior are adapted. Run after fetching the pinned upstream script.
+"""
+from pathlib import Path
+import re
+
+source_path = Path("server-assets/deploy.sh")
+output_path = Path("server-assets/deploy-csqtt-lalune.sh")
+src = source_path.read_text()
+
+replacements = [
+    ('readonly PEER_PORT="${CSQTT_PEER_PORT:-46000}"', 'readonly PEER_PORT="${CSQTT_PEER_PORT:-47000}"'),
+    ('readonly WEB_PORT="${CSQTT_WEB_PORT:-46002}"', 'readonly WEB_PORT="${CSQTT_WEB_PORT:-47002}"'),
+    ('readonly LOG_FILE="/var/log/csqtt-install.log"', 'readonly LOG_FILE="/var/log/csqtt-lalune-install.log"'),
+    ('readonly CSQTT_IFACE="csqtt1"', 'readonly CSQTT_IFACE="csqtt-lalune0"'),
+    ('readonly CSQTT_CONFIG_DIR="/etc/csqtt"', 'readonly CSQTT_CONFIG_DIR="/etc/csqtt-lalune"'),
+    ('readonly CSQTT_LE_CERTBOT="/opt/csqtt-certbot/bin/certbot"', 'readonly CSQTT_LE_CERTBOT="/opt/csqtt-lalune-certbot/bin/certbot"'),
+    ('readonly CSQTT_LE_VENV="/opt/csqtt-certbot"', 'readonly CSQTT_LE_VENV="/opt/csqtt-lalune-certbot"'),
+    ('readonly CSQTT_LE_RENEW_HELPER="/usr/local/lib/csqtt/letsencrypt-renew.sh"', 'readonly CSQTT_LE_RENEW_HELPER="/usr/local/lib/csqtt-lalune/letsencrypt-renew.sh"'),
+    ('readonly CSQTT_LE_SERVICE="csqtt-letsencrypt.service"', 'readonly CSQTT_LE_SERVICE="csqtt-lalune-letsencrypt.service"'),
+    ('readonly CSQTT_LE_TIMER="csqtt-letsencrypt.timer"', 'readonly CSQTT_LE_TIMER="csqtt-lalune-letsencrypt.timer"'),
+    ('readonly CSQTT_SYSCTL_FILE="/etc/sysctl.d/99-csqtt.conf"', 'readonly CSQTT_SYSCTL_FILE="/etc/sysctl.d/99-csqtt-lalune.conf"'),
+    ('readonly CSQTT_UDP_SYSCTL_FILE="/etc/sysctl.d/99-csqtt-udp-buffers.conf"', 'readonly CSQTT_UDP_SYSCTL_FILE="/etc/sysctl.d/99-csqtt-lalune-udp-buffers.conf"'),
+    ('readonly IPT_COMMENT="CSQTT_MANAGED"', 'readonly IPT_COMMENT="CSQTT_LALUNE_MANAGED"'),
+    ('readonly CSQTT_DOCKER_PREREQ_SERVICE="csqtt-docker-prereq.service"', 'readonly CSQTT_DOCKER_PREREQ_SERVICE="csqtt-lalune-docker-prereq.service"'),
+    ('readonly CSQTT_DOCKER_PREREQ_HELPER="/usr/local/lib/csqtt/docker-prereq.sh"', 'readonly CSQTT_DOCKER_PREREQ_HELPER="/usr/local/lib/csqtt-lalune/docker-prereq.sh"'),
+    ('readonly CSQTT_RUNTIME_DIR="/run/csqtt"', 'readonly CSQTT_RUNTIME_DIR="/run/csqtt-lalune"'),
+    ('readonly UPLOAD_BINARY="/tmp/.csqtt-upload-server"', 'readonly UPLOAD_BINARY="${CSQTT_DEPLOY_STAGE:-/tmp}/.csqtt-lalune-upload-server"'),
+    ('readonly UPLOAD_ENV_FILE="/tmp/.csqtt-upload-web.env"', 'readonly UPLOAD_ENV_FILE="${CSQTT_DEPLOY_STAGE:-/tmp}/.csqtt-lalune-upload-web.env"'),
+    ('readonly UPLOAD_OVERRIDES_FILE="/tmp/.csqtt-upload-overrides.json"', 'readonly UPLOAD_OVERRIDES_FILE="${CSQTT_DEPLOY_STAGE:-/tmp}/.csqtt-lalune-upload-overrides.json"'),
+    ('readonly CSQTT_DOCKER_IMAGE="csqtt:2.1.9"', 'readonly CSQTT_DOCKER_IMAGE="csqtt-lalune:2.1.9"'),
+    ('readonly CSQTT_DOCKER_CONTAINER="csqtt"', 'readonly CSQTT_DOCKER_CONTAINER="csqtt-lalune"'),
+]
+for old, new in replacements:
+    count = src.count(old)
+    if count != 1:
+        raise SystemExit(f"expected exactly one upstream marker ({count}): {old}")
+    src = src.replace(old, new, 1)
+
+# Replace the standalone lowercase runtime name, never function identifiers
+# such as csqtt_cleanup or uppercase CSQTT_* protocol/environment variables.
+src = re.sub(r"(?<![A-Za-z0-9_-])csqtt(?![A-Za-z0-9_-])", "csqtt-lalune", src)
+
+for old, new in [
+    ("csqtt-cascade", "csqtt-lalune-cascade"),
+    ("csqtt-docker-prereq", "csqtt-lalune-docker-prereq"),
+    ("csqtt-letsencrypt", "csqtt-lalune-letsencrypt"),
+    ("csqtt-ip-", "csqtt-lalune-ip-"),
+    ("/usr/local/bin/hev-socks5-tunnel", "/usr/local/bin/lalune-hev-socks5-tunnel"),
+    ("/usr/local/bin/hev-socks5-server", "/usr/local/bin/lalune-hev-socks5-server"),
+    ("/tmp/csqtt-web-probe.", "${CSQTT_DEPLOY_STAGE:-/tmp}/csqtt-lalune-web-probe."),
+    ("/tmp/csqtt-docker.", "/tmp/csqtt-lalune-docker."),
+    ("10.66.67", "10.67.68"),
+]:
+    src = src.replace(old, new)
+
+# The original cleanup removed generic legacy proxy interfaces. They are not
+# owned by this instance and must be left alone.
+old = """cleanup_legacy_proxy_interfaces() {
+    local iface
+    for iface in $(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep '^csqtp' || true); do
+        timeout 2 ip link del "$iface" 2>/dev/null || true
+    done
+}"""
+new = """cleanup_legacy_proxy_interfaces() {
+    # The LaLune service owns no legacy proxy interfaces. Never remove
+    # an interface that may belong to the original CSQTT runtime.
+    return 0
+}"""
+if src.count(old) != 1:
+    raise SystemExit("expected exactly one legacy proxy cleanup function")
+src = src.replace(old, new, 1)
+
+# The upstream installer used to kill any process occupying UDP/PEER_PORT.
+# Retain recovery for our own process only; fail closed for unrelated listeners.
+old = """assert_peer_port_is_available() {
+    local listeners
+    listeners="$(peer_port_listeners)"
+    [ -z "$listeners" ] && return 0
+    log_warn "UDP/${PEER_PORT} занят; выполняется принудительное освобождение"
+    force_release_peer_port || die "Не удалось принудительно освободить UDP/${PEER_PORT}"
+    [ -z "$(peer_port_listeners)" ] || die "UDP/${PEER_PORT} остался занят после принудительной очистки"
+}"""
+new = """assert_peer_port_is_available() {
+    local listeners pid
+    listeners="$(peer_port_listeners)"
+    [ -z "$listeners" ] && return 0
+    while IFS= read -r pid; do
+        [ -n "$pid" ] || continue
+        if ! csqtt_process_owns_peer_port "$pid"; then
+            log_error "UDP/${PEER_PORT} занят посторонним процессом PID ${pid}; он не будет остановлен"
+            printf '%s\\n' "$listeners" | tee -a "$LOG_FILE" >&2
+            die "Порт UDP/${PEER_PORT} занят посторонним процессом; конфликтующий процесс не изменён"
+        fi
+    done < <(peer_port_listener_pids)
+    log_warn "UDP/${PEER_PORT} занят принадлежащим LaLune процессом; выполняется освобождение"
+    force_release_peer_port || die "Не удалось освободить UDP/${PEER_PORT} LaLune"
+    [ -z "$(peer_port_listeners)" ] || die "UDP/${PEER_PORT} остался занят после очистки LaLune"
+}"""
+if src.count(old) != 1:
+    raise SystemExit("expected exactly one peer-port conflict handler")
+src = src.replace(old, new, 1)
+
+# The patched server uses this variable for restart actions initiated by its panel.
+old = "Environment=CSQTT_SERVICE_MANAGER=systemd"
+new = old + "\nEnvironment=CSQTT_SYSTEMD_UNIT=csqtt-lalune.service"
+if src.count(old) != 1:
+    raise SystemExit("expected exactly one systemd service-manager environment line")
+src = src.replace(old, new, 1)
+
+# Optional CI switch: keep the upstream TLS setup flow in normal use, while
+# avoiding an outbound Let's Encrypt request in a disposable test VM.
+old = "setup_letsencrypt_ip_tls() {"
+new = """setup_letsencrypt_ip_tls() {
+    if [ "${CSQTT_LALUNE_SKIP_LETSENCRYPT:-0}" = "1" ]; then
+        log_info "LaLune test setting: skipping optional Let's Encrypt issuance"
+        return 0
+    fi"""
+if src.count(old) != 1:
+    raise SystemExit("expected exactly one Let's Encrypt setup function")
+
+src = src.replace(old, new, 1)
+
+for forbidden in [
+    "/etc/csqtt/", "/usr/local/bin/csqtt ", "/usr/local/lib/csqtt/",
+    "csqtt.service", "csqtt-letsencrypt.service", "csqtt-cascade.service",
+    "CSQTT_MANAGED", "csqtt1", "10.66.67", "grep '^csqtp'",
+]:
+    if forbidden in src:
+        raise SystemExit(f"shared runtime identifier remains: {forbidden}")
+for required in [
+    'CSQTT_PEER_PORT:-47000', 'CSQTT_WEB_PORT:-47002',
+    'csqtt-lalune.service', 'csqtt-lalune0', '10.67.68.0/24',
+    'CSQTT_LALUNE_MANAGED', 'CSQTT_SYSTEMD_UNIT=csqtt-lalune.service',
+    'CSQTT_DEPLOY_STAGE:-/tmp', 'CSQTT_LALUNE_SKIP_LETSENCRYPT',
+    'посторонним процессом',
+]:
+    if required not in src:
+        raise SystemExit(f"required LaLune adaptation missing: {required}")
+
+output_path.write_text(src)
+print(f"Created {output_path} from pinned CSQTT 2.1.9 deploy.sh")
