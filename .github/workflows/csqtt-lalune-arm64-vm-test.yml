@@ -609,6 +609,7 @@ jobs:
             sudo chmod 0600 /opt/lalune-package/server-secrets.txt
             sudo env CSQTT_LALUNE_UDP_PORT=47000 CSQTT_LALUNE_WEB_PORT=47002 bash /opt/lalune-package/install-csqtt-lalune.sh --secrets-file /opt/lalune-package/server-secrets.txt
             sudo systemctl is-active --quiet csqtt-lalune.service
+            sudo grep -Fq 'CSQTT_DEVICE_ID=01234567-89ab-cdef-0123-456789abcdef' /etc/csqtt-lalune/server.env
             sudo systemctl is-active --quiet csqtt.service
             sudo systemctl is-active --quiet csqtt-47000.service
             sudo systemctl is-active --quiet csqtt-47000-netns.service
