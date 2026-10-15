@@ -800,7 +800,7 @@ jobs:
           uninstall_log="$(curl -fsS http://127.0.0.1:1062/deploy/log | python3 -c 'import json,sys; print(json.load(sys.stdin))')"
           printf '%s\n' "$uninstall_log"
           grep -Fq 'CSQTT_LALUNE_UNINSTALL_OK' <<<"$uninstall_log"
-          ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo systemctl is-active --quiet csqtt.service && sudo systemctl is-active --quiet csqtt-47000.service && sudo systemctl is-active --quiet csqtt-47000-netns.service && ! sudo systemctl is-active --quiet csqtt-lalune.service && sudo ip -4 route show table main > /tmp/main-routes.after-button-uninstall && diff -u /tmp/main-routes.before /tmp/main-routes.after-button-uninstall && sudo test -s /etc/csqtt-lalune/csqtt.db && sudo test -f /etc/csqtt-lalune/csqtt.env'
+          ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo systemctl is-active --quiet csqtt.service && sudo systemctl is-active --quiet csqtt-47000.service && sudo systemctl is-active --quiet csqtt-47000-netns.service && ! sudo systemctl is-active --quiet csqtt-lalune.service && sudo ip -4 route show table main > /tmp/main-routes.after-button-uninstall && diff -u /tmp/main-routes.before /tmp/main-routes.after-button-uninstall && sudo test -s /etc/csqtt-lalune/csqtt.db && sudo test -f /etc/csqtt-lalune/csqtt.env && sudo ss -H -ltn "sport = :80" | grep -q . && sudo kill "$(sudo cat /run/lalune-test-port80.pid)"'
           ip -4 route show table main > vm/runner-main-routes.after
           ip -4 rule show > vm/runner-ip-rules.after
           diff -u vm/runner-main-routes.before vm/runner-main-routes.after
