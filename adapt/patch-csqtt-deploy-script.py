@@ -113,7 +113,7 @@ assert_web_port_is_available() {
     listeners="$(web_port_listeners)"
     [ -z "$listeners" ] && return 0
     log_error "TCP/${WEB_PORT} remains occupied after stopping LaLune; no listener will be terminated"
-    printf '%s\\n' "$listeners" | tee -a "$LOG_FILE" >&2
+    printf '%s\n' "$listeners" | tee -a "$LOG_FILE" >&2
     die "TCP/${WEB_PORT} remains occupied; refusing to start LaLune"
 }
 
