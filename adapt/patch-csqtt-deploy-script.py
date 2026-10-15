@@ -75,6 +75,49 @@ if src.count(old) != 1:
     raise SystemExit("expected exactly one legacy proxy cleanup function")
 src = src.replace(old, new, 1)
 
+# Port guards run before service cutover and allow only the already-owned
+# LaLune process during a redeploy. Unrelated or unidentifiable listeners fail closed.
+port_guards = r'''
+web_port_listeners() {
+    ss -H -ltnp "sport = :${WEB_PORT}" 2>/dev/null || true
+}
+
+web_port_listener_pids() {
+    web_port_listeners | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -un || true
+}
+
+assert_deployment_ports_not_foreign() {
+    local listeners pids pid
+    listeners="$(peer_port_listeners)"
+    if [ -n "$listeners" ]; then
+        pids="$(peer_port_listener_pids)"
+        [ -n "$pids" ] || die "UDP/${PEER_PORT} occupied but its owner cannot be identified; refusing to change runtime"
+        while IFS= read -r pid; do
+            [ -n "$pid" ] || continue
+            csqtt_process_owns_peer_port "$pid" || die "UDP/${PEER_PORT} is occupied by unrelated PID ${pid}; refusing to stop it"
+        done <<< "$pids"
+    fi
+    listeners="$(web_port_listeners)"
+    if [ -n "$listeners" ]; then
+        pids="$(web_port_listener_pids)"
+        [ -n "$pids" ] || die "TCP/${WEB_PORT} occupied but its owner cannot be identified; refusing to change runtime"
+        while IFS= read -r pid; do
+            [ -n "$pid" ] || continue
+            csqtt_process_is_owned "$pid" || die "TCP/${WEB_PORT} is occupied by unrelated PID ${pid}; refusing to stop it"
+        done <<< "$pids"
+    fi
+}
+
+assert_web_port_is_available() {
+    local listeners
+    listeners="$(web_port_listeners)"
+    [ -z "$listeners" ] && return 0
+    log_error "TCP/${WEB_PORT} remains occupied after stopping LaLune; no listener will be terminated"
+    printf '%s\\n' "$listeners" | tee -a "$LOG_FILE" >&2
+    die "TCP/${WEB_PORT} remains occupied; refusing to start LaLune"
+}
+
+'''
 # The upstream installer used to kill any process occupying UDP/PEER_PORT.
 # Retain recovery for our own process only; fail closed for unrelated listeners.
 old = """assert_peer_port_is_available() {
@@ -103,6 +146,40 @@ new = """assert_peer_port_is_available() {
 }"""
 if src.count(old) != 1:
     raise SystemExit("expected exactly one peer-port conflict handler")
+src = src.replace(old, new, 1)
+
+marker = "assert_peer_port_is_available() {"
+if src.count(marker) != 1:
+    raise SystemExit("expected one peer-port guard insertion point")
+src = src.replace(marker, port_guards + marker, 1)
+
+old = '''            require_runtime_tools
+            if [ "$DEPLOY_MODE" = "docker" ]; then'''
+new = '''            require_runtime_tools
+            assert_deployment_ports_not_foreign
+            if [ "$DEPLOY_MODE" = "docker" ]; then'''
+if src.count(old) != 1:
+    raise SystemExit("expected one pre-sysctl runtime-tools sequence")
+src = src.replace(old, new, 1)
+
+old = '''            run_timed "проверка upload" prepare_uploaded_release
+            if [ "$DEPLOY_MODE" = "docker" ]; then'''
+new = '''            run_timed "проверка upload" prepare_uploaded_release
+            assert_deployment_ports_not_foreign
+            if [ "$DEPLOY_MODE" = "docker" ]; then'''
+if src.count(old) != 1:
+    raise SystemExit("expected one pre-cutover upload sequence")
+src = src.replace(old, new, 1)
+
+old = '''    assert_peer_port_is_available
+
+    cleanup_legacy_proxy_interfaces'''
+new = '''    assert_peer_port_is_available
+    assert_web_port_is_available
+
+    cleanup_legacy_proxy_interfaces'''
+if src.count(old) != 1:
+    raise SystemExit("expected one cleanup port-release sequence")
 src = src.replace(old, new, 1)
 
 # The patched server uses this variable for restart actions initiated by its panel.
