@@ -166,3 +166,21 @@ The latest build and disposable ARM64 system-VM run is green: [run 38784450196, 
 - The Go API creates a short-lived mode-`0600` secrets file. DeployManager stages the matching ARM64/x86_64 binary and credential overrides in a unique mode-`0700` remote directory, invokes the derived script over SSH, and removes the staging directory on completion. The server uses `CSQTT_SYSTEMD_UNIT=csqtt-lalune.service` for panel-triggered restart actions.
 - Verified in the latest disposable ARM64 VM run: the real ARM64 server authenticated the encrypted GETCONF exchange, returned a decryptable `TUNCONF`, passed bidirectional IPv4/TUN traffic, and passed the test-only same-process recovery and redeploy/persistent-state checks. The real client binary's VK call-hash validation passed. The Deploy API-to-SSH path installed the namespaced service, confirmed UDP/47000 and TCP/47002 listeners and the HTTPS panel, preserved the three pre-existing CSQTT-like services and unrelated routes/rules/firewall state, then uninstalled through the same API while preserving the database/configuration. The run emitted `DEPLOY_BUTTON_INSTALL_UNINSTALL_E2E_PASS`.
 - This closes the **CI Deploy API → SSH → original-derived installer/uninstaller integration gate** on a disposable VM. It does not authorize production deployment. Remaining production gates are unchanged: stock packaged-client idle/reconnect behavior (the passing recovery test uses a test-only timeout), exhaustive adversarial ownership/cleanup cases, and Direct-tab UI → backend → live routing-policy integration. Do not deploy to NanoPi or alter production network settings until those gates are reviewed and explicitly authorized.
+
+## Superseding client-recovery evidence (2026-10-15; run #235)
+
+This section supersedes the older recovery-status statements above where they conflict. Those statements remain as a record of the earlier test state.
+
+- [Real Rust client process-recovery E2E](https://github.com/Xenofan-git/LaLune-NanoPi-ARM64/actions/runs/38801699589): both watchdog matrix legs passed. In the no-watchdog leg, a disposable pinned Rust client/server checkout with the CI-only negotiated-liveness patch recovered after restarting only the isolated server. The same client PID parsed fresh TUNCONF, re-registered all nine workers and restored bidirectional IPv4 through the actual client UDP dispatcher and Linux TUN. Before and after restart, the three-packet probes had 0% packet loss.
+- The separate experimental AArch64 client/server artifacts also passed a full Debian ARM64 system-VM test in the same run: quiet-tunnel PING/PONG periods succeeded, and after server restart the same process restored TUN traffic (3/3 packets before; 5/5 after; 0% loss).
+- [Build and packaged-artifact ARM64 VM / Deploy API E2E, run #700](https://github.com/Xenofan-git/LaLune-NanoPi-ARM64/actions/runs/38801700145) passed its separate build, isolation, policy, and install/uninstall checks.
+
+### Exact scope and remaining blockers
+
+- **Proven:** same-process Rust-client recovery with the test-only negotiated PING/PONG patch in disposable pinned sources; full ARM64 system-VM dataplane recovery using separate experimental ARM64 binaries.
+- **Not proven:** recovery by the unmodified stock packaged ARM64 runtime client. Its audit did not find `CSQTT_LIVENESS_V1`; the test patch is not part of that artifact.
+- **Not proven:** live VK authentication or the complete acquisition-plus-recovery flow independently for Manual, Auto API and Auto VK. Parser/preflight/hash-validation tests do not establish those end-to-end flows.
+- **Still required before production consideration:** reviewed implementation in maintained source trees; protocol security/compatibility tests; provenance and E2E validation of a newly versioned final artifact; exhaustive ownership/cleanup checks; and Direct-tab UI → backend → routing-policy integration.
+
+The protocol proposal remains CI-fixture-only / not production-ready. Deployment remains **BLOCKED / NOT AUTHORIZED**. Do not merge or deploy as part of this correction; do not touch NanoPi, VPS, production services, routes, firewall, DNS, Tailscale, or Keenetic.
+
