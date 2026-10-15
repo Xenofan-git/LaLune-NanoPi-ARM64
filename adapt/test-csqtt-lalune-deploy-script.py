@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""Static regression tests for the namespaced original CSQTT v2.1.9 deploy.sh."""
+from pathlib import Path
+
+upstream = Path("server-assets/deploy.sh").read_text()
+script = Path("server-assets/deploy-csqtt-lalune.sh").read_text()
+
+def need(fragment: str) -> None:
+    if fragment not in script:
+        raise SystemExit(f"missing required original/LaLune deploy invariant: {fragment}")
+
+def forbid(fragment: str) -> None:
+    if fragment in script:
+        raise SystemExit(f"conflicting original CSQTT resource remains: {fragment}")
+
+if 'readonly SCRIPT_VERSION="2.1.9"' not in upstream:
+    raise SystemExit("source is not the pinned CSQTT v2.1.9 deploy.sh")
+if 'readonly SCRIPT_VERSION="2.1.9"' not in script:
+    raise SystemExit("derived deploy script lost the upstream version marker")
+
+# Keep the original deployment pipeline rather than replacing it with a second installer.
+for function in [
+    "prepare_uploaded_release()", "run_platform_preflight()", "setup_nat_and_firewall()",
+    "setup_csqtt_environment()", "setup_csqtt_service()", "start_csqtt()",
+    "verify_configured_network()", "verify_web_panel()", "do_uninstall()",
+    "cleanup_deploy_uploads()", "CSQTT_DEPLOY_OK",
+]:
+    need(function)
+
+# The LaLune runtime owns separate ports, paths, services, process and network names.
+for value in [
+    'CSQTT_PEER_PORT:-47000', 'CSQTT_WEB_PORT:-47002',
+    'CSQTT_IFACE="csqtt-lalune0"', 'CSQTT_CONFIG_DIR="/etc/csqtt-lalune"',
+    '/usr/local/bin/csqtt-lalune', '/usr/local/lib/csqtt-lalune',
+    '/var/log/csqtt-lalune-install.log', 'csqtt-lalune.service',
+    'CSQTT_LALUNE_MANAGED', '10.67.68.0/24',
+    'Environment=CSQTT_SYSTEMD_UNIT=csqtt-lalune.service',
+    'CSQTT_LALUNE_SKIP_LETSENCRYPT',
+]:
+    need(value)
+
+# Refuse unrelated listeners and leave the original CSQTT legacy interfaces alone.
+need('csqtt_process_owns_peer_port "$pid"')
+need('Порт UDP/${PEER_PORT} занят посторонним процессом; конфликтующий процесс не изменён')
+cleanup = script.split("cleanup_legacy_proxy_interfaces() {", 1)[1].split("\n}", 1)[0]
+if "ip link del" in cleanup:
+    raise SystemExit("LaLune cleanup still deletes generic legacy proxy interfaces")
+
+for value in [
+    'CSQTT_PEER_PORT:-46000', 'CSQTT_WEB_PORT:-46002',
+    'CSQTT_IFACE="csqtt1"', 'CSQTT_CONFIG_DIR="/etc/csqtt"',
+    '/usr/local/bin/csqtt ', '/usr/local/lib/csqtt/',
+    'csqtt.service', 'csqtt-letsencrypt.service', 'csqtt-cascade.service',
+    'CSQTT_MANAGED', '10.66.67', 'ip route flush cache',
+    'ip route flush table main', 'ip route replace default',
+]:
+    forbid(value)
+
+print("CSQTT LaLune namespaced original deploy.sh static tests: PASS")
