@@ -6,11 +6,17 @@ Only runtime-owned names, ports, the patched TUN subnet, and unsafe port
 conflict behavior are adapted. Run after fetching the pinned upstream script.
 """
 from pathlib import Path
+import hashlib
 import re
 
+EXPECTED_UPSTREAM_SHA256 = "6c94fb8dd033a4f1bab2961e7a1f6edfc1bdc532129d4e9cbf459684ba61ef5a"
 source_path = Path("server-assets/deploy.sh")
 output_path = Path("server-assets/deploy-csqtt-lalune.sh")
-src = source_path.read_text()
+raw_source = source_path.read_bytes()
+actual_sha256 = hashlib.sha256(raw_source).hexdigest()
+if actual_sha256 != EXPECTED_UPSTREAM_SHA256:
+    raise SystemExit(f"refusing to patch an unpinned CSQTT deploy.sh: sha256={actual_sha256}")
+src = raw_source.decode("utf-8")
 
 replacements = [
     ('readonly PEER_PORT="${CSQTT_PEER_PORT:-46000}"', 'readonly PEER_PORT="${CSQTT_PEER_PORT:-47000}"'),
