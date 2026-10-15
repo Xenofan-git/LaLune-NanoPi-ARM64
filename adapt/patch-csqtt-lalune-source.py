@@ -68,8 +68,8 @@ replacements = [
     # original CSQTT ports. Keep test fixtures in protocol/model files unchanged.
     ("main", "46000", "47000", "server UDP defaults/help", 2),
     ("main", "46002", "47002", "server HTTPS defaults/help", 2),
-    ("web", "46000", "47000", "panel DTLS client defaults", 8),
-    ("web", "46001", "47001", "panel WG client defaults", 4),
+    ("web", "46000", "47000", "panel DTLS client defaults", 7),
+    ("web", "46001", "47001", "panel WG client defaults", 6),
     ("web", "46002", "47002", "panel HTTPS redirect fallback", 1),
 ]
 for key, old, new, label, expected_count in replacements:
