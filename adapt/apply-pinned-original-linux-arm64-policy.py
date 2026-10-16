@@ -817,7 +817,7 @@ replace_once(
 replace_once(
     VTOKEN,
     'func (a *AppCore) HasVKToken() bool {',
-    '''func (a *AppCore) SaveVKTokenInput(value string) error {
+    """func (a *AppCore) SaveVKTokenInput(value string) error {
     value = strings.TrimSpace(value)
     token := value
     if strings.Contains(value, "://") {
@@ -866,7 +866,7 @@ replace_once(
     return nil
 }
 
-func (a *AppCore) HasVKToken() bool {'''
+func (a *AppCore) HasVKToken() bool {"""
 )
 
 FETCHER = UPSTREAM / "Core/LaLuneTokenFetcher/Playwright/PlaywrightTokenFetcher.cs"
