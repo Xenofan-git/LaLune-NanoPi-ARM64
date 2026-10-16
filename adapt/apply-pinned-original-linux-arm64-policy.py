@@ -849,7 +849,7 @@ replace_once(
         token = parsed.Get("access_token")
     }
     token = strings.TrimSpace(token)
-    if len(token) < 20 || strings.ContainsAny(token, " \t\r\n") {
+    if len(token) < 20 || strings.ContainsAny(token, " "+string([]byte{9, 10, 13})) {
         return fmt.Errorf("не найден корректный access_token; silent_token не является access_token")
     }
     if err := os.MkdirAll(a.appDir, 0700); err != nil {
