@@ -817,26 +817,40 @@ replace_once(
 replace_once(
     VTOKEN,
     'func (a *AppCore) HasVKToken() bool {',
-    '''func (a *AppCore) SaveVKTokenInput(value string) error {
+    ```func (a *AppCore) SaveVKTokenInput(value string) error {
     value = strings.TrimSpace(value)
     token := value
     if strings.Contains(value, "://") {
         parsed, err := url.Parse(value)
         if err != nil { return fmt.Errorf("некорректная ссылка OAuth: %w", err) }
+        if parsed.Scheme != "https" || parsed.User != nil {
+            return fmt.Errorf("OAuth-ссылка должна использовать HTTPS")
+        }
+        host := strings.ToLower(parsed.Hostname())
+        if host != "oauth.vk.ru" && host != "oauth.vk.com" {
+            return fmt.Errorf("OAuth-ссылка должна принадлежать oauth.vk.ru или oauth.vk.com")
+        }
+        if parsed.Port() != "" && parsed.Port() != "443" {
+            return fmt.Errorf("недопустимый порт OAuth-ссылки")
+        }
+        if parsed.EscapedPath() != "/blank.html" {
+            return fmt.Errorf("ожидался OAuth redirect /blank.html")
+        }
         token = parsed.Query().Get("access_token")
         if token == "" && parsed.Fragment != "" {
             fragment, err := url.ParseQuery(parsed.Fragment)
             if err != nil { return fmt.Errorf("не удалось разобрать фрагмент OAuth: %w", err) }
             token = fragment.Get("access_token")
         }
-    } else if strings.Contains(value, "access_token=") {
+    } else if strings.Contains(value, "=") || strings.HasPrefix(value, "#") {
         fragment := strings.TrimPrefix(value, "#")
         parsed, err := url.ParseQuery(fragment)
-        if err == nil { token = parsed.Get("access_token") }
+        if err != nil { return fmt.Errorf("не удалось разобрать параметры OAuth: %w", err) }
+        token = parsed.Get("access_token")
     }
     token = strings.TrimSpace(token)
-    if len(token) < 20 || strings.ContainsAny(token, " \\t\\r\\n") {
-        return fmt.Errorf("не найден корректный access_token; вставьте URL после успешного входа VK или сам токен")
+    if len(token) < 20 || strings.ContainsAny(token, " \t\r\n") {
+        return fmt.Errorf("не найден корректный access_token; silent_token не является access_token")
     }
     if err := os.MkdirAll(a.appDir, 0700); err != nil {
         return fmt.Errorf("не удалось создать каталог токена: %w", err)
@@ -852,7 +866,7 @@ replace_once(
     return nil
 }
 
-func (a *AppCore) HasVKToken() bool {'''
+func (a *AppCore) HasVKToken() bool {```
 )
 
 FETCHER = UPSTREAM / "Core/LaLuneTokenFetcher/Playwright/PlaywrightTokenFetcher.cs"
