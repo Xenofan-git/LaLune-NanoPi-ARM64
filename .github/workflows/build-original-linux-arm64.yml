@@ -11,6 +11,7 @@ on:
       - feature/csqtt-direct-route-tab
       - test/csqtt-client-reconnect-vm
       - test/csqtt-process-recovery-e2e
+      - feature/csqtt-original-app-panel
   workflow_dispatch:
 
 permissions:
