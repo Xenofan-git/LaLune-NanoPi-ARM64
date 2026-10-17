@@ -106,6 +106,13 @@ if "captchaArmed&&captchaIsActionable(c)" not in js:
 if "failed.push(names[i])" not in js or "'API частично · '+failed.length" not in js:
     raise SystemExit("background API failures are not reflected in panel status")
 
+# renderStatus must not overwrite refreshAll() partial-failure diagnostics.
+render_status = re.search(r"function renderStatus\\(\\)\\s*\\{([\\s\\S]*?)\\n\\}", js)
+if not render_status:
+    raise SystemExit("renderStatus function could not be isolated for API-status regression check")
+if "apiStatus" in render_status.group(1):
+    raise SystemExit("renderStatus overwrites API health indicator set by refreshAll")
+
 # Verify each independently fetched backend response updates its own UI state;
 # a single failing endpoint must not discard successful responses from others.
 for contract in (
