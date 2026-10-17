@@ -41,7 +41,7 @@ replace_once(
 
 protocol = ROOT / "Core/DeployManager/src/protocol.rs"
 replace_once(protocol, '            Protocol::Csqtt => "csqtt-core",', '            Protocol::Csqtt => "csqtt-lalune",')
-replace_once(protocol, "            Protocol::Csqtt => (443, 0, 1080),", "            Protocol::Csqtt => (47000, 47002, 0),")
+replace_once(protocol, "            Protocol::Csqtt => (443, 0, 1080),", "            Protocol::Csqtt => (47100, 47102, 0),")
 
 deploy = ROOT / "Core/DeployManager/src/deploy.rs"
 replace_once(
@@ -213,8 +213,8 @@ official = r'''fn deploy_official_csqtt(args: &DeployArgs, ports: &Ports) -> Res
         }
 
         let remote_bundle = format!("{remote_stage}/{bundle_name}");
-        let peer_port = ports.core.unwrap_or(47000);
-        let web_port = ports.warp.unwrap_or(47002);
+        let peer_port = ports.core.unwrap_or(47100);
+        let web_port = ports.warp.unwrap_or(47102);
         let ssh_port = args.ssh_port;
         let script = if args.uninstall {
             format!(r#"set -Eeuo pipefail
