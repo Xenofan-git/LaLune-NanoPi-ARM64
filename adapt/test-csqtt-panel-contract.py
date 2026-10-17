@@ -54,9 +54,17 @@ if parser.tabs != expected_tabs:
 # Keep the browser port on the native CSQTT brand palette and floating-tab
 # visual language; do not drift back to the earlier generic blue-gray mock.
 for token in ("--bg:#fdfdfe", "--surface2:#f2f2f4", "--blue:#1a73e8",
-              "--blue2:#1565d8", "border-radius:34px", "border-radius:40px", "backdrop-filter:blur(18px)", "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\">"):
+              "--blue2:#1565d8", "border-radius:34px", "border-radius:40px",
+              "backdrop-filter:blur(18px)", "max-width:760px", "border-radius:999px",
+              "width:min(720px,calc(100% - 24px))",
+              "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\">"):
     if token not in html:
         raise SystemExit("native CSQTT visual token missing: " + token)
+
+# The original Android screen uses a 720dp content cap and a floating bottom
+# navigation bar; desktop must not switch to a different top-tab/dashboard layout.
+if re.search(r'@media\\s*\\(min-width:\\s*980px\\)', html):
+    raise SystemExit("panel has a desktop-only layout that diverges from native CSQTT")
 
 
 duplicate_ids = sorted({x for x in parser.button_ids if parser.button_ids.count(x) > 1})
