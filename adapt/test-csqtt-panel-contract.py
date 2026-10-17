@@ -82,6 +82,9 @@ if "!['manual','selected'].includes(String(c.mode||'').toLowerCase())" not in js
 if "captchaArmed&&captchaIsActionable(c)" not in js:
     raise SystemExit("CAPTCHA overlay is not gated on an active connect session")
 
+if "failed.push(names[i])" not in js or "'API частично · '+failed.length" not in js:
+    raise SystemExit("background API failures are not reflected in panel status")
+
 # Keep the user-facing route save explicit: it stores rules but must not claim
 # that active routing changed immediately without a reconnect.
 if "Переподключите CSQTT" not in html:
