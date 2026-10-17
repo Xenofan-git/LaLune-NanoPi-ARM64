@@ -35,7 +35,7 @@ for function in [
 
 # The LaLune runtime owns separate ports, paths, services, process and network names.
 for value in [
-    'CSQTT_PEER_PORT:-47100', 'CSQTT_WEB_PORT:-47102',
+    'CSQTT_PEER_PORT:-47000', 'CSQTT_WEB_PORT:-47002',
     'CSQTT_IFACE="csqtt-lalune0"', 'CSQTT_CONFIG_DIR="/etc/csqtt-lalune"',
     '/usr/local/bin/csqtt-lalune', '/usr/local/lib/csqtt-lalune',
     '/var/log/csqtt-lalune-install.log', '/opt/csqtt-lalune-certbot', 'csqtt-lalune.service',
