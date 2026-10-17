@@ -107,6 +107,10 @@ if "failed.push(names[i])" not in js or "'API частично · '+failed.lengt
     raise SystemExit("background API failures are not reflected in panel status")
 
 # renderStatus must not overwrite refreshAll() partial-failure diagnostics.
+# Catch browser-script syntax regressions that static route/button checks cannot see.
+if not re.search(r"async\\s+function\\s+refreshInfo\\s*\\(\\)", js):
+    raise SystemExit("refreshInfo uses await and must be declared async")
+
 if "function renderStatus(){" not in js or "function fillSettings(){" not in js:
     raise SystemExit("renderStatus function could not be isolated for API-status regression check")
 render_status = js.split("function renderStatus(){", 1)[1].split("function fillSettings(){", 1)[0]
