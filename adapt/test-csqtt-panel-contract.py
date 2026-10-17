@@ -108,7 +108,7 @@ if "failed.push(names[i])" not in js or "'API частично · '+failed.lengt
 
 # renderStatus must not overwrite refreshAll() partial-failure diagnostics.
 # Catch browser-script syntax regressions that static route/button checks cannot see.
-if not re.search(r"async\\s+function\\s+refreshInfo\\s*\\(\\)", js):
+if not re.search(r"async\s+function\s+refreshInfo\s*\(\)", js):
     raise SystemExit("refreshInfo uses await and must be declared async")
 
 if "function renderStatus(){" not in js or "function fillSettings(){" not in js:
