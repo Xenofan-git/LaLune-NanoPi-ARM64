@@ -113,6 +113,10 @@ render_status = js.split("function renderStatus(){", 1)[1].split("function fillS
 if "apiStatus" in render_status:
     raise SystemExit("renderStatus overwrites API health indicator set by refreshAll")
 
+# Deployment completion is derived from the backend log, so a reload keeps the result visible.
+if "const done=!busy&&state.deployLog.includes('CSQTT_LALUNE_DEPLOY_OK')" not in js:
+    raise SystemExit("deployment completion is incorrectly tied to in-memory click state")
+
 # Verify each independently fetched backend response updates its own UI state;
 # a single failing endpoint must not discard successful responses from others.
 for contract in (
