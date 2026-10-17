@@ -54,7 +54,7 @@ if parser.tabs != expected_tabs:
 # Keep the browser port on the native CSQTT brand palette and floating-tab
 # visual language; do not drift back to the earlier generic blue-gray mock.
 for token in ("--bg:#fdfdfe", "--surface2:#f2f2f4", "--blue:#1a73e8",
-              "--blue2:#1565d8", "border-radius:24px", "backdrop-filter:blur(18px)"):
+              "--blue2:#1565d8", "border-radius:34px", "border-radius:40px", "backdrop-filter:blur(18px)", "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\">"):
     if token not in html:
         raise SystemExit("native CSQTT visual token missing: " + token)
 
