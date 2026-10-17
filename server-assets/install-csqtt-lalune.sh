@@ -42,6 +42,9 @@ for port in "$UDP_PORT" "$WEB_PORT"; do
   [[ "$port" =~ ^[0-9]{1,5}$ ]] && (( port >= 1 && port <= 65535 )) || die "invalid port: $port"
 done
 [[ "$UDP_PORT" != "$WEB_PORT" ]] || die "UDP and TCP ports must be different"
+SSH_PORT="${CSQTT_SSH_PORT:-22}"
+[[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] && (( SSH_PORT >= 1 && SSH_PORT <= 65535 )) || die "invalid SSH port: $SSH_PORT"
+[[ "$SSH_PORT" != "$UDP_PORT" && "$SSH_PORT" != "$WEB_PORT" ]] || die "SSH, CSQTT UDP, and web TCP ports must all be different"
 
 # Reject symlinks before checking ownership markers or writing anything. A marker
 # reachable through a symlink does not make the external target LaLune-owned.
@@ -78,12 +81,14 @@ if [[ -e "$UNIT_FILE" ]] && systemctl is-active --quiet "$UNIT"; then
 fi
 
 # Do not kill listeners. Preflight both ports before making any filesystem changes.
-if ss -H -lun "sport = :$UDP_PORT" | grep -q .; then
-  die "UDP port $UDP_PORT is occupied; no listener will be killed"
-fi
-if ss -H -ltn "sport = :$WEB_PORT" | grep -q .; then
-  die "TCP port $WEB_PORT is occupied; no listener will be killed"
-fi
+for port in "$UDP_PORT" "$WEB_PORT"; do
+  if ss -H -lun "sport = :$port" | grep -q .; then
+    die "UDP port $port is occupied; no listener will be killed"
+  fi
+  if ss -H -ltn "sport = :$port" | grep -q .; then
+    die "TCP port $port is occupied; no listener will be killed"
+  fi
+done
 if ip link show dev csqtt-lalune0 >/dev/null 2>&1; then
   die "csqtt-lalune0 already exists; refusing to adopt or reconfigure an existing interface"
 fi
