@@ -75,6 +75,13 @@ for path in api_paths:
 if missing_routes:
     raise SystemExit("panel calls API paths missing from backend: " + ", ".join(missing_routes))
 
+# Backend accepts both explicit manual mode and the core's selected-mode
+# fallback; the panel must surface either only after connection was requested.
+if "!['manual','selected'].includes(String(c.mode||'').toLowerCase())" not in js:
+    raise SystemExit("panel does not expose selected-mode manual CAPTCHA fallback")
+if "captchaArmed&&captchaIsActionable(c)" not in js:
+    raise SystemExit("CAPTCHA overlay is not gated on an active connect session")
+
 # Keep the user-facing route save explicit: it stores rules but must not claim
 # that active routing changed immediately without a reconnect.
 if "Переподключите CSQTT" not in html:
