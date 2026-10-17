@@ -12,8 +12,8 @@ readonly STATE="/var/lib/csqtt-lalune"
 readonly LOG="/var/log/csqtt-lalune"
 readonly UNIT_FILE="/etc/systemd/system/csqtt-lalune.service"
 readonly MARKER="CSQTT-LALUNE-MANAGED-V1"
-UDP_PORT="${CSQTT_LALUNE_UDP_PORT:-47000}"
-WEB_PORT="${CSQTT_LALUNE_WEB_PORT:-47002}"
+UDP_PORT="${CSQTT_LALUNE_UDP_PORT :-47100}"
+WEB_PORT="${CSQTT_LALUNE_WEB_PORT :-47102}"
 SECRETS_FILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
