@@ -107,10 +107,10 @@ if "failed.push(names[i])" not in js or "'API частично · '+failed.lengt
     raise SystemExit("background API failures are not reflected in panel status")
 
 # renderStatus must not overwrite refreshAll() partial-failure diagnostics.
-render_status = re.search(r"function renderStatus\\(\\)\\s*\\{([\\s\\S]*?)\\n\\}", js)
-if not render_status:
+if "function renderStatus(){" not in js or "function fillSettings(){" not in js:
     raise SystemExit("renderStatus function could not be isolated for API-status regression check")
-if "apiStatus" in render_status.group(1):
+render_status = js.split("function renderStatus(){", 1)[1].split("function fillSettings(){", 1)[0]
+if "apiStatus" in render_status:
     raise SystemExit("renderStatus overwrites API health indicator set by refreshAll")
 
 # Verify each independently fetched backend response updates its own UI state;
