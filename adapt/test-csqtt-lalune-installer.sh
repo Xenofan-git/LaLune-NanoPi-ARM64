@@ -46,8 +46,8 @@ SH
 cat > "$ROOT/bin/ss" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
-  *"-lun"*"47000"*) [[ "${SS_MODE:-clear}" == occupied-udp ]] && echo 'UNCONN 0 0 0.0.0.0:47000 0.0.0.0:*';;
-  *"-ltn"*"47002"*) [[ "${SS_MODE:-clear}" == occupied-tcp ]] && echo 'LISTEN 0 128 0.0.0.0:47002 0.0.0.0:*';;
+  *"-lun"*"47100"*) [[ "${SS_MODE:-clear}" == occupied-udp ]] && echo 'UNCONN 0 0 0.0.0.0:47100 0.0.0.0:*';;
+  *"-ltn"*"47102"*) [[ "${SS_MODE:-clear}" == occupied-tcp ]] && echo 'LISTEN 0 128 0.0.0.0:47102 0.0.0.0:*';;
 esac
 exit 0
 SH
@@ -76,7 +76,7 @@ mkdir -p "$ROOT/host/usr/local/bin" "$ROOT/host/usr/local/lib" "$ROOT/host/etc/s
 if SS_MODE=occupied-udp "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
   echo "FAIL: installer accepted occupied UDP port" >&2; exit 1
 fi
-grep -q 'UDP port 47000 is occupied' "$ROOT/out"
+grep -q 'UDP port 47100 is occupied' "$ROOT/out"
 [[ ! -e "$ROOT/host/etc/csqtt-lalune" && ! -e "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
 ! grep -Eq 'stop|kill' "$TEST_SYSTEMCTL_LOG" 2>/dev/null
 
@@ -84,7 +84,7 @@ grep -q 'UDP port 47000 is occupied' "$ROOT/out"
 if SS_MODE=occupied-tcp "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
   echo "FAIL: installer accepted occupied TCP port" >&2; exit 1
 fi
-grep -q 'TCP port 47002 is occupied' "$ROOT/out"
+grep -q 'TCP port 47102 is occupied' "$ROOT/out"
 [[ ! -e "$ROOT/host/etc/csqtt-lalune" && ! -e "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
 
 # Case 1c: an existing TUN interface is never adopted or reconfigured.
@@ -189,8 +189,8 @@ grep -Fq 'CSQTT_WEB_USER=webUser123' "$ROOT/host/etc/csqtt-lalune/server.env"
 grep -Fq 'CSQTT_WEB_PASS=webPass123' "$ROOT/host/etc/csqtt-lalune/server.env"
 grep -Fq 'CSQTT_SERVICE_MANAGER=systemd' "$ROOT/host/etc/csqtt-lalune/server.env"
 grep -Fq 'CSQTT_SYSTEMD_UNIT=csqtt-lalune.service' "$ROOT/host/etc/csqtt-lalune/server.env"
-grep -Fq 'CSQTT_LALUNE_UDP_PORT=47000' "$ROOT/host/etc/csqtt-lalune/server.env"
-grep -Fq 'CSQTT_LALUNE_WEB_PORT=47002' "$ROOT/host/etc/csqtt-lalune/server.env"
+grep -Fq 'CSQTT_LALUNE_UDP_PORT=47100' "$ROOT/host/etc/csqtt-lalune/server.env"
+grep -Fq 'CSQTT_LALUNE_WEB_PORT=47102' "$ROOT/host/etc/csqtt-lalune/server.env"
 grep -Fq 'CSQTT_DEVICE_ID=01234567-89ab-cdef-0123-456789abcdef' "$ROOT/host/etc/csqtt-lalune/server.env"
 [[ "$(stat -c %a "$ROOT/host/etc/csqtt-lalune/server.env")" == 600 ]]
 grep -Fq 'CSQTT-LALUNE-MANAGED-V1' "$ROOT/host/etc/csqtt-lalune/.managed-by-lalune"
@@ -245,7 +245,7 @@ grep -q 'CSQTT_LALUNE_UNINSTALL_OK' "$ROOT/out"
 [[ -f "$ROOT/host/var/log/csqtt-lalune/.managed-by-lalune" ]]
 
 # All service-control calls must be limited to the namespaced unit; never touch production CSQTT.
-if grep -E '(^|[[:space:]])(csqtt|csqtt-47000)(\.service|[[:space:]]|$)' "$TEST_SYSTEMCTL_LOG"; then
+if grep -E '(^|[[:space:]])(csqtt|csqtt-47100)(\.service|[[:space:]]|$)' "$TEST_SYSTEMCTL_LOG"; then
   echo "FAIL: test harness observed a command targeting a production CSQTT unit" >&2; exit 1
 fi
 grep -Fq 'csqtt-lalune.service' "$TEST_SYSTEMCTL_LOG"
