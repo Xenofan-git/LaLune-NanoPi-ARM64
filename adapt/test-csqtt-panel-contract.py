@@ -63,7 +63,7 @@ for token in ("--bg:#fdfdfe", "--surface2:#f2f2f4", "--blue:#1a73e8",
 
 # The original Android screen uses a 720dp content cap and a floating bottom
 # navigation bar; desktop must not switch to a different top-tab/dashboard layout.
-if re.search(r'@media\\s*\\(min-width:\\s*980px\\)', html):
+if re.search(r'@media\s*\(min-width:\s*980px\)', html):
     raise SystemExit("panel has a desktop-only layout that diverges from native CSQTT")
 
 
