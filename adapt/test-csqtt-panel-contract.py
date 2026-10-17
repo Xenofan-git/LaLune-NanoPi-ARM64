@@ -46,6 +46,19 @@ if len(parser.tabs) != 6 or set(parser.tabs) != {
 if len(parser.pages) != 6 or set(parser.pages) != set(parser.tabs):
     raise SystemExit(f"tab/page mismatch: tabs={parser.tabs}, pages={parser.pages}")
 
+# Match the native CSQTT navigation order, not merely the same set of pages.
+expected_tabs = ["connect", "settings", "deploy", "route", "logs", "info"]
+if parser.tabs != expected_tabs:
+    raise SystemExit(f"CSQTT tab order differs from original: {parser.tabs}")
+
+# Keep the browser port on the native CSQTT brand palette and floating-tab
+# visual language; do not drift back to the earlier generic blue-gray mock.
+for token in ("--bg:#fdfdfe", "--surface2:#f2f2f4", "--blue:#1a73e8",
+              "--blue2:#1565d8", "border-radius:24px", "backdrop-filter:blur(18px)"):
+    if token not in html:
+        raise SystemExit("native CSQTT visual token missing: " + token)
+
+
 duplicate_ids = sorted({x for x in parser.button_ids if parser.button_ids.count(x) > 1})
 if duplicate_ids:
     raise SystemExit("duplicate button IDs: " + ", ".join(duplicate_ids))
@@ -84,6 +97,25 @@ if "captchaArmed&&captchaIsActionable(c)" not in js:
 
 if "failed.push(names[i])" not in js or "'API частично · '+failed.length" not in js:
     raise SystemExit("background API failures are not reflected in panel status")
+
+# Verify each independently fetched backend response updates its own UI state;
+# a single failing endpoint must not discard successful responses from others.
+for contract in (
+    "if('configs'in data)state.configs",
+    "if('selected'in data)state.selected",
+    "if('settings'in data){state.settings",
+    "if('status'in data){state.vpnStatus",
+    "if('vk'in data)state.vk",
+    "if('captcha'in data)state.captcha",
+    "if('deployStatus'in data)state.deploying",
+    "if('deployLog'in data)state.deployLog",
+    "if('logs'in data)state.logs",
+    "if('version'in data)state.version",
+    "if(name==='info')refreshInfo()",
+):
+    if contract not in js:
+        raise SystemExit("backend response is not applied to panel state: " + contract)
+
 
 # Keep the user-facing route save explicit: it stores rules but must not claim
 # that active routing changed immediately without a reconnect.
