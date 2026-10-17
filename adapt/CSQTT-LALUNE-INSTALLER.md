@@ -8,7 +8,7 @@ The Deploy button uses the original CSQTT v2.1.9 deployment flow, derived from t
 - Unit: `csqtt-lalune.service`
 - Config/database: `/etc/csqtt-lalune`
 - Helper/runtime/log paths: namespaced under `/usr/local/lib/csqtt-lalune`, `/run/csqtt-lalune`, and `/var/log/csqtt-lalune-install.log`
-- UDP peer port: `47100`; HTTPS web port: `47102`
+- UDP peer port: `47000`; HTTPS web port: `47002`
 - TUN/subnet and policy identifiers: `csqtt-lalune0`, `10.67.68.0/24`, policy tables `47001` and `47066`, marks `0x6741/0x6742`.
 
 ## Isolation changes to the upstream flow
@@ -18,7 +18,7 @@ The adaptation changes only the service-owned resource names, the LaLune ports/s
 - Namespaces systemd units, executable/library/config/runtime/log/certificate-helper paths, Docker names, sysctl filenames, firewall comments, and legacy helper process names.
 - Injects `CSQTT_SYSTEMD_UNIT=csqtt-lalune.service` so panel-triggered restart actions cannot target `csqtt.service`.
 - Uses a unique SSH staging directory and protected one-shot credentials; the DeployManager selects the server binary for the remote architecture.
-- Checks UDP/47100 and TCP/47102 before cutover. If a listener is unrelated or its owner cannot be identified, deployment fails without terminating it.
+- Checks UDP/47000 and TCP/47002 before cutover. If a listener is unrelated or its owner cannot be identified, deployment fails without terminating it.
 - Leaves generic legacy proxy interfaces alone. Firewall cleanup matches only LaLune-specific markers.
 - Keeps the upstream server's persistent database/configuration on uninstall, while removing only the namespaced runtime artifacts.
 
