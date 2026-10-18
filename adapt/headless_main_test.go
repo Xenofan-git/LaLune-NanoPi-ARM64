@@ -56,12 +56,13 @@ func TestPrivateClient(t *testing.T) {
 		want       bool
 	}{
 		{name: "LAN IPv4", remoteAddr: "192.168.4.12:43120", want: true},
-		{name: "loopback", remoteAddr: "127.0.0.1:43120", want: true},
-		{name: "Tailscale peer", remoteAddr: "127.0.0.1:43120", xRealIP: "100.70.73.57", want: true},
-		{name: "Tailscale IPv6", remoteAddr: "127.0.0.1:43120", xRealIP: "fd7a:115c:a1e0::1234", want: true},
+		{name: "loopback proxy", remoteAddr: "127.0.0.1:43120", want: true},
+		{name: "Tailscale IPv4 peer", remoteAddr: "100.70.73.57:43120", want: true},
+		{name: "Tailscale IPv6 peer", remoteAddr: "[fd7a:115c:a1e0::1234]:43120", want: true},
 		{name: "public peer", remoteAddr: "8.8.8.8:43120", want: false},
-		{name: "public proxy client overrides loopback", remoteAddr: "127.0.0.1:43120", xRealIP: "8.8.8.8", want: false},
-		{name: "malformed proxy client", remoteAddr: "127.0.0.1:43120", xRealIP: "not-an-ip", want: false},
+		{name: "spoofed private X-Real-IP from public peer", remoteAddr: "8.8.8.8:43120", xRealIP: "192.168.4.2", want: false},
+		{name: "spoofed Tailscale X-Real-IP from public peer", remoteAddr: "8.8.8.8:43120", xRealIP: "100.70.73.57", want: false},
+		{name: "X-Real-IP ignored for loopback proxy", remoteAddr: "127.0.0.1:43120", xRealIP: "8.8.8.8", want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
