@@ -134,7 +134,7 @@ def main():
                 "profile selection did not reach backend API"
             )
             assert page.locator("#vkHashes").is_disabled() is False
-            assert page.locator("#vkHashes").is_read_only()
+            assert page.locator("#vkHashes").evaluate("el => el.readOnly")
 
             # Direct rules are validated and persisted through the settings API.
             page.locator('button[data-page="route"]').click()
