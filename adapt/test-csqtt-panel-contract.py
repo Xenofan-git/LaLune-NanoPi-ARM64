@@ -125,6 +125,18 @@ if "if(!answer){toast('Введите ответ CAPTCHA или откройте
 if "state.deployLog.toLowerCase().includes('error')" not in js:
     raise SystemExit("deployment error status is case-sensitive")
 
+# The panel deploys the isolated LaLune-namespaced service, not the stock
+# upstream installer; do not assert guessed legacy port numbers in the UI.
+if "Это не штатная установка оригинального CSQTT" not in html:
+    raise SystemExit("deploy tab does not distinguish the isolated fork from stock CSQTT")
+if "Оригинальный CSQTT на 46000/46002" in html:
+    raise SystemExit("deploy tab contains an unverified claim about original CSQTT ports")
+
+# Polling every 1.6 seconds fans out to multiple API endpoints and needlessly
+# loads the ARM64 gateway; poll at a calmer cadence and pause in hidden tabs.
+if "setInterval(()=>{if(!document.hidden)refreshAll()},5000)" not in js:
+    raise SystemExit("panel polling must pause while hidden and use a 5-second interval")
+
 # Deployment completion is derived from the backend log, so a reload keeps the result visible.
 if "const done=!busy&&state.deployLog.includes('CSQTT_LALUNE_DEPLOY_OK')" not in js:
     raise SystemExit("deployment completion is incorrectly tied to in-memory click state")
