@@ -121,6 +121,10 @@ if "apiStatus" in render_status:
 if "if(!answer){toast('Введите ответ CAPTCHA или откройте страницу проверки VK',true);return}" not in js:
     raise SystemExit("CAPTCHA form does not validate an empty answer before calling the backend")
 
+# Deployment failures may be logged with different English capitalization.
+if "state.deployLog.toLowerCase().includes('error')" not in js:
+    raise SystemExit("deployment error status is case-sensitive")
+
 # Deployment completion is derived from the backend log, so a reload keeps the result visible.
 if "const done=!busy&&state.deployLog.includes('CSQTT_LALUNE_DEPLOY_OK')" not in js:
     raise SystemExit("deployment completion is incorrectly tied to in-memory click state")
