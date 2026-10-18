@@ -106,6 +106,12 @@ jobs:
           PY
       - name: Test CSQTT panel buttons and API contract
         run: python3 adapt/test-csqtt-panel-contract.py
+      - name: Run real Chromium panel smoke test
+        run: |
+          set -euxo pipefail
+          python3 -m pip install --user playwright
+          python3 -m playwright install --with-deps chromium
+          python3 adapt/test-csqtt-panel-browser.py
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
