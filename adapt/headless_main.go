@@ -70,15 +70,13 @@ func method(w http.ResponseWriter, r *http.Request, want string) bool {
 }
 
 // privateClient permits sensitive operations only from a private LAN or the
-// Tailscale address range. Nginx overwrites X-Real-IP and the backend binds to
-// loopback, so a remote caller cannot choose this header directly.
+// Tailscale address range. Do not trust X-Real-IP here: the panel listener is
+// directly reachable on the LAN, so a caller could spoof that header. When
+// accessed through a local reverse proxy, RemoteAddr is loopback and is allowed.
 func privateClient(r *http.Request) bool {
-    raw := strings.TrimSpace(r.Header.Get("X-Real-IP"))
-    if raw == "" {
-        raw = r.RemoteAddr
-        if host, _, err := net.SplitHostPort(raw); err == nil {
-            raw = host
-        }
+    raw := r.RemoteAddr
+    if host, _, err := net.SplitHostPort(raw); err == nil {
+        raw = host
     }
     ip := net.ParseIP(strings.Trim(raw, "[]"))
     if ip == nil {
