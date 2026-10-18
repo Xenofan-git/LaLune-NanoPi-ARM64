@@ -53,7 +53,7 @@ if parser.tabs != expected_tabs:
 
 # Keep the browser port on the native CSQTT brand palette and floating-tab
 # visual language; do not drift back to the earlier generic blue-gray mock.
-for token in ("--bg:#fdfdfe", "--surface2:#f2f2f4", "--blue:#1a73e8",
+for token in ('--bg:#fdfdfe', '--surface2:#f2f2f4', '--blue:#1a73e8', '--bg:#09090a', '--surface:#121214', '--blue:#1565d8', 'id="themeMode"', "localStorage.setItem(THEME_KEY,mode)",
               "--blue2:#1565d8", "border-radius:34px", "border-radius:40px",
               "backdrop-filter:blur(18px)", "max-width:760px", "border-radius:999px",
               "width:min(720px,calc(100% - 24px))",
