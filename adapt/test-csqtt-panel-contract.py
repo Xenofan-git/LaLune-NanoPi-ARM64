@@ -184,7 +184,7 @@ for contract in (
     "if('vk'in data)state.vk",
     "if('captcha'in data)state.captcha",
     "if('deployStatus'in data){state.deploying",
-    "if('deployLog'in data)state.deployLog",
+    "if('deployLog'in data){state.deployLog",
     "if('logs'in data)state.logs",
     "if('version'in data)state.version",
     "if(name==='settings')refreshInfo()",
