@@ -108,6 +108,10 @@ def main():
                 assert page.locator(f"#page-{name}").evaluate(
                     "(el) => el.classList.contains('active')"
                 ), f"tab did not activate: {name}"
+                assert page.locator(f'button[data-page="{name}"]').get_attribute("aria-current") == "page", (
+                    f"active tab missing aria-current state: {name}"
+                )
+                assert page.locator(f'button[data-page="{name}"]').get_attribute("aria-pressed") is None
 
             for width in WIDTHS:
                 page.set_viewport_size({"width": width, "height": 850})
