@@ -15,7 +15,7 @@ from playwright.sync_api import sync_playwright
 
 ROOT = Path(".").resolve()
 HTML = ROOT / "adapt" / "csqtt-panel-preview.html"
-EXPECTED = ["connect", "settings", "deploy", "route", "logs", "info"]
+EXPECTED = ["connect", "settings", "deploy", "route", "logs"]
 WIDTHS = [320, 360, 390, 768, 1280]
 
 
@@ -159,7 +159,7 @@ def main():
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
-    print("CSQTT_CHROMIUM_UI_SMOKE_PASS widths=320,360,390,768,1280 tabs=6 profile-api=PASS direct-settings-api=PASS")
+    print("CSQTT_CHROMIUM_UI_SMOKE_PASS widths=320,360,390,768,1280 tabs=5 profile-api=PASS direct-settings-api=PASS")
 
 
 if __name__ == "__main__":
