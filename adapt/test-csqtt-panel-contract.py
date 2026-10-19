@@ -183,7 +183,7 @@ for contract in (
     "if('status'in data){state.vpnStatus",
     "if('vk'in data)state.vk",
     "if('captcha'in data)state.captcha",
-    "if('deployStatus'in data)state.deploying",
+    "if('deployStatus'in data){state.deploying",
     "if('deployLog'in data)state.deployLog",
     "if('logs'in data)state.logs",
     "if('version'in data)state.version",
