@@ -15,7 +15,7 @@ from playwright.sync_api import sync_playwright
 
 ROOT = Path(".").resolve()
 HTML = ROOT / "adapt" / "csqtt-panel-preview.html"
-EXPECTED = ["connect", "settings", "deploy", "route", "logs"]
+EXPECTED = ["connect", "settings", "deploy", "logs", "route"]
 WIDTHS = [320, 360, 390, 768, 1280]
 
 
