@@ -39,15 +39,15 @@ js = "\n".join(scripts)
 
 parser = PanelParser()
 parser.feed(html)
-if len(parser.tabs) != 6 or set(parser.tabs) != {
-    "connect", "settings", "deploy", "route", "logs", "info"
+if len(parser.tabs) != 5 or set(parser.tabs) != {
+    "connect", "settings", "deploy", "route", "logs"
 }:
     raise SystemExit(f"unexpected CSQTT tab contract: {parser.tabs}")
-if len(parser.pages) != 6 or set(parser.pages) != set(parser.tabs):
+if len(parser.pages) != 5 or set(parser.pages) != set(parser.tabs):
     raise SystemExit(f"tab/page mismatch: tabs={parser.tabs}, pages={parser.pages}")
 
 # Match the native CSQTT navigation order, not merely the same set of pages.
-expected_tabs = ["connect", "settings", "deploy", "route", "logs", "info"]
+expected_tabs = ["connect", "settings", "deploy", "route", "logs"]
 if parser.tabs != expected_tabs:
     raise SystemExit(f"CSQTT tab order differs from original: {parser.tabs}")
 
