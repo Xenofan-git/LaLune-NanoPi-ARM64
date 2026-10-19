@@ -37,6 +37,7 @@ def main():
         "directDomains": "", "directIPs": "", "deviceId": "fixture-device",
     }
     calls = []
+    fail_paths = set()
 
     server = ThreadingHTTPServer(
         ("127.0.0.1", 0), partial(QuietHandler, directory=str(ROOT))
@@ -53,6 +54,9 @@ def main():
         calls.append((method, path, request.post_data))
         body = {}
         status = 200
+        if path in fail_paths:
+            route.fulfill(status=503, content_type="application/json", body=json.dumps({"error": "fixture unavailable"}))
+            return
         if path == "/configs" and method == "GET":
             body = profiles
         elif path == "/configs/selected" and method == "GET":
@@ -157,6 +161,16 @@ def main():
 
             assert page.locator("#page-route").is_visible()
             assert not page.locator("#deploySecretsOverlay").is_visible()
+
+            # A failed status endpoint must not be misreported as a real disconnect,
+            # and deployment actions must remain blocked when operation state is unknown.
+            fail_paths.update({"/vpn/status", "/deploy/status", "/deploy/log"})
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_function("document.querySelector('#apiStatus').textContent.includes('API')")
+            assert page.locator("#connState").inner_text() == "Статус недоступен", "VPN API failure was presented as disconnected"
+            assert page.locator("#power").is_disabled(), "connect toggle stayed enabled while VPN state was unknown"
+            assert "Не удалось получить состояние деплоя" in page.locator("#deployState").inner_text(), "unknown deploy state was presented as a completed/idle operation"
+            assert page.locator("#startDeploy").is_disabled(), "deploy remained enabled while deploy state was unknown"
             assert not page_errors, f"uncaught browser errors: {page_errors}"
             browser.close()
     finally:
