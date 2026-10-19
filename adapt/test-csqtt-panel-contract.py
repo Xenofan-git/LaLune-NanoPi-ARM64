@@ -76,6 +76,20 @@ for token in (
 if "background:linear-gradient(145deg,#ddfff0,#fff)" in html:
     raise SystemExit("connected power button uses a light-only hardcoded gradient")
 
+# Accessibility contract: navigation state is exposed to assistive technology,
+# focus is visible, live updates are announced, and mobile safe areas are respected.
+for token in (
+    'role="status" aria-live="polite"',
+    'aria-live="polite" aria-atomic="true"',
+    ':focus-visible{outline:3px solid var(--blue)',
+    'env(safe-area-inset-bottom,0px)',
+    '@media(prefers-reduced-motion:reduce)',
+    "x.setAttribute('aria-current','page')",
+    "$('power').setAttribute('aria-pressed',String(connected))",
+):
+    if token not in html:
+        raise SystemExit("accessibility/mobile token missing: " + token)
+
 # The original Android screen uses a 720dp content cap and a floating bottom
 # navigation bar; desktop must not switch to a different top-tab/dashboard layout.
 if re.search(r'@media\s*\(min-width:\s*980px\)', html):
