@@ -154,7 +154,7 @@ for contract in (
     "if('deployLog'in data)state.deployLog",
     "if('logs'in data)state.logs",
     "if('version'in data)state.version",
-    "if(name==='info')refreshInfo()",
+    "if(name==='settings')refreshInfo()",
 ):
     if contract not in js:
         raise SystemExit("backend response is not applied to panel state: " + contract)
