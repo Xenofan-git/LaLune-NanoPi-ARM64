@@ -61,6 +61,21 @@ for token in ('--bg:#fdfdfe', '--surface2:#f2f2f4', '--blue:#1a73e8', '--bg:#090
     if token not in html:
         raise SystemExit("native CSQTT visual token missing: " + token)
 
+# Keep key surfaces theme-driven in both light and dark modes; fixed dark
+# console/toast surfaces and light-only connected-state gradients are regressions.
+for token in (
+    "--console-bg:#0c1119", "--console-bg:#080b10",
+    "--power-on-shadow:0 12px 28px", "--nav-shadow:0 6px 22px",
+    "--card-shadow:0 5px 20px", "--overlay-shadow:0 20px 70px",
+    "--toast-bg:#111824", "--toast-bg:#202024",
+    ".power.on{background:var(--power-on-bg);color:var(--green);border-color:var(--power-on-border)}",
+    ".console{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--console-bg);color:var(--console-text);",
+):
+    if token not in html:
+        raise SystemExit("theme-aware surface token missing: " + token)
+if "background:linear-gradient(145deg,#ddfff0,#fff)" in html:
+    raise SystemExit("connected power button uses a light-only hardcoded gradient")
+
 # The original Android screen uses a 720dp content cap and a floating bottom
 # navigation bar; desktop must not switch to a different top-tab/dashboard layout.
 if re.search(r'@media\s*\(min-width:\s*980px\)', html):
