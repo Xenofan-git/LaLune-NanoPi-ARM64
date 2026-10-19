@@ -47,7 +47,7 @@ if len(parser.pages) != 5 or set(parser.pages) != set(parser.tabs):
     raise SystemExit(f"tab/page mismatch: tabs={parser.tabs}, pages={parser.pages}")
 
 # Match the native CSQTT navigation order, not merely the same set of pages.
-expected_tabs = ["connect", "settings", "deploy", "route", "logs"]
+expected_tabs = ["connect", "settings", "deploy", "logs", "route"]
 if parser.tabs != expected_tabs:
     raise SystemExit(f"CSQTT tab order differs from original: {parser.tabs}")
 
