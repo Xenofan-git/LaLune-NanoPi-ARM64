@@ -167,8 +167,12 @@ if "setInterval(()=>{if(!document.hidden)refreshAll()},5000)" not in js:
     raise SystemExit("panel polling must pause while hidden and use a 5-second interval")
 
 # Deployment completion is derived from the backend log, so a reload keeps the result visible.
-if "const done=!busy&&state.deployLog.includes('CSQTT_LALUNE_DEPLOY_OK')" not in js:
-    raise SystemExit("deployment completion is incorrectly tied to in-memory click state")
+if "const done=state.deployLogAvailable&&!busy&&state.deployLog.includes('CSQTT_LALUNE_DEPLOY_OK')" not in js:
+    raise SystemExit("deployment completion must come from an available backend log and active status")
+if "state.statusAvailable=false" not in js or "Статус недоступен" not in js:
+    raise SystemExit("VPN status API failure can be misreported as disconnected")
+if "state.deployStatusAvailable=false" not in js or "Не удалось получить состояние деплоя" not in js:
+    raise SystemExit("deployment status API failure is not represented explicitly")
 
 # Verify each independently fetched backend response updates its own UI state;
 # a single failing endpoint must not discard successful responses from others.
