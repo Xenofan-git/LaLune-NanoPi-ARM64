@@ -234,6 +234,7 @@ jobs:
           mv upstream-lalune/Desktop/Linux/app.go upstream-lalune/Desktop/Linux/app_gui.go.disabled
           cp adapt/headless_main.go upstream-lalune/Desktop/Linux/headless_main.go
           cp adapt/headless_main_test.go upstream-lalune/Desktop/Linux/headless_main_test.go
+          cp adapt/headless_api_contract_test.go upstream-lalune/Desktop/Linux/headless_api_contract_test.go
           cp adapt/vktoken_input_test.go upstream-lalune/Desktop/Libs/vktoken_input_test.go
           cp adapt/linux_tun_vm_test.go upstream-lalune/Desktop/Linux/linux_tun_vm_test.go
           mkdir -p upstream-lalune/Desktop/Linux/frontend
