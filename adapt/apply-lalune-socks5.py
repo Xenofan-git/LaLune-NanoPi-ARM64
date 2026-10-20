@@ -11,19 +11,35 @@ if old not in s:
     raise SystemExit("missing App runner field")
 s = s.replace(old, new, 1)
 
-# Start SOCKS5 only after the LaLune TUN/policy table is ready.
-old = '\tt.app.runSudo("ip rule add pref 22020 from 192.168.5.0/24 lookup 202")\n'
-new = old + '\tt.app.runSudo("ip rule add pref 22015 fwmark 0x4d53/0xffff lookup 202")\n\tif t.app.socks != nil {\n\t\tif err := t.app.socks.Start(); err != nil { t.app.core.AddLog(fmt.Sprintf("[SOCKS5] Ошибка запуска: %v", err)) } else { t.app.core.AddLog("[SOCKS5] LaLune SOCKS5 listening on :12500; interface address is determined per client connection") }\n\t}\n'
-if old not in s:
-    raise SystemExit("missing policy rule marker")
-s = s.replace(old, new, 1)
+# Add mark policy and start SOCKS5 only after all TUN setup has succeeded.
+marker = '\tt.app.core.AddLog("[TUN] TUN настроен успешно (table 202; чужие маршруты и DNS сохранены)")'
+addition = '''\tif err := t.app.runSudo("ip rule add pref 22015 fwmark 0x4d53/0xffff lookup 202"); err != nil {
+\t\trollback()
+\t\treturn fmt.Errorf("add SOCKS5 fwmark rule: %w", err)
+\t}
+\tif t.app.socks != nil {
+\t\tif err := t.app.socks.Start(); err != nil {
+\t\t\t_ = t.app.runSudo("ip rule del pref 22015 fwmark 0x4d53/0xffff lookup 202")
+\t\t\trollback()
+\t\t\treturn fmt.Errorf("start SOCKS5 listener: %w", err)
+\t\t}
+\t\tt.app.core.AddLog("[SOCKS5] Listening on :12500; bind address is dynamic")
+\t}
+'''
+if marker not in s:
+    raise SystemExit("TUN success marker missing")
+s = s.replace(marker, addition + marker, 1)
 
-# Stop SOCKS5 and remove its fwmark rule during cleanup.
-old = '\tt.app.runSudo("ip rule del pref 22020 2>/dev/null || true")\n'
-new = '\tif t.app.socks != nil { t.app.socks.Stop() }\n\tt.app.runSudo("ip rule del pref 22015 2>/dev/null || true")\n' + old
-if old not in s:
-    raise SystemExit("missing cleanup rule marker")
-s = s.replace(old, new, 1)
+# Stop the listener and remove its dedicated fwmark rule during TUN cleanup.
+marker = '\tt.cleanupDirectRoutingLocked()\n\tt.app.core.AddLog("[TUN] Удаление TUN...")'
+replacement = '''\tif t.app.socks != nil { t.app.socks.Stop() }
+\tif err := t.app.runSudo("ip rule del pref 22015 fwmark 0x4d53/0xffff lookup 202"); err != nil {
+\t\tt.app.core.AddLog(fmt.Sprintf("[SOCKS5] Не удалось удалить fwmark rule: %v", err))
+\t}
+''' + marker
+if marker not in s:
+    raise SystemExit("cleanup marker missing")
+s = s.replace(marker, replacement, 1)
 
 # Initialize the server in NewApp.
 old = '\tapp := &App{core: core, tun: tun}\n'
