@@ -140,6 +140,14 @@ func (s *Socks5Server) handle(c net.Conn) {
 	if _, err := io.ReadFull(c, h[:]); err != nil || h[0] != 5 { return }
 	methods := make([]byte, int(h[1]))
 	if _, err := io.ReadFull(c, methods); err != nil { return }
+	noAuth := false
+	for _, method := range methods {
+		if method == 0 { noAuth = true; break }
+	}
+	if !noAuth {
+		_, _ = c.Write([]byte{5, 0xff})
+		return
+	}
 	if _, err := c.Write([]byte{5, 0}); err != nil { return }
 
 	var req [3]byte
