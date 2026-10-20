@@ -103,11 +103,33 @@ func readSocksAddr(r io.Reader) (string, error) {
 	return net.JoinHostPort(host, strconv.Itoa(int(binary.BigEndian.Uint16(p[:])))), nil
 }
 
-func writeSocksReply(c net.Conn, code byte, port int) error {
-	b := []byte{5, code, 0, 1, 192, 168, 4, 26, 0, 0}
-	binary.BigEndian.PutUint16(b[8:], uint16(port))
-	_, err := c.Write(b)
-	return err
+func writeSocksReply(c net.Conn, code byte, bind net.Addr) error {
+	ip := net.IPv4zero
+	port := 0
+	switch a := bind.(type) {
+	case *net.TCPAddr:
+		ip, port = a.IP, a.Port
+	case *net.UDPAddr:
+		ip, port = a.IP, a.Port
+	}
+	if ip == nil || ip.IsUnspecified() {
+		if local, ok := c.LocalAddr().(*net.TCPAddr); ok { ip = local.IP }
+	}
+	if v4 := ip.To4(); v4 != nil {
+		b := []byte{5, code, 0, 1, v4[0], v4[1], v4[2], v4[3], 0, 0}
+		binary.BigEndian.PutUint16(b[8:], uint16(port))
+		_, err := c.Write(b)
+		return err
+	}
+	if v6 := ip.To16(); v6 != nil {
+		b := []byte{5, code, 0, 4}
+		b = append(b, v6...)
+		b = append(b, 0, 0)
+		binary.BigEndian.PutUint16(b[len(b)-2:], uint16(port))
+		_, err := c.Write(b)
+		return err
+	}
+	return errors.New("cannot determine SOCKS5 reply address")
 }
 
 func (s *Socks5Server) handle(c net.Conn) {
@@ -129,20 +151,19 @@ func (s *Socks5Server) handle(c net.Conn) {
 	case 3:
 		s.handleUDPAssociate(c)
 	default:
-		_ = writeSocksReply(c, 7, 0)
+		_ = writeSocksReply(c, 7, &net.TCPAddr{})
 	}
 }
 
 func (s *Socks5Server) handleConnect(c net.Conn) {
 	addr, err := readSocksAddr(c)
-	if err != nil { _ = writeSocksReply(c, 8, 0); return }
+	if err != nil { _ = writeSocksReply(c, 8, &net.TCPAddr{}); return }
 	out, err := s.dialTCP(addr)
-	if err != nil { _ = writeSocksReply(c, 1, 0); return }
+	if err != nil { _ = writeSocksReply(c, 1, &net.TCPAddr{}); return }
 	defer out.Close()
 
 	c.SetDeadline(time.Time{})
-	localPort := out.LocalAddr().(*net.TCPAddr).Port
-	if err := writeSocksReply(c, 0, localPort); err != nil { return }
+	if err := writeSocksReply(c, 0, out.LocalAddr()); err != nil { return }
 
 	done := make(chan struct{}, 2)
 	go func() { _, _ = io.Copy(out, c); done <- struct{}{} }()
@@ -151,11 +172,11 @@ func (s *Socks5Server) handleConnect(c net.Conn) {
 }
 
 func (s *Socks5Server) handleUDPAssociate(c net.Conn) {
-	u, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("192.168.4.26"), Port: 0})
-	if err != nil { _ = writeSocksReply(c, 1, 0); return }
+	u, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	if err != nil { _ = writeSocksReply(c, 1, &net.TCPAddr{}); return }
 	defer u.Close()
 
-	if err := writeSocksReply(c, 0, u.LocalAddr().(*net.UDPAddr).Port); err != nil { return }
+	if err := writeSocksReply(c, 0, u.LocalAddr()); err != nil { return }
 	c.SetDeadline(time.Time{})
 
 	buf := make([]byte, 65535)
