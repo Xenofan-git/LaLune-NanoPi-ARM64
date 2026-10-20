@@ -12,6 +12,7 @@ on:
       - test/csqtt-client-reconnect-vm
       - test/csqtt-process-recovery-e2e
       - feature/csqtt-original-app-panel
+      - fix/socks5-dynamic-address
   workflow_dispatch:
 
 permissions:
@@ -29,6 +30,11 @@ jobs:
         run: |
           set -euxo pipefail
           test -f adapt/apply-pinned-original-linux-arm64-policy.py
+          test -s adapt/lalune_socks5_linux.go
+          test -s adapt/lalune_socks5_linux_test.go
+          ! grep -Fq '192.168.4.26' adapt/lalune_socks5_linux.go
+          ! grep -Fq '192.168.4.26' adapt/apply-lalune-socks5.py
+          grep -Fq 'NewSocks5Server(\":12500\")' adapt/apply-lalune-socks5.py
           # Client TUN must never flush a shared route table or mutate global resolver state.
           ! grep -Fq 'ip route flush table 202' adapt/apply-pinned-original-linux-arm64-policy.py
           ! grep -Fq '>> /etc/resolv.conf' adapt/apply-pinned-original-linux-arm64-policy.py
@@ -146,6 +152,7 @@ jobs:
           python3 adapt/apply-pinned-original-linux-arm64-policy.py
           python3 adapt/apply-lalune-socks5.py
           cp adapt/lalune_socks5_linux.go upstream-lalune/Desktop/Linux/lalune_socks5_linux.go
+          cp adapt/lalune_socks5_linux_test.go upstream-lalune/Desktop/Linux/lalune_socks5_linux_test.go
           python3 adapt/patch-csqtt-deploy-ui.py
       - name: Build and package CSQTT panel for NanoPi
         working-directory: upstream-lalune/Frontend/Core
