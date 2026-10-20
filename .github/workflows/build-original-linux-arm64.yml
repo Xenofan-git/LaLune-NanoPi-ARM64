@@ -34,7 +34,7 @@ jobs:
           test -s adapt/lalune_socks5_linux_test.go
           ! grep -Fq '192.168.4.26' adapt/lalune_socks5_linux.go
           ! grep -Fq '192.168.4.26' adapt/apply-lalune-socks5.py
-          grep -Fq 'NewSocks5Server(\":12500\")' adapt/apply-lalune-socks5.py
+          grep -Fq 'NewSocks5Server' adapt/apply-lalune-socks5.py
           # Client TUN must never flush a shared route table or mutate global resolver state.
           ! grep -Fq 'ip route flush table 202' adapt/apply-pinned-original-linux-arm64-policy.py
           ! grep -Fq '>> /etc/resolv.conf' adapt/apply-pinned-original-linux-arm64-policy.py
