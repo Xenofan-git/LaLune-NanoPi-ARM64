@@ -9,9 +9,7 @@ import (
 
 func TestSaveVKTokenInputAcceptsRawTokenAndOAuthRedirect(t *testing.T) {
 	const raw = "vk1.a.fixture-token-value-that-is-long-enough"
-	tests := []struct {
-		name, input string
-	}{
+	tests := []struct { name, input string }{
 		{name: "raw token", input: raw},
 		{name: "oauth fragment", input: "https://oauth.vk.com/blank.html#access_token=" + raw + "&expires_in=86400&user_id=1"},
 		{name: "oauth query", input: "https://oauth.vk.ru/blank.html?access_token=" + raw + "&expires_in=86400"},
@@ -21,36 +19,22 @@ func TestSaveVKTokenInputAcceptsRawTokenAndOAuthRedirect(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			core := &AppCore{appDir: t.TempDir()}
-			if err := core.SaveVKTokenInput(tt.input); err != nil {
-				t.Fatalf("SaveVKTokenInput rejected valid fixture: %v", err)
-			}
+			if err := core.SaveVKTokenInput(tt.input); err != nil { t.Fatalf("SaveVKTokenInput rejected valid fixture: %v", err) }
 			data, err := os.ReadFile(core.vkTokenFile())
-			if err != nil {
-				t.Fatalf("token file was not written: %v", err)
-			}
+			if err != nil { t.Fatalf("token file was not written: %v", err) }
 			var got VKTokenJSON
-			if err := json.Unmarshal(data, &got); err != nil {
-				t.Fatalf("invalid token JSON: %v", err)
-			}
-			if got.Token != raw {
-				t.Fatalf("saved token = %q, want fixture token", got.Token)
-			}
+			if err := json.Unmarshal(data, &got); err != nil { t.Fatalf("invalid token JSON: %v", err) }
+			if got.Token != raw { t.Fatalf("saved token = %q, want fixture token", got.Token) }
 			info, err := os.Stat(core.vkTokenFile())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if info.Mode().Perm() != 0600 {
-				t.Fatalf("token file permissions = %04o, want 0600", info.Mode().Perm())
-			}
+			if err != nil { t.Fatal(err) }
+			if info.Mode().Perm() != 0600 { t.Fatalf("token file permissions = %04o, want 0600", info.Mode().Perm()) }
 		})
 	}
 }
 
 func TestSaveVKTokenInputRejectsUntrustedRedirectsAndSilentToken(t *testing.T) {
 	const raw = "vk1.a.fixture-token-value-that-is-long-enough"
-	tests := []struct {
-		name, input string
-	}{
+	tests := []struct { name, input string }{
 		{name: "untrusted host", input: "https://evil.example/blank.html#access_token=" + raw},
 		{name: "wrong redirect path", input: "https://oauth.vk.com/steal.html#access_token=" + raw},
 		{name: "insecure scheme", input: "http://oauth.vk.com/blank.html#access_token=" + raw},
@@ -66,12 +50,8 @@ func TestSaveVKTokenInputRejectsUntrustedRedirectsAndSilentToken(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			core := &AppCore{appDir: t.TempDir()}
-			if err := core.SaveVKTokenInput(tt.input); err == nil {
-				t.Fatal("SaveVKTokenInput unexpectedly accepted invalid input")
-			}
-			if _, err := os.Stat(core.vkTokenFile()); !os.IsNotExist(err) {
-				t.Fatalf("rejected input left a token file behind (stat err=%v)", err)
-			}
+			if err := core.SaveVKTokenInput(tt.input); err == nil { t.Fatal("SaveVKTokenInput unexpectedly accepted invalid input") }
+			if _, err := os.Stat(core.vkTokenFile()); !os.IsNotExist(err) { t.Fatalf("rejected input left a token file behind (stat err=%v)", err) }
 		})
 	}
 }
@@ -80,10 +60,17 @@ func TestSaveVKTokenInputDoesNotExposeTokenInErrors(t *testing.T) {
 	core := &AppCore{appDir: t.TempDir()}
 	const secret = "vk1.a.fixture-token-value-that-is-long-enough"
 	err := core.SaveVKTokenInput("https://evil.example/blank.html#access_token=" + secret)
-	if err == nil {
-		t.Fatal("expected untrusted redirect rejection")
-	}
-	if strings.Contains(err.Error(), secret) {
-		t.Fatal("error message exposed token input")
-	}
+	if err == nil { t.Fatal("expected untrusted redirect rejection") }
+	if strings.Contains(err.Error(), secret) { t.Fatal("error message exposed token input") }
+}
+
+// Regression: verify the exact file written by the import/fallback path is the
+// same appDir/token.json consumed by the original backend and exposed in state.
+// This is deliberately offline and never contacts VK or uses a real credential.
+func TestSavedVKTokenIsVisibleToBackendState(t *testing.T) {
+	core := &AppCore{appDir: t.TempDir()}
+	const fixture = "vk1.a.fixture-token-value-that-is-long-enough"
+	if err := core.SaveVKTokenInput(fixture); err != nil { t.Fatalf("save fixture token: %v", err) }
+	if got := core.ReadTokenFromFile(); got != fixture { t.Fatalf("ReadTokenFromFile() = %q, want fixture token", got) }
+	if !core.HasVKToken() { t.Fatal("HasVKToken() false after successful save") }
 }
