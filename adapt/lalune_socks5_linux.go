@@ -206,6 +206,13 @@ func (s *Socks5Server) handleUDPAssociate(c net.Conn) {
 	if err := writeSocksReply(c, 0, u.LocalAddr()); err != nil { return }
 	c.SetDeadline(time.Time{})
 
+	// RFC 1928 keeps the UDP relay alive only while its TCP control
+	// connection remains open. Closing that connection must unblock ReadFromUDP.
+	go func() {
+		_, _ = io.Copy(io.Discard, c)
+		_ = u.Close()
+	}()
+
 	buf := make([]byte, 65535)
 	var client *net.UDPAddr
 	for {
