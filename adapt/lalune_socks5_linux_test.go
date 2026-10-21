@@ -115,3 +115,23 @@ func TestBuildUDPReplyIPv6(t *testing.T) {
 func TestBuildUDPReplyRejectsInvalidAddress(t *testing.T) {
 	if _, err := buildUDPReply(nil, nil); err == nil { t.Fatal("expected invalid address error") }
 }
+
+func TestResolveUDPAddrMarkedLiteralIPv4(t *testing.T) {
+	got, err := resolveUDPAddrMarked("192.0.2.25:5353")
+	if err != nil { t.Fatal(err) }
+	if !got.IP.Equal(net.IPv4(192, 0, 2, 25)) || got.Port != 5353 {
+		t.Fatalf("resolved address = %v, want 192.0.2.25:5353", got)
+	}
+}
+
+func TestResolveUDPAddrMarkedRejectsInvalidPort(t *testing.T) {
+	if _, err := resolveUDPAddrMarked("192.0.2.25:70000"); err == nil {
+		t.Fatal("expected invalid port error")
+	}
+}
+
+func TestResolveUDPAddrMarkedRejectsMissingPort(t *testing.T) {
+	if _, err := resolveUDPAddrMarked("192.0.2.25"); err == nil {
+		t.Fatal("expected missing port error")
+	}
+}
