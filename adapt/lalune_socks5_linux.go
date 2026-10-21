@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -77,7 +78,7 @@ func (s *Socks5Server) dialUDP() (*net.UDPConn, error) {
 		return nil, errors.New("LaLune TUN is not active")
 	}
 	lc := net.ListenConfig{Control: laluneDialer("udp").Control}
-	pc, err := lc.ListenPacket(nil, "udp", "0.0.0.0:0")
+	pc, err := lc.ListenPacket(context.Background(), "udp", "0.0.0.0:0")
 	if err != nil { return nil, err }
 	return pc.(*net.UDPConn), nil
 }
