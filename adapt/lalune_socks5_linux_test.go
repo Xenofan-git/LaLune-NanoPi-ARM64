@@ -74,3 +74,19 @@ func TestReadUDPAddrRejectsTruncatedPacket(t *testing.T) {
 		t.Fatal("expected truncated address to fail")
 	}
 }
+
+func TestSocks5ServerStartStopIsIdempotent(t *testing.T) {
+	s := NewSocks5Server("127.0.0.1:0")
+	if err := s.Start(); err != nil {
+		t.Fatalf("first Start: %v", err)
+	}
+	if err := s.Start(); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	s.Stop()
+	s.Stop()
+	if err := s.Start(); err != nil {
+		t.Fatalf("Start after Stop: %v", err)
+	}
+	s.Stop()
+}
