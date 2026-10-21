@@ -225,7 +225,7 @@ func (s *Socks5Server) handleUDPAssociate(c net.Conn) {
 
 		target, off, err := readUDPAddr(buf[:n], 3)
 		if err != nil { continue }
-		dst, err := net.ResolveUDPAddr("udp", target)
+		dst, err := resolveUDPAddrMarked(target)
 		if err != nil { continue }
 
 		out, err := s.dialUDP()
@@ -284,4 +284,32 @@ func buildUDPReply(addr *net.UDPAddr, payload []byte) ([]byte, error) {
 	}
 	binary.BigEndian.PutUint16(header[len(header)-2:], uint16(addr.Port))
 	return append(header, payload...), nil
+}
+
+func resolveUDPAddrMarked(target string) (*net.UDPAddr, error) {
+	host, portText, err := net.SplitHostPort(target)
+	if err != nil { return nil, err }
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 0 || port > 65535 { return nil, errors.New("invalid UDP target port") }
+	if ip := net.ParseIP(host); ip != nil {
+		return &net.UDPAddr{IP: ip, Port: port}, nil
+	}
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := laluneDialer(network)
+			return d.DialContext(ctx, network, address)
+		},
+	}
+	ips, err := resolver.LookupIPAddr(context.Background(), host)
+	if err != nil { return nil, err }
+	for _, candidate := range ips {
+		if ip4 := candidate.IP.To4(); ip4 != nil {
+			return &net.UDPAddr{IP: ip4, Port: port}, nil
+		}
+	}
+	if len(ips) > 0 {
+		return &net.UDPAddr{IP: ips[0].IP, Port: port}, nil
+	}
+	return nil, errors.New("UDP target hostname resolved to no addresses")
 }
