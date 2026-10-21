@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -15,6 +16,7 @@ import (
 const laluneSocksMark = 0x4d53
 
 type Socks5Server struct {
+	mu   sync.Mutex
 	addr string
 	ln   net.Listener
 }
@@ -22,6 +24,8 @@ type Socks5Server struct {
 func NewSocks5Server(addr string) *Socks5Server { return &Socks5Server{addr: addr} }
 
 func (s *Socks5Server) Start() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.ln != nil { return nil }
 	ln, err := net.Listen("tcp", s.addr)
 	if err != nil { return err }
@@ -37,6 +41,8 @@ func (s *Socks5Server) Start() error {
 }
 
 func (s *Socks5Server) Stop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.ln != nil {
 		_ = s.ln.Close()
 		s.ln = nil
