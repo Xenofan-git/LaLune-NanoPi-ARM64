@@ -214,12 +214,9 @@ func (s *Socks5Server) handleUDPAssociate(c net.Conn) {
 		if _, err = out.WriteToUDP(buf[off:n], dst); err == nil {
 			rn, ra, er := out.ReadFromUDP(buf)
 			if er == nil {
-				ip4 := ra.IP.To4()
-				if ip4 != nil {
-					h := []byte{0, 0, 0, 1, ip4[0], ip4[1], ip4[2], ip4[3], 0, 0}
-					binary.BigEndian.PutUint16(h[8:], uint16(ra.Port))
-					h = append(h, buf[:rn]...)
-					_, _ = u.WriteToUDP(h, client)
+				packet, buildErr := buildUDPReply(ra, buf[:rn])
+				if buildErr == nil {
+					_, _ = u.WriteToUDP(packet, client)
 				}
 			}
 		}
@@ -249,4 +246,22 @@ func readUDPAddr(b []byte, off int) (string, int, error) {
 	if len(b) < off+2 { return "", 0, io.ErrUnexpectedEOF }
 	port := int(binary.BigEndian.Uint16(b[off : off+2]))
 	return net.JoinHostPort(host, strconv.Itoa(port)), off + 2, nil
+}
+
+func buildUDPReply(addr *net.UDPAddr, payload []byte) ([]byte, error) {
+	if addr == nil || addr.Port < 0 || addr.Port > 65535 {
+		return nil, errors.New("invalid UDP source address")
+	}
+	var header []byte
+	if ip4 := addr.IP.To4(); ip4 != nil {
+		header = []byte{0, 0, 0, 1, ip4[0], ip4[1], ip4[2], ip4[3], 0, 0}
+	} else if ip6 := addr.IP.To16(); ip6 != nil {
+		header = []byte{0, 0, 0, 4}
+		header = append(header, ip6...)
+		header = append(header, 0, 0)
+	} else {
+		return nil, errors.New("invalid UDP source IP")
+	}
+	binary.BigEndian.PutUint16(header[len(header)-2:], uint16(addr.Port))
+	return append(header, payload...), nil
 }
