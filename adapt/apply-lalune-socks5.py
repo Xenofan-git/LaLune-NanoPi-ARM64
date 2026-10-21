@@ -14,12 +14,14 @@ s = s.replace(old, new, 1)
 # Add mark policy and start SOCKS5 only after all TUN setup has succeeded.
 marker = '\tt.app.core.AddLog("[TUN] TUN настроен успешно (table 202; чужие маршруты и DNS сохранены)")'
 addition = '''\tif err := t.app.runSudo("ip rule add pref 22015 fwmark 0x4d53/0xffff lookup 202"); err != nil {
+\t\tt.cleanupDirectRoutingLocked()
 \t\trollback()
 \t\treturn fmt.Errorf("add SOCKS5 fwmark rule: %w", err)
 \t}
 \tif t.app.socks != nil {
 \t\tif err := t.app.socks.Start(); err != nil {
 \t\t\t_ = t.app.runSudo("ip rule del pref 22015 fwmark 0x4d53/0xffff lookup 202")
+\t\t\tt.cleanupDirectRoutingLocked()
 \t\t\trollback()
 \t\t\treturn fmt.Errorf("start SOCKS5 listener: %w", err)
 \t\t}
