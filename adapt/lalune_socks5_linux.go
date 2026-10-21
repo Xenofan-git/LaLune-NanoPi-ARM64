@@ -180,8 +180,20 @@ func (s *Socks5Server) handleConnect(c net.Conn) {
 	if err := writeSocksReply(c, 0, out.LocalAddr()); err != nil { return }
 
 	done := make(chan struct{}, 2)
-	go func() { _, _ = io.Copy(out, c); done <- struct{}{} }()
-	go func() { _, _ = io.Copy(c, out); done <- struct{}{} }()
+	go func() {
+		_, _ = io.Copy(out, c)
+		if tcp, ok := out.(*net.TCPConn); ok { _ = tcp.CloseWrite() }
+		done <- struct{}{}
+	}()
+	go func() {
+		_, _ = io.Copy(c, out)
+		if tcp, ok := c.(*net.TCPConn); ok { _ = tcp.CloseWrite() }
+		done <- struct{}{}
+	}()
+	// Wait for both directions so a half-close does not leak the reverse copier.
+	<-done
+	if tcp, ok := out.(*net.TCPConn); ok { _ = tcp.CloseRead() }
+	if tcp, ok := c.(*net.TCPConn); ok { _ = tcp.CloseRead() }
 	<-done
 }
 
