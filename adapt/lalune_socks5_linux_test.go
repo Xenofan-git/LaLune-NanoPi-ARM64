@@ -90,3 +90,28 @@ func TestSocks5ServerStartStopIsIdempotent(t *testing.T) {
 	}
 	s.Stop()
 }
+
+func TestBuildUDPReplyIPv4(t *testing.T) {
+	payload := []byte("reply")
+	got, err := buildUDPReply(&net.UDPAddr{IP: net.IPv4(192, 0, 2, 10), Port: 5353}, payload)
+	if err != nil { t.Fatal(err) }
+	wantHeader := []byte{0, 0, 0, 1, 192, 0, 2, 10, 0x14, 0xe9}
+	if len(got) != len(wantHeader)+len(payload) { t.Fatalf("packet length = %d", len(got)) }
+	for i := range wantHeader { if got[i] != wantHeader[i] { t.Fatalf("header = %v, want %v", got[:len(wantHeader)], wantHeader) } }
+	if string(got[len(wantHeader):]) != string(payload) { t.Fatal("payload was not preserved") }
+}
+
+func TestBuildUDPReplyIPv6(t *testing.T) {
+	payload := []byte("v6")
+	got, err := buildUDPReply(&net.UDPAddr{IP: net.ParseIP("2001:db8::7"), Port: 443}, payload)
+	if err != nil { t.Fatal(err) }
+	if len(got) != 4+16+2+len(payload) { t.Fatalf("packet length = %d", len(got)) }
+	if got[0] != 0 || got[1] != 0 || got[2] != 0 || got[3] != 4 { t.Fatalf("ATYP header = %v, want IPv6", got[:4]) }
+	if !net.IP(got[4:20]).Equal(net.ParseIP("2001:db8::7")) { t.Fatalf("reply IP = %v", net.IP(got[4:20])) }
+	if binary.BigEndian.Uint16(got[20:22]) != 443 { t.Fatalf("reply port = %d", binary.BigEndian.Uint16(got[20:22])) }
+	if string(got[22:]) != string(payload) { t.Fatal("payload was not preserved") }
+}
+
+func TestBuildUDPReplyRejectsInvalidAddress(t *testing.T) {
+	if _, err := buildUDPReply(nil, nil); err == nil { t.Fatal("expected invalid address error") }
+}
