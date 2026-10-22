@@ -20,6 +20,11 @@ type Socks5Server struct {
 	mu   sync.Mutex
 	addr string
 	ln   net.Listener
+
+	// Optional dial overrides keep protocol-level integration tests isolated from
+	// the host network. Production leaves these nil and always uses marked sockets.
+	dialTCPOverride func(string) (net.Conn, error)
+	dialUDPOverride func() (*net.UDPConn, error)
 }
 
 func NewSocks5Server(addr string) *Socks5Server { return &Socks5Server{addr: addr} }
@@ -66,6 +71,7 @@ func laluneDialer(network string) net.Dialer {
 }
 
 func (s *Socks5Server) dialTCP(addr string) (net.Conn, error) {
+	if s.dialTCPOverride != nil { return s.dialTCPOverride(addr) }
 	if _, err := net.InterfaceByName("csqtt0"); err != nil {
 		return nil, errors.New("LaLune TUN is not active")
 	}
@@ -74,6 +80,7 @@ func (s *Socks5Server) dialTCP(addr string) (net.Conn, error) {
 }
 
 func (s *Socks5Server) dialUDP() (*net.UDPConn, error) {
+	if s.dialUDPOverride != nil { return s.dialUDPOverride() }
 	if _, err := net.InterfaceByName("csqtt0"); err != nil {
 		return nil, errors.New("LaLune TUN is not active")
 	}
