@@ -631,7 +631,22 @@ jobs:
               if sudo ip netns exec socks5-echo ss -H -ltn | grep -q "198.18.77.2:18080"; then break; fi
               sleep 0.2
             done
+            set +e
             sudo env CSQTT_SOCKS5_MARKED_E2E=1 CSQTT_SOCKS5_E2E_TARGET=198.18.77.2 /usr/local/bin/client-tun-tests-arm64 -test.run=TestSocks5MarkedSocketEndToEnd -test.v
+            socks5_test_status=$?
+            set -e
+            echo "SOCKS5_TEST_STATUS=$socks5_test_status"
+            echo "=== SOCKS5 echo server log ==="
+            sudo cat /tmp/socks5-echo.log || true
+            echo "=== namespace addresses/routes/neighbors ==="
+            sudo ip -n socks5-echo -br addr || true
+            sudo ip -n socks5-echo route show table all || true
+            sudo ip -n socks5-echo neigh show || true
+            echo "=== host policy routes ==="
+            sudo ip rule show || true
+            sudo ip route show table 202 || true
+            sudo ip route get 198.18.77.2 mark 0x4d53 || true
+            if [ "$socks5_test_status" -ne 0 ]; then exit "$socks5_test_status"; fi
             cleanup_socks5_marked
             trap - EXIT
             echo SOCKS5_MARKED_TCP_UDP_POLICY_ROUTE_E2E_PASS
