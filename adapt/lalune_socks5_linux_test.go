@@ -240,64 +240,51 @@ func TestSocks5UDPAssociateRelaysDatagram(t *testing.T) {
 // the kernel policy route, not merely the SOCKS protocol relay.
 func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 	if os.Getenv("CSQTT_SOCKS5_MARKED_E2E") != "1" {
-		t.Skip("requires disposable VM TUN and fwmark policy")
+		t.Skip("requires disposable VM fwmark policy")
 	}
 	if _, err := net.InterfaceByName("csqtt0"); err != nil {
-		t.Fatalf("test TUN csqtt0 missing: %v", err)
+		t.Fatalf("test TUN/egress interface csqtt0 missing: %v", err)
 	}
+	// The VM provides echo servers in a separate network namespace. Traffic to
+	// that namespace must use the marked policy table; the main table deliberately
+	// blackholes the test subnet, so an unmarked socket cannot accidentally pass.
+	target := os.Getenv("CSQTT_SOCKS5_E2E_TARGET")
+	if target == "" {
+		t.Fatal("CSQTT_SOCKS5_E2E_TARGET must point to the isolated namespace echo server")
+	}
+	tcpPort, udpPort := 18080, 18081
 
 	t.Run("TCP", func(t *testing.T) {
-		echo, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil { t.Fatal(err) }
-		defer echo.Close()
-		go func() {
-			c, err := echo.Accept()
-			if err == nil { defer c.Close(); _, _ = io.Copy(c, c) }
-		}()
 		s := NewSocks5Server("127.0.0.1:0")
 		if err := s.Start(); err != nil { t.Fatal(err) }
 		defer s.Stop()
 		client, err := net.DialTimeout("tcp", s.ln.Addr().String(), 2*time.Second)
 		if err != nil { t.Fatal(err) }
 		defer client.Close()
-		_ = client.SetDeadline(time.Now().Add(4*time.Second))
+		_ = client.SetDeadline(time.Now().Add(5*time.Second))
 		socks5Handshake(t, client)
-		host, portText, err := net.SplitHostPort(echo.Addr().String())
-		if err != nil { t.Fatal(err) }
-		port, err := strconv.Atoi(portText)
-		if err != nil { t.Fatal(err) }
-		ip := net.ParseIP(host).To4()
-		req := []byte{5, 1, 0, 1, ip[0], ip[1], ip[2], ip[3], byte(port >> 8), byte(port)}
+		ip := net.ParseIP(target).To4()
+		if ip == nil { t.Fatalf("invalid E2E target IPv4 address %q", target) }
+		req := []byte{5, 1, 0, 1, ip[0], ip[1], ip[2], ip[3], byte(tcpPort >> 8), byte(tcpPort)}
 		if _, err := client.Write(req); err != nil { t.Fatal(err) }
 		reply := make([]byte, 10)
 		if _, err := io.ReadFull(client, reply); err != nil { t.Fatal(err) }
 		if reply[1] != 0 { t.Fatalf("marked CONNECT failed: %v", reply) }
-		payload := []byte("marked-tcp")
+		payload := []byte("marked-tcp-via-policy-route")
 		if _, err := client.Write(payload); err != nil { t.Fatal(err) }
 		got := make([]byte, len(payload))
-		if _, err := io.ReadFull(client, got); err != nil { t.Fatal(err) }
+		if _, err := io.ReadFull(client, got); err != nil { t.Fatalf("TCP echo via csqtt0 failed: %v", err) }
 		if string(got) != string(payload) { t.Fatalf("TCP echo %q", got) }
 	})
 
 	t.Run("UDP", func(t *testing.T) {
-		echo, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127,0,0,1)})
-		if err != nil { t.Fatal(err) }
-		defer echo.Close()
-		go func() {
-			buf := make([]byte, 1024)
-			for {
-				n, addr, err := echo.ReadFromUDP(buf)
-				if err != nil { return }
-				_, _ = echo.WriteToUDP(buf[:n], addr)
-			}
-		}()
 		s := NewSocks5Server("127.0.0.1:0")
 		if err := s.Start(); err != nil { t.Fatal(err) }
 		defer s.Stop()
 		control, err := net.DialTimeout("tcp", s.ln.Addr().String(), 2*time.Second)
 		if err != nil { t.Fatal(err) }
 		defer control.Close()
-		_ = control.SetDeadline(time.Now().Add(5*time.Second))
+		_ = control.SetDeadline(time.Now().Add(6*time.Second))
 		socks5Handshake(t, control)
 		if _, err := control.Write([]byte{5,3,0,1,0,0,0,0,0,0}); err != nil { t.Fatal(err) }
 		reply := make([]byte, 10)
@@ -308,14 +295,15 @@ func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 		relay, err := net.DialUDP("udp", nil, &net.UDPAddr{IP:relayIP, Port:int(binary.BigEndian.Uint16(reply[8:10]))})
 		if err != nil { t.Fatal(err) }
 		defer relay.Close()
-		_ = relay.SetDeadline(time.Now().Add(5*time.Second))
-		dst := echo.LocalAddr().(*net.UDPAddr)
-		packet := []byte{0,0,0,1,127,0,0,1,byte(dst.Port>>8),byte(dst.Port)}
-		packet = append(packet, []byte("marked-udp")...)
+		_ = relay.SetDeadline(time.Now().Add(6*time.Second))
+		ip := net.ParseIP(target).To4()
+		if ip == nil { t.Fatalf("invalid E2E target IPv4 address %q", target) }
+		packet := []byte{0,0,0,1,ip[0],ip[1],ip[2],ip[3],byte(udpPort>>8),byte(udpPort)}
+		packet = append(packet, []byte("marked-udp-via-policy-route")...)
 		if _, err := relay.Write(packet); err != nil { t.Fatal(err) }
 		got := make([]byte, 1024)
 		n, err := relay.Read(got)
-		if err != nil { t.Fatal(err) }
-		if n < 10 || string(got[10:n]) != "marked-udp" { t.Fatalf("unexpected marked UDP response: %v", got[:n]) }
+		if err != nil { t.Fatalf("UDP echo via csqtt0 failed: %v", err) }
+		if n < 10 || string(got[10:n]) != "marked-udp-via-policy-route" { t.Fatalf("unexpected marked UDP response: %v", got[:n]) }
 	})
 }
