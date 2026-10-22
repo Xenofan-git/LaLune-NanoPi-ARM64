@@ -596,18 +596,39 @@ jobs:
             sudo ip route add 198.18.77.0/24 dev csqtt0 src 198.18.77.1 table 202
             sudo ip rule add pref 22015 fwmark 0x4d53/0xffff lookup 202
             sudo ip route get 198.18.77.2 mark 0x4d53 | grep -q "table 202"
-            sudo ip netns exec socks5-echo python3 -c 'import socket,threading
+            cat > /tmp/socks5-echo.py <<'PY'
+            import socket
+            import threading
+
             def tcp():
-             s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("198.18.77.2",18080)); s.listen()
-             while True:
-              c,_=s.accept(); threading.Thread(target=lambda x: (x.sendall(x.recv(65536)),x.close()),args=(c,),daemon=True).start()
+                server = socket.socket()
+                server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                server.bind(("198.18.77.2", 18080))
+                server.listen()
+                while True:
+                    conn, _ = server.accept()
+                    def echo(client):
+                        try:
+                            data = client.recv(65536)
+                            if data:
+                                client.sendall(data)
+                        finally:
+                            client.close()
+                    threading.Thread(target=echo, args=(conn,), daemon=True).start()
+
             def udp():
-             s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.bind(("198.18.77.2",18081))
-             while True:
-              d,a=s.recvfrom(65535); s.sendto(d,a)
-            threading.Thread(target=tcp,daemon=True).start(); udp()' >/tmp/socks5-echo.log 2>&1 &
+                server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                server.bind(("198.18.77.2", 18081))
+                while True:
+                    data, addr = server.recvfrom(65535)
+                    server.sendto(data, addr)
+
+            threading.Thread(target=tcp, daemon=True).start()
+            udp()
+            PY
+            sudo ip netns exec socks5-echo python3 /tmp/socks5-echo.py >/tmp/socks5-echo.log 2>&1 &
             for attempt in $(seq 1 20); do
-              if sudo ip netns exec socks5-echo python3 -c 'import socket;s=socket.socket();s.settimeout(.2);s.connect(("198.18.77.2",18080));s.close()' 2>/dev/null; then break; fi
+              if sudo ip netns exec socks5-echo python3 -c 'import socket; s=socket.socket(); s.settimeout(.2); s.connect(("198.18.77.2",18080)); s.close()' 2>/dev/null; then break; fi
               sleep 0.2
             done
             sudo env CSQTT_SOCKS5_MARKED_E2E=1 CSQTT_SOCKS5_E2E_TARGET=198.18.77.2 /usr/local/bin/client-tun-tests-arm64 -test.run=TestSocks5MarkedSocketEndToEnd -test.v
