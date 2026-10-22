@@ -628,7 +628,7 @@ jobs:
             PY
             sudo ip netns exec socks5-echo python3 /tmp/socks5-echo.py >/tmp/socks5-echo.log 2>&1 &
             for attempt in $(seq 1 20); do
-              if sudo ip netns exec socks5-echo python3 -c 'import socket; s=socket.socket(); s.settimeout(.2); s.connect(("198.18.77.2",18080)); s.close()' 2>/dev/null; then break; fi
+              if sudo ip netns exec socks5-echo ss -H -ltn | grep -q "198.18.77.2:18080"; then break; fi
               sleep 0.2
             done
             sudo env CSQTT_SOCKS5_MARKED_E2E=1 CSQTT_SOCKS5_E2E_TARGET=198.18.77.2 /usr/local/bin/client-tun-tests-arm64 -test.run=TestSocks5MarkedSocketEndToEnd -test.v
