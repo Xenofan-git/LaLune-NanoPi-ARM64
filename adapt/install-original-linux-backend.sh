@@ -14,7 +14,7 @@ SERVICE=/etc/systemd/system/lalune-backend.service
 
 [ -x "$BIN" ] || { echo "LaLune backend binary not found: $BIN" >&2; exit 1; }
 [ -x "$BUNDLE_DIR/deploy-manager" ] || { echo "DeployManager binary missing beside the backend bundle: $BUNDLE_DIR/deploy-manager" >&2; exit 1; }
-for asset in install-csqtt-lalune.sh uninstall-csqtt-lalune.sh csqtt-lalune-linux-arm64 csqtt-lalune-linux-amd64; do
+for asset in deploy-csqtt-lalune.sh csqtt-lalune-linux-arm64 csqtt-lalune-linux-amd64; do
     [ -s "$BUNDLE_DIR/server-assets/$asset" ] || { echo "Required deployment asset missing: $BUNDLE_DIR/server-assets/$asset" >&2; exit 1; }
 done
 
@@ -42,7 +42,7 @@ fi
 install -m 0755 "$BIN" "$INSTALL"
 install -m 0755 "$BUNDLE_DIR/deploy-manager" "$DEPLOY_MANAGER"
 install -d -m 0755 "$ASSET_DIR"
-for asset in install-csqtt-lalune.sh uninstall-csqtt-lalune.sh csqtt-lalune-linux-arm64 csqtt-lalune-linux-amd64; do
+for asset in deploy-csqtt-lalune.sh csqtt-lalune-linux-arm64 csqtt-lalune-linux-amd64; do
     install -m 0755 "$BUNDLE_DIR/server-assets/$asset" "$ASSET_DIR/$asset"
 done
 printf '%s\n' 'LALUNE-DEPLOY-BUNDLE-V1' > "$DEPLOY_MARKER"
