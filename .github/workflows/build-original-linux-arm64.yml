@@ -550,6 +550,12 @@ jobs:
           test -s dist/LaLune-CAPTCHA-Bridge.zip
           test -s dist/CAPTCHA-BRIDGE-README.md
           test -x dist/install-original-linux-backend.sh
+          # The optional backend installer must match the actual DeployManager asset contract.
+          for asset in deploy-csqtt-lalune.sh csqtt-lalune-linux-arm64 csqtt-lalune-linux-amd64; do
+            test -s "dist/server-assets/$asset"
+          done
+          ! grep -Fq 'install-csqtt-lalune.sh' adapt/install-original-linux-backend.sh
+          ! grep -Fq 'uninstall-csqtt-lalune.sh' adapt/install-original-linux-backend.sh
           test -s dist/server-assets/csqtt-lalune-linux-arm64
           test -s dist/server-assets/csqtt-lalune-linux-amd64
           test -s dist/server-assets/csqtt-lalune-help.txt
@@ -584,6 +590,10 @@ jobs:
           cp protocols-source.sha256 dist/
           printf '%s\n' 'e4a6d08b63aef6025bf8ad8f77da660ea552e04b' > dist/UPSTREAM_COMMIT
           (cd dist && sha256sum lalune-original-linux-arm64 client-linux-arm64 > SHA256SUMS && sha256sum -c SHA256SUMS)
+          # Release-wide manifest covers every packaged payload, including nested assets and
+          # the component manifests; only the release manifest itself is excluded.
+          (cd dist && find . -type f ! -name RELEASE-SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > RELEASE-SHA256SUMS)
+          (cd dist && sha256sum -c RELEASE-SHA256SUMS)
           tar -C dist -czf lalune-original-linux-arm64.tar.gz .
       - uses: actions/upload-artifact@v4
         with:
