@@ -11,49 +11,57 @@ DEPLOY_LIB=/usr/local/lib/lalune
 ASSET_DIR=$DEPLOY_LIB/server-assets
 DEPLOY_MARKER=$DEPLOY_LIB/.managed-by-lalune-deploy
 SERVICE=/etc/systemd/system/lalune-backend.service
+SERVICE_TMP=$SERVICE.lalune-tmp
+MARKER_VALUE=LALUNE-DEPLOY-BUNDLE-V1
 
-[ -x "$BIN" ] || { echo "LaLune backend binary not found: $BIN" >&2; exit 1; }
-[ -x "$BUNDLE_DIR/deploy-manager" ] || { echo "DeployManager binary missing beside the backend bundle: $BUNDLE_DIR/deploy-manager" >&2; exit 1; }
+fail() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+[ -x "$BIN" ] || fail "LaLune backend binary not found: $BIN"
+[ -x "$BUNDLE_DIR/deploy-manager" ] || fail "DeployManager binary missing beside the backend bundle: $BUNDLE_DIR/deploy-manager"
 for asset in deploy-csqtt-lalune.sh csqtt-lalune-linux-arm64 csqtt-lalune-linux-amd64; do
-    [ -s "$BUNDLE_DIR/server-assets/$asset" ] || { echo "Required deployment asset missing: $BUNDLE_DIR/server-assets/$asset" >&2; exit 1; }
+    [ -s "$BUNDLE_DIR/server-assets/$asset" ] || fail "Required deployment asset missing: $BUNDLE_DIR/server-assets/$asset"
 done
 
-[ ! -L "$DEPLOY_LIB" ] || { echo "Refusing symlinked deployment library: $DEPLOY_LIB" >&2; exit 1; }
+# Refuse symlinks and unowned pre-existing targets before changing anything.
+for path in "$INSTALL" "$DEPLOY_MANAGER" "$DEPLOY_LIB" "$ASSET_DIR" "$DEPLOY_MARKER" "$SERVICE" "$SERVICE_TMP"; do
+    [ ! -L "$path" ] || fail "Refusing symlinked installation path: $path"
+done
 if [ -e "$DEPLOY_LIB" ] && [ ! -f "$DEPLOY_MARKER" ]; then
-    echo "LaLune library exists without the deployment ownership marker; refusing to adopt it." >&2
-    exit 1
+    fail "LaLune library exists without the deployment ownership marker; refusing to adopt it."
 fi
-[ ! -L "$ASSET_DIR" ] || { echo "Refusing symlinked deployment assets: $ASSET_DIR" >&2; exit 1; }
-[ ! -L "$DEPLOY_MANAGER" ] || { echo "Refusing symlinked DeployManager: $DEPLOY_MANAGER" >&2; exit 1; }
-[ ! -L "$DEPLOY_MARKER" ] || { echo "Refusing symlinked ownership marker: $DEPLOY_MARKER" >&2; exit 1; }
-if [ -e "$DEPLOY_MARKER" ] && [ "$(cat "$DEPLOY_MARKER")" != "LALUNE-DEPLOY-BUNDLE-V1" ]; then
-    echo "Deployment ownership marker mismatch; refusing to overwrite deployment assets." >&2
-    exit 1
+if [ -e "$DEPLOY_MARKER" ]; then
+    [ -f "$DEPLOY_MARKER" ] || fail "Ownership marker is not a regular file: $DEPLOY_MARKER"
+    [ "$(cat "$DEPLOY_MARKER")" = "$MARKER_VALUE" ] || fail "Deployment ownership marker mismatch; refusing to overwrite deployment assets."
 fi
-if [ -e "$DEPLOY_MANAGER" ] && [ ! -f "$DEPLOY_MARKER" ]; then
-    echo "DeployManager exists without the LaLune ownership marker; refusing to overwrite it." >&2
-    exit 1
-fi
-if [ -e "$ASSET_DIR" ] && [ ! -f "$DEPLOY_MARKER" ]; then
-    echo "Deployment assets exist without the LaLune ownership marker; refusing to adopt them." >&2
-    exit 1
-fi
+for path in "$INSTALL" "$DEPLOY_MANAGER" "$SERVICE"; do
+    if [ -e "$path" ] && [ ! -f "$DEPLOY_MARKER" ]; then
+        fail "Existing target has no LaLune ownership marker; refusing to overwrite: $path"
+    fi
+    if [ -e "$path" ] && [ ! -f "$path" ]; then
+        fail "Existing target is not a regular file: $path"
+    fi
+done
 
+install -d -m 0755 /usr/local/bin /usr/local/lib
 install -m 0755 "$BIN" "$INSTALL"
 install -m 0755 "$BUNDLE_DIR/deploy-manager" "$DEPLOY_MANAGER"
 install -d -m 0755 "$ASSET_DIR"
 for asset in deploy-csqtt-lalune.sh csqtt-lalune-linux-arm64 csqtt-lalune-linux-amd64; do
     install -m 0755 "$BUNDLE_DIR/server-assets/$asset" "$ASSET_DIR/$asset"
 done
-printf '%s\n' 'LALUNE-DEPLOY-BUNDLE-V1' > "$DEPLOY_MARKER"
+printf '%s\n' "$MARKER_VALUE" > "$DEPLOY_MARKER"
 chmod 0644 "$DEPLOY_MARKER"
 
-cat > "$SERVICE" <<'UNIT'
+# This backend is independent from the optional gateway service. Do not stop,
+# mask, conflict with, or otherwise alter lalune-gateway.service.
+cat > "$SERVICE_TMP" <<'UNIT'
 [Unit]
 Description=Original LaLune Linux backend (NanoPi ARM64)
 After=network-online.target
 Wants=network-online.target
-Conflicts=lalune-gateway.service
 
 [Service]
 Type=simple
@@ -65,7 +73,22 @@ Environment=RUST_LOG=info
 [Install]
 WantedBy=multi-user.target
 UNIT
+chmod 0644 "$SERVICE_TMP"
+mv -f "$SERVICE_TMP" "$SERVICE"
 
 systemctl daemon-reload
-systemctl enable lalune-backend
-echo "Installed. Existing lalune-gateway is not modified."
+systemctl enable lalune-backend.service
+if ! systemctl restart lalune-backend.service; then
+    echo "LaLune backend failed to start; diagnostic output follows:" >&2
+    systemctl status --no-pager --full lalune-backend.service >&2 || true
+    journalctl -u lalune-backend.service -n 80 --no-pager >&2 || true
+    exit 1
+fi
+if ! systemctl is-active --quiet lalune-backend.service; then
+    echo "LaLune backend is not active after restart; diagnostic output follows:" >&2
+    systemctl status --no-pager --full lalune-backend.service >&2 || true
+    journalctl -u lalune-backend.service -n 80 --no-pager >&2 || true
+    exit 1
+fi
+
+echo "LaLune backend installed and active. lalune-gateway.service was not modified."
