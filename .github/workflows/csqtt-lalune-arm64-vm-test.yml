@@ -612,13 +612,19 @@ jobs:
               server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
               server.bind(("198.18.77.2", 18080))
               server.listen()
+              print("TCP_LISTENING 198.18.77.2:18080", flush=True)
               while True:
-                  conn, _ = server.accept()
+                  conn, addr = server.accept()
+                  print("TCP_ACCEPT", addr, flush=True)
                   def echo(client):
                       try:
                           data = client.recv(65536)
+                          print("TCP_RECEIVED", len(data), flush=True)
                           if data:
                               client.sendall(data)
+                              print("TCP_ECHO_SENT", len(data), flush=True)
+                      except Exception as exc:
+                          print("TCP_ECHO_ERROR", repr(exc), flush=True)
                       finally:
                           client.close()
                   threading.Thread(target=echo, args=(conn,), daemon=True).start()
@@ -626,14 +632,16 @@ jobs:
           def udp():
               server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
               server.bind(("198.18.77.2", 18081))
+              print("UDP_LISTENING 198.18.77.2:18081", flush=True)
               while True:
                   data, addr = server.recvfrom(65535)
+                  print("UDP_RECEIVED", len(data), "from", addr, flush=True)
                   server.sendto(data, addr)
 
           threading.Thread(target=tcp, daemon=True).start()
           udp()
           PY
-            sudo ip netns exec socks5-echo python3 /tmp/socks5-echo.py >/tmp/socks5-echo.log 2>&1 &
+            sudo ip netns exec socks5-echo python3 -u /tmp/socks5-echo.py >/tmp/socks5-echo.log 2>&1 &
             for attempt in $(seq 1 20); do
               if sudo ip netns exec socks5-echo ss -H -ltn | grep -q "198.18.77.2:18080"; then break; fi
               sleep 0.2
@@ -649,10 +657,18 @@ jobs:
             sudo ip -n socks5-echo -br addr || true
             sudo ip -n socks5-echo route show table all || true
             sudo ip -n socks5-echo neigh show || true
+            sudo ip netns exec socks5-echo ss -lntup || true
+            echo "=== host and peer interface counters ==="
+            sudo ip -s link show csqtt0 || true
+            sudo ip -n socks5-echo -s link show socks5-peer || true
             echo "=== host policy routes ==="
             sudo ip rule show || true
+            sudo ip route show table main || true
             sudo ip route show table 202 || true
             sudo ip route get 198.18.77.2 mark 0x4d53 || true
+            sudo ip route get 198.18.77.1 from 198.18.77.2 || true
+            echo "=== relevant sysctls ==="
+            sudo sysctl net.ipv4.conf.all.rp_filter net.ipv4.conf.default.rp_filter net.ipv4.conf.csqtt0.rp_filter || true
             if [ "$socks5_test_status" -ne 0 ]; then exit "$socks5_test_status"; fi
             cleanup_socks5_marked
             trap - EXIT
