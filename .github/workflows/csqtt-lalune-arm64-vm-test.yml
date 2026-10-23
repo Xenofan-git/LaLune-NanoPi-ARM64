@@ -589,11 +589,18 @@ jobs:
             sudo ip link set socks5-peer netns socks5-echo
             sudo ip link set csqtt0 up
             sudo ip addr add 198.18.77.1/32 dev csqtt0
+            # The host-end veth is deliberately used as the disposable TUN stand-in.
+            # Disable reverse-path filtering only on this isolated test interface:
+            # fwmark policy routes are intentionally asymmetric with the main blackhole.
+            sudo sysctl -w net.ipv4.conf.csqtt0.rp_filter=0
             sudo ip -n socks5-echo link set lo up
             sudo ip -n socks5-echo link set socks5-peer up
             sudo ip -n socks5-echo addr add 198.18.77.2/24 dev socks5-peer
             sudo ip route add blackhole 198.18.77.0/24
             sudo ip route add 198.18.77.0/24 dev csqtt0 src 198.18.77.1 table 202
+            # Confirm the marked path and the return path before exercising SOCKS.
+            sudo ip route get 198.18.77.2 mark 0x4d53 | grep -q "table 202"
+            sudo ip route get 198.18.77.1 from 198.18.77.2
             sudo ip rule add pref 22015 fwmark 0x4d53/0xffff lookup 202
             sudo ip route get 198.18.77.2 mark 0x4d53 | grep -q "table 202"
             cat > /tmp/socks5-echo.py <<'PY'
