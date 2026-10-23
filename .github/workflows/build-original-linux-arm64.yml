@@ -546,6 +546,14 @@ jobs:
           cp adapt/install-original-linux-backend.sh dist/install-original-linux-backend.sh
           chmod 0755 dist/install-original-linux-backend.sh
           sh -n dist/install-original-linux-backend.sh
+          # Backend installer contract: no service conflict, explicit activation,
+          # post-start health check, and refusal to overwrite unowned targets.
+          ! grep -Fq 'Conflicts=lalune-gateway.service' adapt/install-original-linux-backend.sh
+          grep -Fq 'systemctl restart lalune-backend.service' adapt/install-original-linux-backend.sh
+          grep -Fq 'systemctl is-active --quiet lalune-backend.service' adapt/install-original-linux-backend.sh
+          grep -Fq 'journalctl -u lalune-backend.service' adapt/install-original-linux-backend.sh
+          grep -Fq 'Existing target has no LaLune ownership marker' adapt/install-original-linux-backend.sh
+          grep -Fq 'Refusing symlinked installation path' adapt/install-original-linux-backend.sh
           cp captcha-bridge/README.md dist/CAPTCHA-BRIDGE-README.md
           test -s dist/LaLune-CAPTCHA-Bridge.zip
           test -s dist/CAPTCHA-BRIDGE-README.md
