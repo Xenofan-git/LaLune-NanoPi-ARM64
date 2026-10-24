@@ -12,6 +12,8 @@ ASSET_DIR=$DEPLOY_LIB/server-assets
 DEPLOY_MARKER=$DEPLOY_LIB/.managed-by-lalune-deploy
 SERVICE=/etc/systemd/system/lalune-backend.service
 SERVICE_TMP=$SERVICE.lalune-tmp
+AUTH_ENV=/etc/lalune-backend.env
+AUTH_NOTE=/root/lalune-panel-credentials.txt
 MARKER_VALUE=LALUNE-DEPLOY-BUNDLE-V1
 
 fail() {
@@ -26,7 +28,7 @@ for asset in deploy-csqtt-lalune.sh csqtt-lalune-linux-arm64 csqtt-lalune-linux-
 done
 
 # Refuse symlinks and unowned pre-existing targets before changing anything.
-for path in "$INSTALL" "$DEPLOY_MANAGER" "$DEPLOY_LIB" "$ASSET_DIR" "$DEPLOY_MARKER" "$SERVICE" "$SERVICE_TMP"; do
+for path in "$INSTALL" "$DEPLOY_MANAGER" "$DEPLOY_LIB" "$ASSET_DIR" "$DEPLOY_MARKER" "$SERVICE" "$SERVICE_TMP" "$AUTH_ENV" "$AUTH_NOTE"; do
     [ ! -L "$path" ] || fail "Refusing symlinked installation path: $path"
 done
 if [ -e "$DEPLOY_LIB" ] && [ ! -f "$DEPLOY_MARKER" ]; then
@@ -53,7 +55,62 @@ for asset in deploy-csqtt-lalune.sh csqtt-lalune-linux-arm64 csqtt-lalune-linux-
     install -m 0755 "$BUNDLE_DIR/server-assets/$asset" "$ASSET_DIR/$asset"
 done
 printf '%s\n' "$MARKER_VALUE" > "$DEPLOY_MARKER"
+
 chmod 0644 "$DEPLOY_MARKER"
+
+# Provision a per-install panel password. Never print the secret into CI or
+# installer logs; root can read the mode-0600 credential note on the device.
+if [ -e "$AUTH_ENV" ]; then
+    [ -f "$AUTH_ENV" ] || fail "Panel auth environment path is not a regular file."
+    grep -q '^LALUNE_PANEL_PASSWORD=[0-9a-f]\{64\}
+# This backend is independent from the optional gateway service. Do not stop,
+# mask, conflict with, or otherwise alter lalune-gateway.service.
+cat > "$SERVICE_TMP" <<'UNIT'
+[Unit]
+Description=Original LaLune Linux backend (NanoPi ARM64)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/lalune-backend
+Restart=on-failure
+RestartSec=3
+Environment=RUST_LOG=info
+EnvironmentFile=/etc/lalune-backend.env
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+chmod 0644 "$SERVICE_TMP"
+mv -f "$SERVICE_TMP" "$SERVICE"
+
+systemctl daemon-reload
+systemctl enable lalune-backend.service
+if ! systemctl restart lalune-backend.service; then
+    echo "LaLune backend failed to start; diagnostic output follows:" >&2
+    systemctl status --no-pager --full lalune-backend.service >&2 || true
+    journalctl -u lalune-backend.service -n 80 --no-pager >&2 || true
+    exit 1
+fi
+if ! systemctl is-active --quiet lalune-backend.service; then
+    echo "LaLune backend is not active after restart; diagnostic output follows:" >&2
+    systemctl status --no-pager --full lalune-backend.service >&2 || true
+    journalctl -u lalune-backend.service -n 80 --no-pager >&2 || true
+    exit 1
+fi
+
+echo "LaLune backend installed and active. lalune-gateway.service was not modified."
+echo "Panel login: admin; credentials are stored in /root/lalune-panel-credentials.txt (root-only)."
+ "$AUTH_ENV" || fail "Existing panel auth environment file is malformed; refusing to replace it."
+else
+    PANEL_PASSWORD=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
+    [ "${#PANEL_PASSWORD}" -eq 64 ] || fail "Could not generate a secure panel password."
+    (umask 077; printf 'LALUNE_PANEL_PASSWORD=%s\n' "$PANEL_PASSWORD" > "$AUTH_ENV")
+    chmod 0600 "$AUTH_ENV"
+    (umask 077; printf 'LaLune CSQTT panel credentials\nUsername: admin\nPassword: %s\n\nKeep this file private.\n' "$PANEL_PASSWORD" > "$AUTH_NOTE")
+    chmod 0600 "$AUTH_NOTE"
+fi
 
 # This backend is independent from the optional gateway service. Do not stop,
 # mask, conflict with, or otherwise alter lalune-gateway.service.
