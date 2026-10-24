@@ -659,3 +659,4 @@ jobs:
     needs: build
     uses: ./.github/workflows/csqtt-lalune-arm64-vm-test.yml
     secrets: inherit
+# CI recovery retrigger: keep Build -> ARM64 VM lifecycle as the only execution path.
