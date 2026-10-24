@@ -112,6 +112,83 @@ jobs:
           cat vm/serial.log
           exit 1
 
+      - name: Test backend installer lifecycle and ownership safety in disposable ARM64 VM
+        run: |
+          set -euo pipefail
+          mkdir -p vm/backend-installer-test/server-assets
+          cp vm/real/install-original-linux-backend.sh vm/backend-installer-test/
+          cat > vm/backend-installer-test/fake-backend <<'EOF'
+          #!/bin/sh
+          exec /bin/sleep infinity
+          EOF
+          cat > vm/backend-installer-test/deploy-manager <<'EOF'
+          #!/bin/sh
+          exit 0
+          EOF
+          chmod 0755 vm/backend-installer-test/fake-backend vm/backend-installer-test/deploy-manager
+          for asset in deploy-csqtt-lalune.sh csqtt-lalune-linux-arm64 csqtt-lalune-linux-amd64; do
+            printf '#!/bin/sh\nexit 0\n' > "vm/backend-installer-test/server-assets/$asset"
+            chmod 0755 "vm/backend-installer-test/server-assets/$asset"
+          done
+          SCP=(scp -i vm/id_ed25519 -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+          "${SCP[@]}" -r vm/backend-installer-test tester@127.0.0.1:/home/tester/backend-installer-test
+          ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo bash -se' <<'BACKEND_INSTALL_TEST'
+          set -euo pipefail
+          T=/home/tester/backend-installer-test
+          # A foreign DeployManager must cause a fail-closed refusal without alteration.
+          printf 'FOREIGN_DEPLOY_MANAGER\n' > /usr/local/bin/deploy-manager
+          if sudo sh "$T/install-original-linux-backend.sh" "$T/fake-backend" "$T"; then
+            echo "installer unexpectedly overwrote an unowned DeployManager" >&2
+            exit 1
+          fi
+          grep -qx 'FOREIGN_DEPLOY_MANAGER' /usr/local/bin/deploy-manager
+          test ! -e /usr/local/lib/lalune/.managed-by-lalune-deploy
+          rm -f /usr/local/bin/deploy-manager
+
+          # Run an independent gateway service and prove backend installation leaves it active.
+          cat > /etc/systemd/system/lalune-gateway.service <<'UNIT'
+          [Unit]
+          Description=Independent gateway lifecycle sentinel
+          [Service]
+          Type=simple
+          ExecStart=/bin/sleep infinity
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+          systemctl daemon-reload
+          systemctl enable --now lalune-gateway.service
+          systemctl is-active --quiet lalune-gateway.service
+
+          sh "$T/install-original-linux-backend.sh" "$T/fake-backend" "$T"
+          systemctl is-active --quiet lalune-backend.service
+          systemctl is-active --quiet lalune-gateway.service
+          grep -Fq 'ExecStart=/usr/local/bin/lalune-backend' /etc/systemd/system/lalune-backend.service
+          ! grep -Fq 'Conflicts=lalune-gateway.service' /etc/systemd/system/lalune-backend.service
+
+          # Reinstall/upgrade with an existing ownership marker must be idempotent.
+          sh "$T/install-original-linux-backend.sh" "$T/fake-backend" "$T"
+          systemctl is-active --quiet lalune-backend.service
+          systemctl is-active --quiet lalune-gateway.service
+          test "$(cat /usr/local/lib/lalune/.managed-by-lalune-deploy)" = LALUNE-DEPLOY-BUNDLE-V1
+
+          # A symlinked managed executable must be rejected before it is followed/replaced.
+          systemctl stop lalune-backend.service
+          mv /usr/local/bin/lalune-backend /usr/local/bin/lalune-backend.saved
+          ln -s /tmp/foreign-backend /usr/local/bin/lalune-backend
+          if sh "$T/install-original-linux-backend.sh" "$T/fake-backend" "$T"; then
+            echo "installer unexpectedly accepted a symlink target" >&2
+            exit 1
+          fi
+          test -L /usr/local/bin/lalune-backend
+          rm /usr/local/bin/lalune-backend
+          mv /usr/local/bin/lalune-backend.saved /usr/local/bin/lalune-backend
+
+          systemctl start lalune-backend.service
+          systemctl is-active --quiet lalune-backend.service
+          systemctl is-active --quiet lalune-gateway.service
+          echo BACKEND_INSTALLER_CLEAN_INSTALL_REINSTALL_FOREIGN_COLLISION_GATEWAY_PRESERVATION_PASS
+          BACKEND_INSTALL_TEST
+
       - name: Validate VK call hash with the pinned real ARM64 client
         env:
           VK_CALL_HASH: ${{ secrets.VK_CALL_HASH }}
