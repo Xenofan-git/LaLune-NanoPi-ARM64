@@ -25,6 +25,10 @@ func laluneSocks5ListenAddr() (string, error) {
 	if err != nil { return "", errors.New("downstream LAN interface eth1 is unavailable") }
 	addrs, err := iface.Addrs()
 	if err != nil { return "", err }
+	return socks5ListenAddrFromAddrs(addrs)
+}
+
+func socks5ListenAddrFromAddrs(addrs []net.Addr) (string, error) {
 	for _, addr := range addrs {
 		ip, _, err := net.ParseCIDR(addr.String())
 		if err != nil { continue }
