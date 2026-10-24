@@ -45,7 +45,8 @@ s = s.replace(marker, replacement, 1)
 
 # Initialize the server in NewApp.
 old = '\tapp := &App{core: core, tun: tun}\n'
-new = '\tapp := &App{core: core, tun: tun}\n\tapp.socks = NewSocks5Server(":12500")\n'
+new = '\tapp := &App{core: core, tun: tun}\n\tlistenAddr, listenErr := laluneSocks5ListenAddr()
+	if listenErr != nil { app.core.AddLog(fmt.Sprintf("[SOCKS5] Listener не запущен: %v", listenErr)) } else { app.socks = NewSocks5Server(listenAddr) }\n'
 if old not in s:
     raise SystemExit("missing NewApp marker")
 s = s.replace(old, new, 1)
