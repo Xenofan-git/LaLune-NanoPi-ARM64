@@ -4,6 +4,7 @@ package main
 
 import (
     "sync"
+    "crypto/subtle"
     "context"
     "embed"
     "io/fs"
@@ -459,15 +460,45 @@ func apiHandler(app *App) http.Handler {
         }()
     })
 
+    return mux
+}
+
+
+// panelSecurity protects both the UI and every API route with the same
+// per-install HTTP Basic credential. The panel is intentionally LAN reachable;
+// authentication is therefore mandatory and origin checks prevent browser CSRF.
+func panelSecurity(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Access-Control-Allow-Origin", "*")
-        w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-        w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        if r.Method == http.MethodOptions {
-            w.WriteHeader(http.StatusNoContent)
+        w.Header().Set("Cache-Control", "no-store")
+        w.Header().Set("X-Content-Type-Options", "nosniff")
+        w.Header().Set("X-Frame-Options", "DENY")
+        w.Header().Set("Referrer-Policy", "same-origin")
+
+        expected := os.Getenv("LALUNE_PANEL_PASSWORD")
+        user, password, ok := r.BasicAuth()
+        if expected == "" {
+            http.Error(w, "panel authentication is not configured", http.StatusServiceUnavailable)
             return
         }
-        mux.ServeHTTP(w, r)
+        if !ok || subtle.ConstantTimeCompare([]byte(user), []byte("admin")) != 1 ||
+            subtle.ConstantTimeCompare([]byte(password), []byte(expected)) != 1 {
+            w.Header().Set("WWW-Authenticate", `Basic realm="LaLune CSQTT", charset="UTF-8"`)
+            http.Error(w, "authentication required", http.StatusUnauthorized)
+            return
+        }
+
+        if r.Method != http.MethodGet && r.Method != http.MethodHead {
+            origin := r.Header.Get("Origin")
+            parsed, err := url.Parse(origin)
+            scheme := "http"
+            if r.TLS != nil { scheme = "https" }
+            if err != nil || parsed.Scheme != scheme || parsed.Host == "" ||
+                !strings.EqualFold(parsed.Host, r.Host) || parsed.User != nil {
+                http.Error(w, "same-origin request required", http.StatusForbidden)
+                return
+            }
+        }
+        next.ServeHTTP(w, r)
     })
 }
 
@@ -476,7 +507,8 @@ func main() {
     app.startup(context.Background())
 
     api := apiHandler(app)
-    srv := &http.Server{Addr: headlessListen, Handler: api, ReadHeaderTimeout: 5 * time.Second}
+    secureAPI := panelSecurity(api)
+    srv := &http.Server{Addr: headlessListen, Handler: secureAPI, ReadHeaderTimeout: 5 * time.Second}
     panelFS, _ := fs.Sub(panelAssets, "frontend")
     panelHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
@@ -492,7 +524,7 @@ func main() {
         if _, err := fs.Stat(panelFS, p); err != nil { p = "index.html" }
         http.ServeFileFS(w, r, panelFS, p)
     })
-    panelSrv := &http.Server{Addr: panelListen, Handler: panelHandler, ReadHeaderTimeout: 5 * time.Second}
+    panelSrv := &http.Server{Addr: panelListen, Handler: panelSecurity(panelHandler), ReadHeaderTimeout: 5 * time.Second}
 
     errCh := make(chan error, 2)
     go func() { app.core.AddLog(fmt.Sprintf("[INFO] Headless API: http://%s", headlessListen)); errCh <- srv.ListenAndServe() }()

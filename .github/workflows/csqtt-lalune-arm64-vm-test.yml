@@ -112,6 +112,83 @@ jobs:
           cat vm/serial.log
           exit 1
 
+      - name: Test backend installer lifecycle and ownership safety in disposable ARM64 VM
+        run: |
+          set -euo pipefail
+          mkdir -p vm/backend-installer-test/server-assets
+          cp vm/real/install-original-linux-backend.sh vm/backend-installer-test/
+          cat > vm/backend-installer-test/fake-backend <<'EOF'
+          #!/bin/sh
+          exec /bin/sleep infinity
+          EOF
+          cat > vm/backend-installer-test/deploy-manager <<'EOF'
+          #!/bin/sh
+          exit 0
+          EOF
+          chmod 0755 vm/backend-installer-test/fake-backend vm/backend-installer-test/deploy-manager
+          for asset in deploy-csqtt-lalune.sh csqtt-lalune-linux-arm64 csqtt-lalune-linux-amd64; do
+            printf '#!/bin/sh\nexit 0\n' > "vm/backend-installer-test/server-assets/$asset"
+            chmod 0755 "vm/backend-installer-test/server-assets/$asset"
+          done
+          SCP=(scp -i vm/id_ed25519 -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+          "${SCP[@]}" -r vm/backend-installer-test tester@127.0.0.1:/home/tester/backend-installer-test
+          ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo bash -se' <<'BACKEND_INSTALL_TEST'
+          set -euo pipefail
+          T=/home/tester/backend-installer-test
+          # A foreign DeployManager must cause a fail-closed refusal without alteration.
+          printf 'FOREIGN_DEPLOY_MANAGER\n' > /usr/local/bin/deploy-manager
+          if sudo sh "$T/install-original-linux-backend.sh" "$T/fake-backend" "$T"; then
+            echo "installer unexpectedly overwrote an unowned DeployManager" >&2
+            exit 1
+          fi
+          grep -qx 'FOREIGN_DEPLOY_MANAGER' /usr/local/bin/deploy-manager
+          test ! -e /usr/local/lib/lalune/.managed-by-lalune-deploy
+          rm -f /usr/local/bin/deploy-manager
+
+          # Run an independent gateway service and prove backend installation leaves it active.
+          cat > /etc/systemd/system/lalune-gateway.service <<'UNIT'
+          [Unit]
+          Description=Independent gateway lifecycle sentinel
+          [Service]
+          Type=simple
+          ExecStart=/bin/sleep infinity
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+          systemctl daemon-reload
+          systemctl enable --now lalune-gateway.service
+          systemctl is-active --quiet lalune-gateway.service
+
+          sh "$T/install-original-linux-backend.sh" "$T/fake-backend" "$T"
+          systemctl is-active --quiet lalune-backend.service
+          systemctl is-active --quiet lalune-gateway.service
+          grep -Fq 'ExecStart=/usr/local/bin/lalune-backend' /etc/systemd/system/lalune-backend.service
+          ! grep -Fq 'Conflicts=lalune-gateway.service' /etc/systemd/system/lalune-backend.service
+
+          # Reinstall/upgrade with an existing ownership marker must be idempotent.
+          sh "$T/install-original-linux-backend.sh" "$T/fake-backend" "$T"
+          systemctl is-active --quiet lalune-backend.service
+          systemctl is-active --quiet lalune-gateway.service
+          test "$(cat /usr/local/lib/lalune/.managed-by-lalune-deploy)" = LALUNE-DEPLOY-BUNDLE-V1
+
+          # A symlinked managed executable must be rejected before it is followed/replaced.
+          systemctl stop lalune-backend.service
+          mv /usr/local/bin/lalune-backend /usr/local/bin/lalune-backend.saved
+          ln -s /tmp/foreign-backend /usr/local/bin/lalune-backend
+          if sh "$T/install-original-linux-backend.sh" "$T/fake-backend" "$T"; then
+            echo "installer unexpectedly accepted a symlink target" >&2
+            exit 1
+          fi
+          test -L /usr/local/bin/lalune-backend
+          rm /usr/local/bin/lalune-backend
+          mv /usr/local/bin/lalune-backend.saved /usr/local/bin/lalune-backend
+
+          systemctl start lalune-backend.service
+          systemctl is-active --quiet lalune-backend.service
+          systemctl is-active --quiet lalune-gateway.service
+          echo BACKEND_INSTALLER_CLEAN_INSTALL_REINSTALL_FOREIGN_COLLISION_GATEWAY_PRESERVATION_PASS
+          BACKEND_INSTALL_TEST
+
       - name: Validate VK call hash with the pinned real ARM64 client
         env:
           VK_CALL_HASH: ${{ secrets.VK_CALL_HASH }}
@@ -573,6 +650,106 @@ jobs:
             sudo install -m 0755 /home/tester/csqtt-lalune-linux-arm64 /opt/lalune-package/.csqtt-lalune-upload-server
             sudo install -m 0755 /home/tester/client-tun-tests-arm64 /usr/local/bin/client-tun-tests-arm64
             /usr/local/bin/client-tun-tests-arm64 -test.v
+            # Real TCP/UDP path test: marked traffic must cross a veth into a
+            # separate network namespace. The main table blackholes this subnet,
+            # so a missing SO_MARK/policy rule makes both echo tests fail.
+            cleanup_socks5_marked() {
+              sudo ip rule del pref 22015 fwmark 0x4d53/0xffff lookup 202 2>/dev/null || true
+              sudo ip route del 198.18.77.0/24 dev csqtt0 table 202 2>/dev/null || true
+              sudo ip route del blackhole 198.18.77.0/24 2>/dev/null || true
+              sudo ip netns del socks5-echo 2>/dev/null || true
+              sudo ip link del csqtt0 2>/dev/null || true
+            }
+            trap cleanup_socks5_marked EXIT
+            sudo ip netns add socks5-echo
+            sudo ip link add csqtt0 type veth peer name socks5-peer
+            sudo ip link set socks5-peer netns socks5-echo
+            sudo ip link set csqtt0 up
+            sudo ip addr add 198.18.77.1/32 dev csqtt0
+            # The host-end veth is deliberately used as the disposable TUN stand-in.
+            # Disable reverse-path filtering only on this isolated test interface:
+            # fwmark policy routes are intentionally asymmetric with the main blackhole.
+            sudo sysctl -w net.ipv4.conf.csqtt0.rp_filter=0
+            sudo ip -n socks5-echo link set lo up
+            sudo ip -n socks5-echo link set socks5-peer up
+            sudo ip -n socks5-echo addr add 198.18.77.2/24 dev socks5-peer
+            sudo ip route add blackhole 198.18.77.0/24
+            sudo ip route add 198.18.77.0/24 dev csqtt0 src 198.18.77.1 table 202
+            # The mark only selects table 202 after the policy rule exists.
+            # Check the reverse path independently, then install and verify the rule.
+            sudo ip -n socks5-echo route get 198.18.77.1
+            sudo ip rule add pref 22015 fwmark 0x4d53/0xffff lookup 202
+            sudo ip route get 198.18.77.2 mark 0x4d53 | grep -q "table 202"
+            cat > /tmp/socks5-echo.py <<'PY'
+          import socket
+          import threading
+
+          def tcp():
+              server = socket.socket()
+              server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+              server.bind(("198.18.77.2", 18080))
+              server.listen()
+              print("TCP_LISTENING 198.18.77.2:18080", flush=True)
+              while True:
+                  conn, addr = server.accept()
+                  print("TCP_ACCEPT", addr, flush=True)
+                  def echo(client):
+                      try:
+                          data = client.recv(65536)
+                          print("TCP_RECEIVED", len(data), flush=True)
+                          if data:
+                              client.sendall(data)
+                              print("TCP_ECHO_SENT", len(data), flush=True)
+                      except Exception as exc:
+                          print("TCP_ECHO_ERROR", repr(exc), flush=True)
+                      finally:
+                          client.close()
+                  threading.Thread(target=echo, args=(conn,), daemon=True).start()
+
+          def udp():
+              server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+              server.bind(("198.18.77.2", 18081))
+              print("UDP_LISTENING 198.18.77.2:18081", flush=True)
+              while True:
+                  data, addr = server.recvfrom(65535)
+                  print("UDP_RECEIVED", len(data), "from", addr, flush=True)
+                  server.sendto(data, addr)
+
+          threading.Thread(target=tcp, daemon=True).start()
+          udp()
+          PY
+            sudo ip netns exec socks5-echo python3 -u /tmp/socks5-echo.py >/tmp/socks5-echo.log 2>&1 &
+            for attempt in $(seq 1 20); do
+              if sudo ip netns exec socks5-echo ss -H -ltn | grep -q "198.18.77.2:18080"; then break; fi
+              sleep 0.2
+            done
+            set +e
+            sudo env CSQTT_SOCKS5_MARKED_E2E=1 CSQTT_SOCKS5_E2E_TARGET=198.18.77.2 /usr/local/bin/client-tun-tests-arm64 -test.run=TestSocks5MarkedSocketEndToEnd -test.v
+            socks5_test_status=$?
+            set -e
+            echo "SOCKS5_TEST_STATUS=$socks5_test_status"
+            echo "=== SOCKS5 echo server log ==="
+            sudo cat /tmp/socks5-echo.log || true
+            echo "=== namespace addresses/routes/neighbors ==="
+            sudo ip -n socks5-echo -br addr || true
+            sudo ip -n socks5-echo route show table all || true
+            sudo ip -n socks5-echo neigh show || true
+            sudo ip netns exec socks5-echo ss -lntup || true
+            echo "=== host and peer interface counters ==="
+            sudo ip -s link show csqtt0 || true
+            sudo ip -n socks5-echo -s link show socks5-peer || true
+            echo "=== host policy routes ==="
+            sudo ip rule show || true
+            sudo ip route show table main || true
+            sudo ip route show table 202 || true
+            sudo ip route get 198.18.77.2 mark 0x4d53 || true
+            sudo ip route get 198.18.77.1 from 198.18.77.2 || true
+            echo "=== relevant sysctls ==="
+            sudo sysctl net.ipv4.conf.all.rp_filter net.ipv4.conf.default.rp_filter net.ipv4.conf.csqtt0.rp_filter || true
+            if [ "$socks5_test_status" -ne 0 ]; then exit "$socks5_test_status"; fi
+            cleanup_socks5_marked
+            trap - EXIT
+            echo SOCKS5_MARKED_TCP_UDP_POLICY_ROUTE_E2E_PASS
             file /opt/lalune-package/.csqtt-lalune-upload-server
             sudo install -m 0644 /home/tester/csqtt.service /etc/systemd/system/csqtt.service
             sudo install -m 0644 /home/tester/csqtt-47000.service /etc/systemd/system/csqtt-47000.service
@@ -838,6 +1015,9 @@ jobs:
           ip -4 rule show > vm/runner-ip-rules.before
           export HOME="$GITHUB_WORKSPACE/vm/deploy-e2e-home"
           export XDG_CONFIG_HOME="$HOME/.config"
+          # The E2E backend runs outside systemd, so provide the same mandatory
+          # per-install credential explicitly. This is a disposable test secret.
+          export LALUNE_PANEL_PASSWORD="ci-panel-password-for-isolated-vm"
           cd vm/real/deploy-e2e
           ./lalune-original-linux-amd64 > "$GITHUB_WORKSPACE/vm/deploy-e2e-backend.log" 2>&1 &
           BACKEND_PID=$!
@@ -845,13 +1025,13 @@ jobs:
           trap cleanup_backend EXIT
           cd "$GITHUB_WORKSPACE"
           for attempt in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:1062/deploy/status >/dev/null; then break; fi
+            if curl -fsS -u admin:ci-panel-password-for-isolated-vm http://127.0.0.1:1062/deploy/status >/dev/null; then break; fi
             if ! kill -0 "$BACKEND_PID" 2>/dev/null; then cat vm/deploy-e2e-backend.log; exit 1; fi
             sleep 1
           done
-          curl -fsS http://127.0.0.1:1062/deploy/status >/dev/null
+          curl -fsS -u admin:ci-panel-password-for-isolated-vm http://127.0.0.1:1062/deploy/status >/dev/null
           python3 - <<'PY'
-          import json, os, urllib.request
+          import base64, json, os, urllib.request
           payload = {
               "protocol": "CSQTT",
               "host": "127.0.0.1",
@@ -874,7 +1054,11 @@ jobs:
           req = urllib.request.Request(
               "http://127.0.0.1:1062/deploy",
               data=json.dumps(payload).encode(),
-              headers={"Content-Type": "application/json"},
+              headers={
+              "Content-Type": "application/json",
+              "Authorization": "Basic " + base64.b64encode(b"admin:ci-panel-password-for-isolated-vm").decode(),
+              "Origin": "http://127.0.0.1:1062",
+          },
               method="POST",
           )
           with urllib.request.urlopen(req, timeout=15) as response:
@@ -885,7 +1069,7 @@ jobs:
           PY
           deploy_done=0
           for attempt in $(seq 1 600); do
-            status="$(curl -fsS http://127.0.0.1:1062/deploy/status)"
+            status="$(curl -fsS -u admin:ci-panel-password-for-isolated-vm http://127.0.0.1:1062/deploy/status)"
             if python3 -c 'import json,sys; raise SystemExit(0 if not json.load(sys.stdin).get("deploying", True) else 1)' <<<"$status"; then
               deploy_done=1
               break
@@ -893,13 +1077,13 @@ jobs:
             sleep 2
           done
           [[ "$deploy_done" == 1 ]] || { cat vm/deploy-e2e-backend.log; exit 1; }
-          deploy_log="$(curl -fsS http://127.0.0.1:1062/deploy/log | python3 -c 'import json,sys; print(json.load(sys.stdin))')"
+          deploy_log="$(curl -fsS -u admin:ci-panel-password-for-isolated-vm http://127.0.0.1:1062/deploy/log | python3 -c 'import json,sys; print(json.load(sys.stdin))')"
           printf '%s\n' "$deploy_log"
           grep -Fq 'CSQTT_LALUNE_DEPLOY_OK' <<<"$deploy_log"
           grep -Fq 'PANEL_URL=https://127.0.0.1:47002' <<<"$deploy_log"
           ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo systemctl is-active --quiet csqtt-lalune.service && sudo grep -Fq "CSQTT_WEB_USER=deployWeb123" /etc/csqtt-lalune/csqtt.env && sudo grep -aFq "01234567-89ab-cdef-0123-456789abcdef" /etc/csqtt-lalune/csqtt.db && sudo systemctl is-active --quiet csqtt.service && sudo systemctl is-active --quiet csqtt-47000.service && sudo systemctl is-active --quiet csqtt-47000-netns.service && sudo ss -H -lun "sport = :47000" | grep -q . && sudo ss -H -ltn "sport = :47002" | grep -q . && sudo systemctl show -p ActiveState -p SubState csqtt.service csqtt-47000.service csqtt-47000-netns.service > /tmp/production-states.after-button-install && diff -u /tmp/production-states.before /tmp/production-states.after-button-install && sudo ip -4 route show table main | grep -vF "10.67.68.0/24 dev csqtt-lalune0" > /tmp/main-routes.after-button-install.unrelated && diff -u /tmp/main-routes.before /tmp/main-routes.after-button-install.unrelated && sudo ip -4 rule show > /tmp/ip-rules.after-button-install && diff -u /tmp/ip-rules.after-install /tmp/ip-rules.after-button-install && sudo iptables-save | sed "/^# Generated by iptables-save/d; /^# Completed on /d; s/\\[[0-9:]*\\]/[COUNTERS]/g" > /tmp/iptables.after-button-install && diff -u /tmp/iptables.after-install /tmp/iptables.after-button-install && sudo ip -4 route show table 470010 > /tmp/near-miss-routes.after-button-install && diff -u /tmp/near-miss-routes.before /tmp/near-miss-routes.after-button-install'
           python3 - <<'PY'
-          import json, os, urllib.request
+          import base64, json, os, urllib.request
           payload = {
               "protocol": "CSQTT",
               "host": "127.0.0.1",
@@ -917,7 +1101,11 @@ jobs:
           req = urllib.request.Request(
               "http://127.0.0.1:1062/deploy",
               data=json.dumps(payload).encode(),
-              headers={"Content-Type": "application/json"},
+              headers={
+              "Content-Type": "application/json",
+              "Authorization": "Basic " + base64.b64encode(b"admin:ci-panel-password-for-isolated-vm").decode(),
+              "Origin": "http://127.0.0.1:1062",
+          },
               method="POST",
           )
           with urllib.request.urlopen(req, timeout=15) as response:
@@ -928,7 +1116,7 @@ jobs:
           PY
           uninstall_done=0
           for attempt in $(seq 1 450); do
-            status="$(curl -fsS http://127.0.0.1:1062/deploy/status)"
+            status="$(curl -fsS -u admin:ci-panel-password-for-isolated-vm http://127.0.0.1:1062/deploy/status)"
             if python3 -c 'import json,sys; raise SystemExit(0 if not json.load(sys.stdin).get("deploying", True) else 1)' <<<"$status"; then
               uninstall_done=1
               break
@@ -936,7 +1124,7 @@ jobs:
             sleep 2
           done
           [[ "$uninstall_done" == 1 ]] || { cat vm/deploy-e2e-backend.log; exit 1; }
-          uninstall_log="$(curl -fsS http://127.0.0.1:1062/deploy/log | python3 -c 'import json,sys; print(json.load(sys.stdin))')"
+          uninstall_log="$(curl -fsS -u admin:ci-panel-password-for-isolated-vm http://127.0.0.1:1062/deploy/log | python3 -c 'import json,sys; print(json.load(sys.stdin))')"
           printf '%s\n' "$uninstall_log"
           grep -Fq 'CSQTT_LALUNE_UNINSTALL_OK' <<<"$uninstall_log"
           ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo systemctl is-active --quiet csqtt.service && sudo systemctl is-active --quiet csqtt-47000.service && sudo systemctl is-active --quiet csqtt-47000-netns.service && ! sudo systemctl is-active --quiet csqtt-lalune.service && sudo ip -4 route show table main > /tmp/main-routes.after-button-uninstall && diff -u /tmp/main-routes.before /tmp/main-routes.after-button-uninstall && sudo ip -4 rule show > /tmp/ip-rules.after-button-uninstall && diff -u /tmp/ip-rules.before /tmp/ip-rules.after-button-uninstall && sudo iptables-save | sed "/^# Generated by iptables-save/d; /^# Completed on /d; s/\\[[0-9:]*\\]/[COUNTERS]/g" | python3 -c "import re,sys; s=sys.stdin.read(); s=re.sub(r\"(?ms)^\\*(?:mangle|nat)\\n(?:(?::[A-Z0-9_-]+ ACCEPT \\[COUNTERS\\])\\n)+COMMIT\\n\", \"\", s); sys.stdout.write(s)" > /tmp/iptables.after-button-uninstall && diff -u /tmp/iptables.before /tmp/iptables.after-button-uninstall && sudo ip -4 route show table 470010 > /tmp/near-miss-routes.after-button-uninstall && diff -u /tmp/near-miss-routes.before /tmp/near-miss-routes.after-button-uninstall && sudo test -s /etc/csqtt-lalune/csqtt.db && sudo test -f /etc/csqtt-lalune/csqtt.env && sudo ss -H -ltn "sport = :80" | grep -q . && sudo kill "$(sudo cat /run/lalune-test-port80.pid)"'

@@ -3,25 +3,58 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"io"
 	"net"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 )
 
+
 const laluneSocksMark = 0x4d53
 
+// The unauthenticated SOCKS5 service is reachable only on the downstream
+// LAN interface. Resolve its current IPv4 address at startup; never bind :12500
+// or 0.0.0.0 because this service intentionally has no password.
+func laluneSocks5ListenAddr() (string, error) {
+	iface, err := net.InterfaceByName("eth1")
+	if err != nil { return "", errors.New("downstream LAN interface eth1 is unavailable") }
+	addrs, err := iface.Addrs()
+	if err != nil { return "", err }
+	return socks5ListenAddrFromAddrs(addrs)
+}
+
+func socks5ListenAddrFromAddrs(addrs []net.Addr) (string, error) {
+	for _, addr := range addrs {
+		ip, _, err := net.ParseCIDR(addr.String())
+		if err != nil { continue }
+		ip = ip.To4()
+		if ip == nil || !ip.IsPrivate() || ip.IsUnspecified() || ip.IsLoopback() { continue }
+		return net.JoinHostPort(ip.String(), "12500"), nil
+	}
+	return "", errors.New("eth1 has no private IPv4 address; refusing to expose unauthenticated SOCKS5")
+}
+
 type Socks5Server struct {
+	mu   sync.Mutex
 	addr string
 	ln   net.Listener
+
+	// Optional dial overrides keep protocol-level integration tests isolated from
+	// the host network. Production leaves these nil and always uses marked sockets.
+	dialTCPOverride func(string) (net.Conn, error)
+	dialUDPOverride func() (*net.UDPConn, error)
 }
 
 func NewSocks5Server(addr string) *Socks5Server { return &Socks5Server{addr: addr} }
 
 func (s *Socks5Server) Start() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.ln != nil { return nil }
 	ln, err := net.Listen("tcp", s.addr)
 	if err != nil { return err }
@@ -37,6 +70,8 @@ func (s *Socks5Server) Start() error {
 }
 
 func (s *Socks5Server) Stop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.ln != nil {
 		_ = s.ln.Close()
 		s.ln = nil
@@ -59,6 +94,7 @@ func laluneDialer(network string) net.Dialer {
 }
 
 func (s *Socks5Server) dialTCP(addr string) (net.Conn, error) {
+	if s.dialTCPOverride != nil { return s.dialTCPOverride(addr) }
 	if _, err := net.InterfaceByName("csqtt0"); err != nil {
 		return nil, errors.New("LaLune TUN is not active")
 	}
@@ -67,11 +103,12 @@ func (s *Socks5Server) dialTCP(addr string) (net.Conn, error) {
 }
 
 func (s *Socks5Server) dialUDP() (*net.UDPConn, error) {
+	if s.dialUDPOverride != nil { return s.dialUDPOverride() }
 	if _, err := net.InterfaceByName("csqtt0"); err != nil {
 		return nil, errors.New("LaLune TUN is not active")
 	}
 	lc := net.ListenConfig{Control: laluneDialer("udp").Control}
-	pc, err := lc.ListenPacket(nil, "udp", "0.0.0.0:0")
+	pc, err := lc.ListenPacket(context.Background(), "udp", "0.0.0.0:0")
 	if err != nil { return nil, err }
 	return pc.(*net.UDPConn), nil
 }
@@ -103,11 +140,33 @@ func readSocksAddr(r io.Reader) (string, error) {
 	return net.JoinHostPort(host, strconv.Itoa(int(binary.BigEndian.Uint16(p[:])))), nil
 }
 
-func writeSocksReply(c net.Conn, code byte, port int) error {
-	b := []byte{5, code, 0, 1, 192, 168, 4, 26, 0, 0}
-	binary.BigEndian.PutUint16(b[8:], uint16(port))
-	_, err := c.Write(b)
-	return err
+func writeSocksReply(c net.Conn, code byte, bind net.Addr) error {
+	ip := net.IPv4zero
+	port := 0
+	switch a := bind.(type) {
+	case *net.TCPAddr:
+		ip, port = a.IP, a.Port
+	case *net.UDPAddr:
+		ip, port = a.IP, a.Port
+	}
+	if ip == nil || ip.IsUnspecified() {
+		if local, ok := c.LocalAddr().(*net.TCPAddr); ok { ip = local.IP }
+	}
+	if v4 := ip.To4(); v4 != nil {
+		b := []byte{5, code, 0, 1, v4[0], v4[1], v4[2], v4[3], 0, 0}
+		binary.BigEndian.PutUint16(b[8:], uint16(port))
+		_, err := c.Write(b)
+		return err
+	}
+	if v6 := ip.To16(); v6 != nil {
+		b := []byte{5, code, 0, 4}
+		b = append(b, v6...)
+		b = append(b, 0, 0)
+		binary.BigEndian.PutUint16(b[len(b)-2:], uint16(port))
+		_, err := c.Write(b)
+		return err
+	}
+	return errors.New("cannot determine SOCKS5 reply address")
 }
 
 func (s *Socks5Server) handle(c net.Conn) {
@@ -118,6 +177,14 @@ func (s *Socks5Server) handle(c net.Conn) {
 	if _, err := io.ReadFull(c, h[:]); err != nil || h[0] != 5 { return }
 	methods := make([]byte, int(h[1]))
 	if _, err := io.ReadFull(c, methods); err != nil { return }
+	noAuth := false
+	for _, method := range methods {
+		if method == 0 { noAuth = true; break }
+	}
+	if !noAuth {
+		_, _ = c.Write([]byte{5, 0xff})
+		return
+	}
 	if _, err := c.Write([]byte{5, 0}); err != nil { return }
 
 	var req [3]byte
@@ -129,34 +196,56 @@ func (s *Socks5Server) handle(c net.Conn) {
 	case 3:
 		s.handleUDPAssociate(c)
 	default:
-		_ = writeSocksReply(c, 7, 0)
+		_ = writeSocksReply(c, 7, &net.TCPAddr{})
 	}
 }
 
 func (s *Socks5Server) handleConnect(c net.Conn) {
 	addr, err := readSocksAddr(c)
-	if err != nil { _ = writeSocksReply(c, 8, 0); return }
+	if err != nil { _ = writeSocksReply(c, 8, &net.TCPAddr{}); return }
 	out, err := s.dialTCP(addr)
-	if err != nil { _ = writeSocksReply(c, 1, 0); return }
+	if err != nil { _ = writeSocksReply(c, 1, &net.TCPAddr{}); return }
 	defer out.Close()
 
 	c.SetDeadline(time.Time{})
-	localPort := out.LocalAddr().(*net.TCPAddr).Port
-	if err := writeSocksReply(c, 0, localPort); err != nil { return }
+	if err := writeSocksReply(c, 0, out.LocalAddr()); err != nil { return }
 
 	done := make(chan struct{}, 2)
-	go func() { _, _ = io.Copy(out, c); done <- struct{}{} }()
-	go func() { _, _ = io.Copy(c, out); done <- struct{}{} }()
+	go func() {
+		_, _ = io.Copy(out, c)
+		if tcp, ok := out.(*net.TCPConn); ok { _ = tcp.CloseWrite() }
+		done <- struct{}{}
+	}()
+	go func() {
+		_, _ = io.Copy(c, out)
+		if tcp, ok := c.(*net.TCPConn); ok { _ = tcp.CloseWrite() }
+		done <- struct{}{}
+	}()
+	// Wait for both directions so a half-close does not leak the reverse copier.
+	<-done
+	if tcp, ok := out.(*net.TCPConn); ok { _ = tcp.CloseRead() }
+	if tcp, ok := c.(*net.TCPConn); ok { _ = tcp.CloseRead() }
 	<-done
 }
 
 func (s *Socks5Server) handleUDPAssociate(c net.Conn) {
-	u, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("192.168.4.26"), Port: 0})
-	if err != nil { _ = writeSocksReply(c, 1, 0); return }
+	bindIP := net.IPv4zero
+	if local, ok := c.LocalAddr().(*net.TCPAddr); ok && local.IP != nil && !local.IP.IsUnspecified() {
+		bindIP = local.IP
+	}
+	u, err := net.ListenUDP("udp", &net.UDPAddr{IP: bindIP, Port: 0})
+	if err != nil { _ = writeSocksReply(c, 1, &net.TCPAddr{}); return }
 	defer u.Close()
 
-	if err := writeSocksReply(c, 0, u.LocalAddr().(*net.UDPAddr).Port); err != nil { return }
+	if err := writeSocksReply(c, 0, u.LocalAddr()); err != nil { return }
 	c.SetDeadline(time.Time{})
+
+	// RFC 1928 keeps the UDP relay alive only while its TCP control
+	// connection remains open. Closing that connection must unblock ReadFromUDP.
+	go func() {
+		_, _ = io.Copy(io.Discard, c)
+		_ = u.Close()
+	}()
 
 	buf := make([]byte, 65535)
 	var client *net.UDPAddr
@@ -170,7 +259,7 @@ func (s *Socks5Server) handleUDPAssociate(c net.Conn) {
 
 		target, off, err := readUDPAddr(buf[:n], 3)
 		if err != nil { continue }
-		dst, err := net.ResolveUDPAddr("udp", target)
+		dst, err := resolveUDPAddrMarked(target)
 		if err != nil { continue }
 
 		out, err := s.dialUDP()
@@ -179,12 +268,9 @@ func (s *Socks5Server) handleUDPAssociate(c net.Conn) {
 		if _, err = out.WriteToUDP(buf[off:n], dst); err == nil {
 			rn, ra, er := out.ReadFromUDP(buf)
 			if er == nil {
-				ip4 := ra.IP.To4()
-				if ip4 != nil {
-					h := []byte{0, 0, 0, 1, ip4[0], ip4[1], ip4[2], ip4[3], 0, 0}
-					binary.BigEndian.PutUint16(h[8:], uint16(ra.Port))
-					h = append(h, buf[:rn]...)
-					_, _ = u.WriteToUDP(h, client)
+				packet, buildErr := buildUDPReply(ra, buf[:rn])
+				if buildErr == nil {
+					_, _ = u.WriteToUDP(packet, client)
 				}
 			}
 		}
@@ -214,4 +300,50 @@ func readUDPAddr(b []byte, off int) (string, int, error) {
 	if len(b) < off+2 { return "", 0, io.ErrUnexpectedEOF }
 	port := int(binary.BigEndian.Uint16(b[off : off+2]))
 	return net.JoinHostPort(host, strconv.Itoa(port)), off + 2, nil
+}
+
+func buildUDPReply(addr *net.UDPAddr, payload []byte) ([]byte, error) {
+	if addr == nil || addr.Port < 0 || addr.Port > 65535 {
+		return nil, errors.New("invalid UDP source address")
+	}
+	var header []byte
+	if ip4 := addr.IP.To4(); ip4 != nil {
+		header = []byte{0, 0, 0, 1, ip4[0], ip4[1], ip4[2], ip4[3], 0, 0}
+	} else if ip6 := addr.IP.To16(); ip6 != nil {
+		header = []byte{0, 0, 0, 4}
+		header = append(header, ip6...)
+		header = append(header, 0, 0)
+	} else {
+		return nil, errors.New("invalid UDP source IP")
+	}
+	binary.BigEndian.PutUint16(header[len(header)-2:], uint16(addr.Port))
+	return append(header, payload...), nil
+}
+
+func resolveUDPAddrMarked(target string) (*net.UDPAddr, error) {
+	host, portText, err := net.SplitHostPort(target)
+	if err != nil { return nil, err }
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 0 || port > 65535 { return nil, errors.New("invalid UDP target port") }
+	if ip := net.ParseIP(host); ip != nil {
+		return &net.UDPAddr{IP: ip, Port: port}, nil
+	}
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := laluneDialer(network)
+			return d.DialContext(ctx, network, address)
+		},
+	}
+	ips, err := resolver.LookupIPAddr(context.Background(), host)
+	if err != nil { return nil, err }
+	for _, candidate := range ips {
+		if ip4 := candidate.IP.To4(); ip4 != nil {
+			return &net.UDPAddr{IP: ip4, Port: port}, nil
+		}
+	}
+	if len(ips) > 0 {
+		return &net.UDPAddr{IP: ips[0].IP, Port: port}, nil
+	}
+	return nil, errors.New("UDP target hostname resolved to no addresses")
 }
