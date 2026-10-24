@@ -43,6 +43,8 @@ type Socks5Server struct {
 	mu   sync.Mutex
 	addr string
 	ln   net.Listener
+	stop chan struct{}
+	done chan struct{}
 
 	// Optional dial overrides keep protocol-level integration tests isolated from
 	// the host network. Production leaves these nil and always uses marked sockets.
@@ -52,13 +54,20 @@ type Socks5Server struct {
 
 func NewSocks5Server(addr string) *Socks5Server { return &Socks5Server{addr: addr} }
 
-func (s *Socks5Server) Start() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.ln != nil { return nil }
-	ln, err := net.Listen("tcp", s.addr)
+func (s *Socks5Server) listenAddress() (string, error) {
+	// Production resolves eth1's current private IPv4; tests may pass host:port.
+	if s.addr == "eth1:12500" { return laluneSocks5ListenAddr() }
+	return s.addr, nil
+}
+
+func (s *Socks5Server) bindCurrent() error {
+	addr, err := s.listenAddress()
 	if err != nil { return err }
+	ln, err := net.Listen("tcp", addr)
+	if err != nil { return err }
+	s.mu.Lock()
 	s.ln = ln
+	s.mu.Unlock()
 	go func() {
 		for {
 			c, err := ln.Accept()
@@ -69,13 +78,51 @@ func (s *Socks5Server) Start() error {
 	return nil
 }
 
+func (s *Socks5Server) Start() error {
+	s.mu.Lock()
+	if s.stop != nil { s.mu.Unlock(); return nil }
+	s.stop = make(chan struct{})
+	s.done = make(chan struct{})
+	stop, done := s.stop, s.done
+	s.mu.Unlock()
+	if err := s.bindCurrent(); err != nil {
+		s.mu.Lock(); s.stop = nil; s.done = nil; s.mu.Unlock()
+		return err
+	}
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop: return
+			case <-ticker.C:
+				addr, err := s.listenAddress()
+				s.mu.Lock()
+				current := ""
+				if s.ln != nil { current = s.ln.Addr().String() }
+				if err != nil || current != addr {
+					old := s.ln; s.ln = nil
+					s.mu.Unlock()
+					if old != nil { _ = old.Close() }
+					if err == nil { _ = s.bindCurrent() }
+					continue
+				}
+				s.mu.Unlock()
+			}
+		}
+	}()
+	return nil
+}
+
 func (s *Socks5Server) Stop() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.ln != nil {
-		_ = s.ln.Close()
-		s.ln = nil
-	}
+	stop, done, ln := s.stop, s.done, s.ln
+	s.stop, s.done, s.ln = nil, nil, nil
+	s.mu.Unlock()
+	if stop != nil { close(stop) }
+	if ln != nil { _ = ln.Close() }
+	if done != nil { <-done }
 }
 
 func laluneDialer(network string) net.Dialer {
