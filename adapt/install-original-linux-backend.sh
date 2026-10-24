@@ -47,6 +47,24 @@ for path in "$INSTALL" "$DEPLOY_MANAGER" "$SERVICE"; do
     fi
 done
 
+# Provision a per-install panel password without printing it to logs.
+if [ -e "$AUTH_ENV" ]; then
+    [ -f "$AUTH_ENV" ] || fail "Panel auth environment path is not a regular file."
+    grep -Eq '^LALUNE_PANEL_PASSWORD=[0-9a-f]{64}$' "$AUTH_ENV" || fail "Existing panel auth environment file is malformed; refusing to replace it."
+    if [ ! -e "$AUTH_NOTE" ]; then
+        PANEL_PASSWORD=$(sed -n 's/^LALUNE_PANEL_PASSWORD=//p' "$AUTH_ENV")
+        (umask 077; printf 'LaLune CSQTT panel credentials\nUsername: admin\nPassword: %s\n\nKeep this file private.\n' "$PANEL_PASSWORD" > "$AUTH_NOTE")
+        chmod 0600 "$AUTH_NOTE"
+    fi
+else
+    PANEL_PASSWORD=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
+    [ "${#PANEL_PASSWORD}" -eq 64 ] || fail "Could not generate a secure panel password."
+    (umask 077; printf 'LALUNE_PANEL_PASSWORD=%s\n' "$PANEL_PASSWORD" > "$AUTH_ENV")
+    chmod 0600 "$AUTH_ENV"
+    (umask 077; printf 'LaLune CSQTT panel credentials\nUsername: admin\nPassword: %s\n\nKeep this file private.\n' "$PANEL_PASSWORD" > "$AUTH_NOTE")
+    chmod 0600 "$AUTH_NOTE"
+fi
+
 install -d -m 0755 /usr/local/bin /usr/local/lib
 install -m 0755 "$BIN" "$INSTALL"
 install -m 0755 "$BUNDLE_DIR/deploy-manager" "$DEPLOY_MANAGER"
@@ -55,16 +73,9 @@ for asset in deploy-csqtt-lalune.sh csqtt-lalune-linux-arm64 csqtt-lalune-linux-
     install -m 0755 "$BUNDLE_DIR/server-assets/$asset" "$ASSET_DIR/$asset"
 done
 printf '%s\n' "$MARKER_VALUE" > "$DEPLOY_MARKER"
-
 chmod 0644 "$DEPLOY_MARKER"
 
-# Provision a per-install panel password. Never print the secret into CI or
-# installer logs; root can read the mode-0600 credential note on the device.
-if [ -e "$AUTH_ENV" ]; then
-    [ -f "$AUTH_ENV" ] || fail "Panel auth environment path is not a regular file."
-    grep -q '^LALUNE_PANEL_PASSWORD=[0-9a-f]\{64\}
-# This backend is independent from the optional gateway service. Do not stop,
-# mask, conflict with, or otherwise alter lalune-gateway.service.
+# This backend is independent from the optional gateway service.
 cat > "$SERVICE_TMP" <<'UNIT'
 [Unit]
 Description=Original LaLune Linux backend (NanoPi ARM64)
@@ -102,50 +113,3 @@ fi
 
 echo "LaLune backend installed and active. lalune-gateway.service was not modified."
 echo "Panel login: admin; credentials are stored in /root/lalune-panel-credentials.txt (root-only)."
- "$AUTH_ENV" || fail "Existing panel auth environment file is malformed; refusing to replace it."
-else
-    PANEL_PASSWORD=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
-    [ "${#PANEL_PASSWORD}" -eq 64 ] || fail "Could not generate a secure panel password."
-    (umask 077; printf 'LALUNE_PANEL_PASSWORD=%s\n' "$PANEL_PASSWORD" > "$AUTH_ENV")
-    chmod 0600 "$AUTH_ENV"
-    (umask 077; printf 'LaLune CSQTT panel credentials\nUsername: admin\nPassword: %s\n\nKeep this file private.\n' "$PANEL_PASSWORD" > "$AUTH_NOTE")
-    chmod 0600 "$AUTH_NOTE"
-fi
-
-# This backend is independent from the optional gateway service. Do not stop,
-# mask, conflict with, or otherwise alter lalune-gateway.service.
-cat > "$SERVICE_TMP" <<'UNIT'
-[Unit]
-Description=Original LaLune Linux backend (NanoPi ARM64)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/lalune-backend
-Restart=on-failure
-RestartSec=3
-Environment=RUST_LOG=info
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-chmod 0644 "$SERVICE_TMP"
-mv -f "$SERVICE_TMP" "$SERVICE"
-
-systemctl daemon-reload
-systemctl enable lalune-backend.service
-if ! systemctl restart lalune-backend.service; then
-    echo "LaLune backend failed to start; diagnostic output follows:" >&2
-    systemctl status --no-pager --full lalune-backend.service >&2 || true
-    journalctl -u lalune-backend.service -n 80 --no-pager >&2 || true
-    exit 1
-fi
-if ! systemctl is-active --quiet lalune-backend.service; then
-    echo "LaLune backend is not active after restart; diagnostic output follows:" >&2
-    systemctl status --no-pager --full lalune-backend.service >&2 || true
-    journalctl -u lalune-backend.service -n 80 --no-pager >&2 || true
-    exit 1
-fi
-
-echo "LaLune backend installed and active. lalune-gateway.service was not modified."
