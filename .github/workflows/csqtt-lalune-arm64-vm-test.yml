@@ -1055,10 +1055,10 @@ jobs:
               "http://127.0.0.1:1062/deploy",
               data=json.dumps(payload).encode(),
               headers={
-        "Content-Type": "application/json",
-        "Authorization": "Basic " + base64.b64encode(b"admin:ci-panel-password-for-isolated-vm").decode(),
-        "Origin": "http://127.0.0.1:1062",
-    },
+              "Content-Type": "application/json",
+              "Authorization": "Basic " + base64.b64encode(b"admin:ci-panel-password-for-isolated-vm").decode(),
+              "Origin": "http://127.0.0.1:1062",
+          },
               method="POST",
           )
           with urllib.request.urlopen(req, timeout=15) as response:
@@ -1102,10 +1102,10 @@ jobs:
               "http://127.0.0.1:1062/deploy",
               data=json.dumps(payload).encode(),
               headers={
-        "Content-Type": "application/json",
-        "Authorization": "Basic " + base64.b64encode(b"admin:ci-panel-password-for-isolated-vm").decode(),
-        "Origin": "http://127.0.0.1:1062",
-    },
+              "Content-Type": "application/json",
+              "Authorization": "Basic " + base64.b64encode(b"admin:ci-panel-password-for-isolated-vm").decode(),
+              "Origin": "http://127.0.0.1:1062",
+          },
               method="POST",
           )
           with urllib.request.urlopen(req, timeout=15) as response:
