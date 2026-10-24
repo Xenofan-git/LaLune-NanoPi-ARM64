@@ -191,10 +191,10 @@ jobs:
 
       - name: Validate VK call hash with the pinned real ARM64 client
         env:
-          VK_CALL_HASH: ${{ secrets.VK_CALL_HASH }}
+          VK_CALL_HASH: ${{ secrets.VK_CALL_HACH_1 }}
         run: |
           set -euo pipefail
-          test -n "${VK_CALL_HASH:-}" || { echo "VK_CALL_HASH repository secret is missing" >&2; exit 1; }
+          test -n "${VK_CALL_HASH:-}" || { echo "VK_CALL_HACH_1 repository secret is missing" >&2; exit 1; }
           SSH=(ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1)
           SCP=(scp -i vm/id_ed25519 -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
           "${SCP[@]}" vm/real/client-linux-arm64 tester@127.0.0.1:/home/tester/client-linux-arm64
