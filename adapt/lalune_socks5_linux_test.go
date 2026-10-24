@@ -322,3 +322,24 @@ func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 		if n < 10 || string(got[10:n]) != "marked-udp-via-policy-route" { t.Fatalf("unexpected marked UDP response: %v", got[:n]) }
 	})
 }
+
+
+func TestSocks5ListenerRebindsAfterDownstreamAddressChange(t *testing.T) {
+ probe,err:=net.Listen("tcp","127.0.0.1:0"); if err!=nil {t.Fatal(err)}; port:=probe.Addr().(*net.TCPAddr).Port; _=probe.Close()
+ oldAddr:=net.JoinHostPort("127.0.0.1",strconv.Itoa(port)); newAddr:=net.JoinHostPort("127.0.0.2",strconv.Itoa(port)); current:=oldAddr
+ s:=NewSocks5Server("eth1:12500"); s.resolveAddr=func()(string,error){return current,nil}; s.pollInterval=20*time.Millisecond
+ s.dialTCPOverride=func(addr string)(net.Conn,error){return net.Dial("tcp",addr)}
+ s.dialUDPOverride=func()(*net.UDPConn,error){return net.ListenUDP("udp",&net.UDPAddr{IP:net.IPv4zero,Port:0})}
+ if err:=s.Start(); err!=nil {t.Fatal(err)}; defer s.Stop(); current=newAddr
+ deadline:=time.Now().Add(2*time.Second); got:=""; for time.Now().Before(deadline){s.mu.Lock(); if s.ln!=nil {got=s.ln.Addr().String()}; s.mu.Unlock(); if got==newAddr {break}; time.Sleep(10*time.Millisecond)}
+ if got!=newAddr {t.Fatalf("listener did not rebind: got %q want %q",got,newAddr)}
+ echo,err:=net.Listen("tcp","127.0.0.1:0"); if err!=nil {t.Fatal(err)}; defer echo.Close(); go func(){for{c,e:=echo.Accept();if e!=nil{return};go func(c net.Conn){defer c.Close();_,_=io.Copy(c,c)}(c)}}()
+ c,err:=net.DialTimeout("tcp",newAddr,time.Second);if err!=nil{t.Fatal(err)};_=c.SetDeadline(time.Now().Add(2*time.Second));socks5Handshake(t,c)
+ dst:=echo.Addr().(*net.TCPAddr);ip:=dst.IP.To4();req:=[]byte{5,1,0,1,ip[0],ip[1],ip[2],ip[3],byte(dst.Port>>8),byte(dst.Port)};if _,err=c.Write(req);err!=nil{t.Fatal(err)}
+ rep:=make([]byte,10);if _,err=io.ReadFull(c,rep);err!=nil{t.Fatal(err)};if rep[1]!=0{t.Fatalf("TCP CONNECT after rebind: %v",rep)};p:=[]byte("tcp-after-rebind");if _,err=c.Write(p);err!=nil{t.Fatal(err)};gotP:=make([]byte,len(p));if _,err=io.ReadFull(c,gotP);err!=nil{t.Fatal(err)};if string(gotP)!=string(p){t.Fatalf("TCP echo %q",gotP)};_=c.Close()
+ ue,err:=net.ListenUDP("udp",&net.UDPAddr{IP:net.IPv4(127,0,0,1)});if err!=nil{t.Fatal(err)};defer ue.Close();go func(){b:=make([]byte,1024);for{n,a,e:=ue.ReadFromUDP(b);if e!=nil{return};_,_=ue.WriteToUDP(b[:n],a)}}()
+ ctl,err:=net.DialTimeout("tcp",newAddr,time.Second);if err!=nil{t.Fatal(err)};defer ctl.Close();_=ctl.SetDeadline(time.Now().Add(3*time.Second));socks5Handshake(t,ctl);if _,err=ctl.Write([]byte{5,3,0,1,0,0,0,0,0,0});err!=nil{t.Fatal(err)}
+ ar:=make([]byte,10);if _,err=io.ReadFull(ctl,ar);err!=nil{t.Fatal(err)};if ar[1]!=0{t.Fatalf("UDP ASSOCIATE after rebind: %v",ar)};rip:=net.IP(ar[4:8]);if rip.IsUnspecified(){rip=net.IPv4(127,0,0,1)}
+ relay,err:=net.DialUDP("udp",nil,&net.UDPAddr{IP:rip,Port:int(binary.BigEndian.Uint16(ar[8:10]))});if err!=nil{t.Fatal(err)};defer relay.Close();_=relay.SetDeadline(time.Now().Add(3*time.Second));ud:=ue.LocalAddr().(*net.UDPAddr)
+ packet:=[]byte{0,0,0,1,127,0,0,1,byte(ud.Port>>8),byte(ud.Port)};packet=append(packet,[]byte("udp-after-rebind")...);if _,err=relay.Write(packet);err!=nil{t.Fatal(err)};b:=make([]byte,1024);n,err:=relay.Read(b);if err!=nil{t.Fatal(err)};if n<10||string(b[10:n])!="udp-after-rebind"{t.Fatalf("UDP echo after rebind: %q",b[10:n])}
+}
