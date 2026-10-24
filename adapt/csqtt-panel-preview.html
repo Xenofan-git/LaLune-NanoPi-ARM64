@@ -93,8 +93,8 @@ body{max-width:760px;padding:0 20px 112px}
  <div class="card" id="socks5TunnelCard">
   <h2>SOCKS5 через туннель</h2>
   <div class="statusline"><span class="dot"></span><span>Порт SOCKS5: TCP 12500 · предусмотрен адаптацией</span></div>
-  <p class="muted">Сервер слушает на всех локальных адресах без привязки к IP конкретного устройства. Исходящие TCP/UDP-соединения помечаются для таблицы маршрутизации LaLune и разрешаются только при наличии интерфейса csqtt0.</p>
-  <div class="notice">Состояние слушателя и успешность передачи TCP/UDP здесь не считываются из backend. Блок описывает конфигурацию, а не подтверждает активность туннеля или end-to-end соединение.</div>
+  <p class="muted">Слушатель привязывается только к текущему приватному IPv4-адресу downstream-интерфейса eth1: TCP 12500. На 0.0.0.0 и WAN-адрес не открывается. Авторизация SOCKS5 — без пароля. Исходящие TCP/UDP-соединения помечаются для таблицы маршрутизации LaLune (fwmark 0x4d53, table 202).</p>
+  <div class="notice">Проверка фактического состояния слушателя и end-to-end передачи пока не подключена к backend. Карточка описывает целевую конфигурацию, а не подтверждает активность сервиса.</div>
  </div>
 
  <h2>VK и получение хешей</h2><div class="card"><div class="statusline"><span id="vkDot" class="dot"></span><span id="vkState">Проверка токена…</span></div><p id="vkDetails" class="muted">Токен используется для режимов «Авто API» и «Авто VK».</p><div class="notice">Для VK-авторизации на NanoPi ARM64 требуется Chromium. Если он не установлен, выполните на NanoPi: <code>sudo sh /usr/local/lib/lalune/server-assets/install-vk-chromium.sh</code>.</div><div class="row"><button id="vkLogin">Войти через VK</button><button class="secondary" id="vkValidate">Проверить</button></div><button class="secondary small" id="vkDelete" style="margin-top:9px">Удалить сохранённый токен</button></div>
