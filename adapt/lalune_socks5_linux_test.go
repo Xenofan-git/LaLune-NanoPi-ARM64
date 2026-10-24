@@ -12,6 +12,21 @@ import (
 	"time"
 )
 
+func TestSocks5ListenAddressUsesDownstreamLANIP(t *testing.T) {
+	got, err := socks5ListenAddrFromAddrs([]net.Addr{
+		&net.IPNet{IP: net.ParseIP("fe80::1"), Mask: net.CIDRMask(64, 128)},
+		&net.IPNet{IP: net.ParseIP("192.168.5.1"), Mask: net.CIDRMask(24, 32)},
+	})
+	if err != nil { t.Fatal(err) }
+	if got != "192.168.5.1:12500" { t.Fatalf("listen address=%q", got) }
+	if _, err := socks5ListenAddrFromAddrs([]net.Addr{&net.IPNet{IP: net.ParseIP("8.8.8.8"), Mask: net.CIDRMask(32, 32)}}); err == nil {
+		t.Fatal("public IPv4 must not be used for unauthenticated SOCKS5")
+	}
+	if _, err := socks5ListenAddrFromAddrs(nil); err == nil {
+		t.Fatal("missing LAN address must fail closed")
+	}
+}
+
 func TestWriteSocksReplyUsesDynamicIPv4Address(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
