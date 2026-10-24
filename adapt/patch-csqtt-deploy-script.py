@@ -230,6 +230,17 @@ if src.count(old) != 1:
     raise SystemExit("expected one cleanup port-release sequence")
 src = src.replace(old, new, 1)
 
+# A previous helper may have been installed by another local project. It is
+# not safe to infer ownership from a shared /usr/local/bin basename. Keep it
+# untouched during both redeploy and uninstall; the in-process SOCKS5 server
+# is owned by the csqtt-lalune binary and needs no external HEV executable.
+for old in [
+    '    rm -f /usr/local/bin/lalune-hev-socks5-tunnel\n',
+    '    rm -f /usr/local/bin/csqtt-lalune-cascade /usr/local/bin/lalune-hev-socks5-server\n',
+    '    rm -f /usr/local/bin/lalune-hev-socks5-tunnel /usr/local/bin/lalune-hev-socks5-server\n',
+]:
+    src = src.replace(old, '    # Preserve legacy SOCKS5 helpers unless their ownership is independently verified.\n')
+
 # The patched server uses this variable for restart actions initiated by its panel.
 old = "Environment=CSQTT_SERVICE_MANAGER=systemd"
 new = old + "\nEnvironment=CSQTT_SYSTEMD_UNIT=csqtt-lalune.service"
