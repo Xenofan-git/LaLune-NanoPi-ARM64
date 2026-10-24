@@ -14,7 +14,26 @@ import (
 	"time"
 )
 
+
 const laluneSocksMark = 0x4d53
+
+// The unauthenticated SOCKS5 service is reachable only on the downstream
+// LAN interface. Resolve its current IPv4 address at startup; never bind :12500
+// or 0.0.0.0 because this service intentionally has no password.
+func laluneSocks5ListenAddr() (string, error) {
+	iface, err := net.InterfaceByName("eth1")
+	if err != nil { return "", errors.New("downstream LAN interface eth1 is unavailable") }
+	addrs, err := iface.Addrs()
+	if err != nil { return "", err }
+	for _, addr := range addrs {
+		ip, _, err := net.ParseCIDR(addr.String())
+		if err != nil { continue }
+		ip = ip.To4()
+		if ip == nil || !ip.IsPrivate() || ip.IsUnspecified() || ip.IsLoopback() { continue }
+		return net.JoinHostPort(ip.String(), "12500"), nil
+	}
+	return "", errors.New("eth1 has no private IPv4 address; refusing to expose unauthenticated SOCKS5")
+}
 
 type Socks5Server struct {
 	mu   sync.Mutex
