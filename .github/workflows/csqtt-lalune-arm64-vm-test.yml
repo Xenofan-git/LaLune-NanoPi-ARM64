@@ -224,6 +224,10 @@ jobs:
               raise SystemExit(1)
           statuses = [str(row.get("status", "unknown")) for row in rows]
           print("VK_HASH_VALIDATION_STATUSES", ",".join(statuses))
+          for row in rows:
+              message = str(row.get("message", "")).replace(str(row.get("hash", "")), "[REDACTED]")
+              if message:
+                  print("VK_HASH_VALIDATION_DETAIL", message[:500])
           if not any(row.get("status") == "valid" for row in rows):
               raise SystemExit(1)
           PY
