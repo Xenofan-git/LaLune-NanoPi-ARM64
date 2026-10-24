@@ -229,7 +229,11 @@ func (s *Socks5Server) handleConnect(c net.Conn) {
 }
 
 func (s *Socks5Server) handleUDPAssociate(c net.Conn) {
-	u, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	bindIP := net.IPv4zero
+	if local, ok := c.LocalAddr().(*net.TCPAddr); ok && local.IP != nil && !local.IP.IsUnspecified() {
+		bindIP = local.IP
+	}
+	u, err := net.ListenUDP("udp", &net.UDPAddr{IP: bindIP, Port: 0})
 	if err != nil { _ = writeSocksReply(c, 1, &net.TCPAddr{}); return }
 	defer u.Close()
 
