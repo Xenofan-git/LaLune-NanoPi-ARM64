@@ -45,6 +45,8 @@ type Socks5Server struct {
 	ln   net.Listener
 	stop chan struct{}
 	done chan struct{}
+	resolveAddr func() (string, error)
+	pollInterval time.Duration
 
 	// Optional dial overrides keep protocol-level integration tests isolated from
 	// the host network. Production leaves these nil and always uses marked sockets.
@@ -55,6 +57,7 @@ type Socks5Server struct {
 func NewSocks5Server(addr string) *Socks5Server { return &Socks5Server{addr: addr} }
 
 func (s *Socks5Server) listenAddress() (string, error) {
+	if s.resolveAddr != nil { return s.resolveAddr() }
 	// Production resolves eth1's current private IPv4; tests may pass host:port.
 	if s.addr == "eth1:12500" { return laluneSocks5ListenAddr() }
 	return s.addr, nil
@@ -91,7 +94,9 @@ func (s *Socks5Server) Start() error {
 	}
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(5 * time.Second)
+		interval := s.pollInterval
+		if interval <= 0 { interval = 5 * time.Second }
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
