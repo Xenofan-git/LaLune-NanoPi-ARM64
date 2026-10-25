@@ -328,11 +328,13 @@ func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 
 func TestSocks5ListenerRebindsAfterDownstreamAddressChange(t *testing.T) {
  probe,err:=net.Listen("tcp","127.0.0.1:0"); if err!=nil {t.Fatal(err)}; port:=probe.Addr().(*net.TCPAddr).Port; _=probe.Close()
- oldAddr:=net.JoinHostPort("127.0.0.1",strconv.Itoa(port)); newAddr:=net.JoinHostPort("127.0.0.2",strconv.Itoa(port)); current:=oldAddr
- s:=NewSocks5Server("eth1:12500"); s.resolveAddr=func()(string,error){return current,nil}; s.pollInterval=20*time.Millisecond
+ oldAddr:=net.JoinHostPort("127.0.0.1",strconv.Itoa(port)); newAddr:=net.JoinHostPort("127.0.0.2",strconv.Itoa(port))
+ var addrMu sync.Mutex
+ current:=oldAddr
+ s:=NewSocks5Server("eth1:12500"); s.resolveAddr=func()(string,error){addrMu.Lock(); defer addrMu.Unlock(); return current,nil}; s.pollInterval=20*time.Millisecond
  s.dialTCPOverride=func(addr string)(net.Conn,error){return net.Dial("tcp",addr)}
  s.dialUDPOverride=func()(*net.UDPConn,error){return net.ListenUDP("udp",&net.UDPAddr{IP:net.IPv4zero,Port:0})}
- if err:=s.Start(); err!=nil {t.Fatal(err)}; defer s.Stop(); current=newAddr
+ if err:=s.Start(); err!=nil {t.Fatal(err)}; defer s.Stop(); addrMu.Lock(); current=newAddr; addrMu.Unlock()
  deadline:=time.Now().Add(2*time.Second); got:=""; for time.Now().Before(deadline){s.mu.Lock(); if s.ln!=nil {got=s.ln.Addr().String()}; s.mu.Unlock(); if got==newAddr {break}; time.Sleep(10*time.Millisecond)}
  if got!=newAddr {t.Fatalf("listener did not rebind: got %q want %q",got,newAddr)}
  echo,err:=net.Listen("tcp","127.0.0.1:0"); if err!=nil {t.Fatal(err)}; defer echo.Close(); go func(){for{c,e:=echo.Accept();if e!=nil{return};go func(c net.Conn){defer c.Close();_,_=io.Copy(c,c)}(c)}}()
