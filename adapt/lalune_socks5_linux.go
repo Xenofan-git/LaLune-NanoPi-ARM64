@@ -29,14 +29,21 @@ func laluneSocks5ListenAddr() (string, error) {
 }
 
 func socks5ListenAddrFromAddrs(addrs []net.Addr) (string, error) {
+	var selected net.IP
 	for _, addr := range addrs {
 		ip, _, err := net.ParseCIDR(addr.String())
 		if err != nil { continue }
 		ip = ip.To4()
 		if ip == nil || !ip.IsPrivate() || ip.IsUnspecified() || ip.IsLoopback() { continue }
-		return net.JoinHostPort(ip.String(), "12500"), nil
+		if selected != nil && !selected.Equal(ip) {
+			return "", errors.New("eth1 has multiple private IPv4 addresses; refusing ambiguous unauthenticated SOCKS5 bind")
+		}
+		selected = append(net.IP(nil), ip...)
 	}
-	return "", errors.New("eth1 has no private IPv4 address; refusing to expose unauthenticated SOCKS5")
+	if selected == nil {
+		return "", errors.New("eth1 has no private IPv4 address; refusing to expose unauthenticated SOCKS5")
+	}
+	return net.JoinHostPort(selected.String(), "12500"), nil
 }
 
 type Socks5Server struct {
@@ -108,6 +115,28 @@ func (s *Socks5Server) acceptLoop(ln net.Listener, stop <-chan struct{}) {
 	}
 }
 
+func (s *Socks5Server) closeActiveSessions() {
+	s.mu.Lock()
+	conns := make([]net.Conn, 0, len(s.active))
+	for conn := range s.active { conns = append(conns, conn) }
+	s.mu.Unlock()
+	for _, conn := range conns { _ = conn.Close() }
+}
+
+func (s *Socks5Server) trackConn(conn net.Conn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped { _ = conn.Close(); return false }
+	s.active[conn] = struct{}{}
+	return true
+}
+
+func (s *Socks5Server) untrackConn(conn net.Conn) {
+	s.mu.Lock()
+	delete(s.active, conn)
+	s.mu.Unlock()
+}
+
 func (s *Socks5Server) bindCurrent(stop <-chan struct{}) error {
 	addr, err := s.listenAddress()
 	if err != nil { return err }
@@ -147,6 +176,9 @@ func (s *Socks5Server) Start() error {
 				s.ln = nil
 				s.mu.Unlock()
 				if old != nil { _ = old.Close() }
+				// An address transition invalidates sessions accepted on the old
+				// downstream address. Close both client and upstream sockets.
+				s.closeActiveSessions()
 				if err == nil { _ = s.bindCurrent(stop) }
 			}
 		}
@@ -304,7 +336,8 @@ func (s *Socks5Server) handleConnect(c net.Conn) {
 	if err != nil { _ = writeSocksReply(c, 8, &net.TCPAddr{}); return }
 	out, err := s.dialTCP(addr)
 	if err != nil { _ = writeSocksReply(c, 1, &net.TCPAddr{}); return }
-	defer out.Close()
+	if !s.trackConn(out) { return }
+	defer func() { s.untrackConn(out); _ = out.Close() }()
 
 	c.SetDeadline(time.Time{})
 	if err := writeSocksReply(c, 0, out.LocalAddr()); err != nil { return }
@@ -334,7 +367,8 @@ func (s *Socks5Server) handleUDPAssociate(c net.Conn) {
 	}
 	u, err := net.ListenUDP("udp", &net.UDPAddr{IP: bindIP, Port: 0})
 	if err != nil { _ = writeSocksReply(c, 1, &net.TCPAddr{}); return }
-	defer u.Close()
+	if !s.trackConn(u) { return }
+	defer func() { s.untrackConn(u); _ = u.Close() }()
 
 	if err := writeSocksReply(c, 0, u.LocalAddr()); err != nil { return }
 	c.SetDeadline(time.Time{})
