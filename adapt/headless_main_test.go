@@ -48,6 +48,33 @@ func TestAutoApiCallCountAndHashBatchContract(t *testing.T) {
 	}
 }
 
+func TestPanelSecurityUsesInstallerCredentials(t *testing.T) {
+	oldPassword, hadPassword := os.LookupEnv("LALUNE_PANEL_PASSWORD")
+	oldUser, hadUser := os.LookupEnv("LALUNE_PANEL_USER")
+	oldCompatPassword, hadCompatPassword := os.LookupEnv("CSQTT_WEB_PASS")
+	oldCompatUser, hadCompatUser := os.LookupEnv("CSQTT_WEB_USER")
+	t.Cleanup(func() {
+		for key, value := range map[string]struct{ value string; had bool }{
+			"LALUNE_PANEL_PASSWORD": {oldPassword, hadPassword},
+			"LALUNE_PANEL_USER": {oldUser, hadUser},
+			"CSQTT_WEB_PASS": {oldCompatPassword, hadCompatPassword},
+			"CSQTT_WEB_USER": {oldCompatUser, hadCompatUser},
+		} {
+			if value.had { _ = os.Setenv(key, value.value) } else { _ = os.Unsetenv(key) }
+		}
+	})
+	_ = os.Unsetenv("LALUNE_PANEL_PASSWORD")
+	_ = os.Unsetenv("LALUNE_PANEL_USER")
+	_ = os.Setenv("CSQTT_WEB_PASS", "installer-secret")
+	_ = os.Setenv("CSQTT_WEB_USER", "installer-user")
+	handler := panelSecurity(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	req := httptest.NewRequest(http.MethodGet, "http://localhost/", nil)
+	req.SetBasicAuth("installer-user", "installer-secret")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent { t.Fatalf("installer credentials status = %d, want 204", w.Code) }
+}
+
 func TestPrivateClient(t *testing.T) {
 	tests := []struct {
 		name       string
