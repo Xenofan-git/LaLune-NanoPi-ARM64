@@ -477,7 +477,7 @@ func TestSocks5StopRacingWithAddressResolution(t *testing.T) {
 	var calls int
 	s.resolveAddr = func() (string, error) {
 		calls++
-		if calls == 1 { return "", errors.New("address not assigned yet") }
+		if calls == 1 { return "", fmt.Errorf("%w: address not assigned yet", errSocksAddressUnavailable) }
 		select { case <-entered: default: close(entered) }
 		<-release
 		return "127.0.0.1:1", nil
