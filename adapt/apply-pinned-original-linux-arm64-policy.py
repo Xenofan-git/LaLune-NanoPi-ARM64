@@ -157,6 +157,7 @@ s, struct_count = struct_pattern.subn("""type LinuxTun struct {
 	workers      sync.WaitGroup
 	tunOpen      func() (*os.File, error)
 	tunSetIFF    func(*os.File, *unix.Ifreq) error
+	socksRuleCreated bool
 }""", s, count=1)
 if struct_count != 1:
     raise SystemExit(f"LinuxTun struct marker missing or ambiguous: replaced {struct_count}")
@@ -319,9 +320,9 @@ setup = '''func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) error {
 		dnsServers = append(dnsServers, parsed.To4().String())
 	}
 	// Refuse to touch a non-empty table or occupied rule priority.
-	if err := t.app.runSudo("test -z \\"$(ip -o route show table 202 2>/dev/null)\\" && test -z \\"$(ip -o rule show pref 22020 2>/dev/null)\\""); err != nil {
+	if err := t.app.runSudo("test -z \\"$(ip -o route show table 202 2>/dev/null)\\" && test -z \\"$(ip -o rule show pref 22020 2>/dev/null) && test -z \\"$(ip -o rule show pref 22015 2>/dev/null)\\"\\""); err != nil {
 		t.app.core.AddLog(fmt.Sprintf("[TUN] ОШИБКА: table 202 или priority 22020 уже заняты; чужие записи сохранены: %v", err))
-		return fmt.Errorf("TUN routing table 202 or rule priority 22020 is already occupied: %w", err)
+		return fmt.Errorf("TUN routing table 202 or rule priority 22020/22015 is already occupied: %w", err)
 	}
 	cmd := fmt.Sprintf("ip tuntap add dev csqtt0 mode tun && ip addr add %s/32 dev csqtt0 && ip link set csqtt0 up && ip link set csqtt0 mtu 1300", ip.To4().String())
 	if err := t.app.runSudo(cmd); err != nil {
