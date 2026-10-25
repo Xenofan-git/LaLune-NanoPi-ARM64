@@ -18,12 +18,14 @@ import (
 
 const laluneSocksMark = 0x4d53
 
+var errSocksAddressUnavailable = errors.New("SOCKS5 downstream address unavailable")
+
 // The unauthenticated SOCKS5 service is reachable only on the downstream
 // LAN interface. Resolve its current IPv4 address at startup; never bind :12500
 // or 0.0.0.0 because this service intentionally has no password.
 func laluneSocks5ListenAddr() (string, error) {
 	iface, err := net.InterfaceByName("eth1")
-	if err != nil { return "", errors.New("downstream LAN interface eth1 is unavailable") }
+	if err != nil { return "", fmt.Errorf("%w: downstream LAN interface eth1 is unavailable", errSocksAddressUnavailable) }
 	addrs, err := iface.Addrs()
 	if err != nil { return "", err }
 	return socks5ListenAddrFromAddrs(addrs)
@@ -42,7 +44,7 @@ func socks5ListenAddrFromAddrs(addrs []net.Addr) (string, error) {
 		selected = append(net.IP(nil), ip...)
 	}
 	if selected == nil {
-		return "", errors.New("eth1 has no private IPv4 address; refusing to expose unauthenticated SOCKS5")
+		return "", fmt.Errorf("%w: eth1 has no private IPv4 address; refusing to expose unauthenticated SOCKS5", errSocksAddressUnavailable)
 	}
 	return net.JoinHostPort(selected.String(), "12500"), nil
 }
@@ -158,6 +160,11 @@ func (s *Socks5Server) Start() error {
 	// A resolved address that cannot be bound is not: surface that error so
 	// systemd does not report a healthy SOCKS service with no listening socket.
 	initialAddr, resolveErr := s.listenAddress()
+	if resolveErr != nil && !errors.Is(resolveErr, errSocksAddressUnavailable) {
+		s.mu.Lock(); s.stopped = true; s.stop, s.done = nil, nil; s.mu.Unlock()
+		close(stop); close(done)
+		return fmt.Errorf("resolve SOCKS5 bind address: %w", resolveErr)
+	}
 	if resolveErr == nil {
 		ln, listenErr := net.Listen("tcp", initialAddr)
 		if listenErr != nil {
