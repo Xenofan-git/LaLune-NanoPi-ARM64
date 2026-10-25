@@ -40,58 +40,93 @@ func socks5ListenAddrFromAddrs(addrs []net.Addr) (string, error) {
 }
 
 type Socks5Server struct {
-	mu   sync.Mutex
+	mu sync.Mutex
 	addr string
-	ln   net.Listener
+	ln net.Listener
 	stop chan struct{}
 	done chan struct{}
 	resolveAddr func() (string, error)
 	pollInterval time.Duration
+	stopped bool
+	active map[net.Conn]struct{}
+	handlers sync.WaitGroup
 
-	// Optional dial overrides keep protocol-level integration tests isolated from
-	// the host network. Production leaves these nil and always uses marked sockets.
 	dialTCPOverride func(string) (net.Conn, error)
 	dialUDPOverride func() (*net.UDPConn, error)
 }
 
-func NewSocks5Server(addr string) *Socks5Server { return &Socks5Server{addr: addr} }
+func NewSocks5Server(addr string) *Socks5Server {
+	return &Socks5Server{addr: addr, active: make(map[net.Conn]struct{})}
+}
 
 func (s *Socks5Server) listenAddress() (string, error) {
 	if s.resolveAddr != nil { return s.resolveAddr() }
-	// Production resolves eth1's current private IPv4; tests may pass host:port.
 	if s.addr == "eth1:12500" { return laluneSocks5ListenAddr() }
 	return s.addr, nil
 }
 
-func (s *Socks5Server) bindCurrent() error {
+// publishListener serializes listener publication with Stop. A listener created
+// while shutdown is in progress is closed instead of becoming reachable.
+func (s *Socks5Server) publishListener(ln net.Listener, stop <-chan struct{}) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped || s.stop == nil || s.stop != stop {
+		_ = ln.Close()
+		return false
+	}
+	old := s.ln
+	s.ln = ln
+	if old != nil { _ = old.Close() }
+	s.handlers.Add(1)
+	go s.acceptLoop(ln, stop)
+	return true
+}
+
+func (s *Socks5Server) acceptLoop(ln net.Listener, stop <-chan struct{}) {
+	defer s.handlers.Done()
+	for {
+		conn, err := ln.Accept()
+		if err != nil { return }
+		s.mu.Lock()
+		if s.stopped || s.stop != stop {
+			s.mu.Unlock()
+			_ = conn.Close()
+			return
+		}
+		s.active[conn] = struct{}{}
+		s.handlers.Add(1)
+		s.mu.Unlock()
+		go func(c net.Conn) {
+			defer s.handlers.Done()
+			defer func() {
+				s.mu.Lock()
+				delete(s.active, c)
+				s.mu.Unlock()
+			}()
+			s.handle(c)
+		}(conn)
+	}
+}
+
+func (s *Socks5Server) bindCurrent(stop <-chan struct{}) error {
 	addr, err := s.listenAddress()
 	if err != nil { return err }
 	ln, err := net.Listen("tcp", addr)
 	if err != nil { return err }
-	s.mu.Lock()
-	s.ln = ln
-	s.mu.Unlock()
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil { return }
-			go s.handle(c)
-		}
-	}()
+	if !s.publishListener(ln, stop) { return errors.New("SOCKS5 server stopped during bind") }
 	return nil
 }
 
 func (s *Socks5Server) Start() error {
 	s.mu.Lock()
-	if s.stop != nil { s.mu.Unlock(); return nil }
-	s.stop = make(chan struct{})
-	s.done = make(chan struct{})
-	stop, done := s.stop, s.done
+	if !s.stopped && s.stop != nil { s.mu.Unlock(); return nil }
+	stop, done := make(chan struct{}), make(chan struct{})
+	s.stop, s.done, s.stopped = stop, done, false
 	s.mu.Unlock()
-	if err := s.bindCurrent(); err != nil {
-		s.mu.Lock(); s.stop = nil; s.done = nil; s.mu.Unlock()
-		return err
-	}
+
+	// An unavailable downstream address is not fatal: keep the service closed
+	// and let the monitor bind when eth1 receives a private IPv4 address.
+	_ = s.bindCurrent(stop)
 	go func() {
 		defer close(done)
 		interval := s.pollInterval
@@ -104,16 +139,15 @@ func (s *Socks5Server) Start() error {
 			case <-ticker.C:
 				addr, err := s.listenAddress()
 				s.mu.Lock()
+				if s.stopped || s.stop != stop { s.mu.Unlock(); return }
 				current := ""
 				if s.ln != nil { current = s.ln.Addr().String() }
-				if err != nil || current != addr {
-					old := s.ln; s.ln = nil
-					s.mu.Unlock()
-					if old != nil { _ = old.Close() }
-					if err == nil { _ = s.bindCurrent() }
-					continue
-				}
+				if err == nil && current == addr { s.mu.Unlock(); continue }
+				old := s.ln
+				s.ln = nil
 				s.mu.Unlock()
+				if old != nil { _ = old.Close() }
+				if err == nil { _ = s.bindCurrent(stop) }
 			}
 		}
 	}()
@@ -122,12 +156,25 @@ func (s *Socks5Server) Start() error {
 
 func (s *Socks5Server) Stop() {
 	s.mu.Lock()
+	if s.stop == nil {
+		s.stopped = true
+		s.mu.Unlock()
+		return
+	}
 	stop, done, ln := s.stop, s.done, s.ln
+	s.stopped = true
 	s.stop, s.done, s.ln = nil, nil, nil
+	conns := make([]net.Conn, 0, len(s.active))
+	for conn := range s.active { conns = append(conns, conn) }
 	s.mu.Unlock()
-	if stop != nil { close(stop) }
+
+	close(stop)
 	if ln != nil { _ = ln.Close() }
+	for _, conn := range conns { _ = conn.Close() }
 	if done != nil { <-done }
+	// No further handler/accept-loop Add calls are possible after stopped=true
+	// and the listener is closed; wait for all accepted sessions to unwind.
+	s.handlers.Wait()
 }
 
 func laluneDialer(network string) net.Dialer {
