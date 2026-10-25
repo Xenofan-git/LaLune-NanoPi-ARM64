@@ -25,7 +25,7 @@ addition = '''\tif err := t.app.runSudo("ip rule add pref 22015 fwmark 0x4d53/0x
 \t\t\trollback()
 \t\t\treturn fmt.Errorf("start SOCKS5 listener: %w", err)
 \t\t}
-\t\tt.app.core.AddLog("[SOCKS5] Listening on :12500; bind address is dynamic")
+\t\tt.app.core.AddLog("[SOCKS5] Address monitor started; waiting for eth1 private IPv4 or rebinding dynamically")
 \t}
 '''
 if marker not in s:
