@@ -76,7 +76,7 @@ mkdir -p "$ROOT/host/usr/local/bin" "$ROOT/host/usr/local/lib" "$ROOT/host/etc/s
 if SS_MODE=occupied-tcp "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
   echo "FAIL: installer accepted occupied TCP port" >&2; exit 1
 fi
-grep -q 'TCP port 47002 is occupied' "$ROOT/out"
+grep -q 'TCP panel port 47002 is occupied' "$ROOT/out"
 [[ ! -e "$ROOT/host/etc/csqtt-lalune" && ! -e "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
 
 # Case 1b: an existing TUN interface is never adopted or reconfigured.
