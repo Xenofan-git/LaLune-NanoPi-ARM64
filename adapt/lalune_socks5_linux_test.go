@@ -29,6 +29,55 @@ func TestSocks5ListenAddressUsesDownstreamLANIP(t *testing.T) {
 	}
 }
 
+func TestSocks5ListenAddressRejectsMultiplePrivateIPv4s(t *testing.T) {
+	_, err := socks5ListenAddrFromAddrs([]net.Addr{
+		&net.IPNet{IP: net.ParseIP("192.168.5.1"), Mask: net.CIDRMask(24, 32)},
+		&net.IPNet{IP: net.ParseIP("10.0.0.1"), Mask: net.CIDRMask(24, 32)},
+	})
+	if err == nil { t.Fatal("multiple private IPv4 addresses must be rejected as ambiguous") }
+}
+
+func TestSocks5RebindClosesSessionsFromOldAddress(t *testing.T) {
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil { t.Fatal(err) }
+	port := probe.Addr().(*net.TCPAddr).Port
+	_ = probe.Close()
+	oldAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	newAddr := net.JoinHostPort("127.0.0.2", strconv.Itoa(port))
+	var mu sync.Mutex
+	current := oldAddr
+	s := NewSocks5Server("eth1:12500")
+	s.pollInterval = 10 * time.Millisecond
+	s.resolveAddr = func() (string, error) { mu.Lock(); defer mu.Unlock(); return current, nil }
+	if err := s.Start(); err != nil { t.Fatal(err) }
+	defer s.Stop()
+	client, err := net.DialTimeout("tcp", oldAddr, time.Second)
+	if err != nil { t.Fatal(err) }
+	defer client.Close()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		s.mu.Lock(); active := len(s.active); s.mu.Unlock()
+		if active == 1 { break }
+		time.Sleep(time.Millisecond)
+	}
+	s.mu.Lock(); active := len(s.active); s.mu.Unlock()
+	if active != 1 { t.Fatalf("expected one active session, got %d", active) }
+	mu.Lock(); current = newAddr; mu.Unlock()
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		s.mu.Lock(); got := ""; if s.ln != nil { got = s.ln.Addr().String() }; s.mu.Unlock()
+		if got == newAddr { break }
+		time.Sleep(5 * time.Millisecond)
+	}
+	s.mu.Lock(); got := ""; if s.ln != nil { got = s.ln.Addr().String() }; s.mu.Unlock()
+	if got != newAddr { t.Fatalf("listener did not rebind: %q", got) }
+	_ = client.SetReadDeadline(time.Now().Add(time.Second))
+	var b [1]byte
+	if _, err := client.Read(b[:]); err == nil { t.Fatal("old downstream session remained open after rebind") }
+	s.mu.Lock(); remaining := len(s.active); s.mu.Unlock()
+	if remaining != 0 { t.Fatalf("%d old sessions remain after rebind", remaining) }
+}
+
 func TestWriteSocksReplyUsesDynamicIPv4Address(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
