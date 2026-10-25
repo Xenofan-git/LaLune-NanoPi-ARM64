@@ -8,7 +8,7 @@ The Deploy button uses the original CSQTT v2.1.9 deployment flow, derived from t
 - Unit: `csqtt-lalune.service`
 - Config/database: `/etc/csqtt-lalune`
 - Helper/runtime/log paths: namespaced under `/usr/local/lib/csqtt-lalune`, `/run/csqtt-lalune`, and `/var/log/csqtt-lalune-install.log`
-- UDP peer port: `47000`; HTTPS web port: `47002`
+- UDP peer port: `47000`; WireGuard peer port: `47001`; HTTPS web port: `47002`; local SOCKS5 profile default: `47005`
 - TUN/subnet and policy identifiers: `csqtt-lalune0`, `10.67.68.0/24`, policy tables `47001` and `47066`, marks `0x6741/0x6742`.
 
 ## Isolation changes to the upstream flow

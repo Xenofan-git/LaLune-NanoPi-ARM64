@@ -86,4 +86,12 @@ for value in [
 ]:
     forbid(value)
 
+# Shared /usr/local/bin legacy helpers are not proven to be owned by this app.
+for value in [
+    'rm -f /usr/local/bin/lalune-hev-socks5-tunnel',
+    'rm -f /usr/local/bin/lalune-hev-socks5-server',
+]:
+    forbid(value)
+need('Preserve legacy SOCKS5 helpers unless their ownership is independently verified.')
+
 print("CSQTT LaLune namespaced original deploy.sh static tests: PASS")

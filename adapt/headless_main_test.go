@@ -5,7 +5,9 @@ package main
 import (
 	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -46,6 +48,33 @@ func TestAutoApiCallCountAndHashBatchContract(t *testing.T) {
 	if got, want := batch.CallIds(), []string{"fixture-call-1", "fixture-call-2"}; !slices.Equal(got, want) {
 		t.Fatalf("Auto API call IDs = %#v, want %#v", got, want)
 	}
+}
+
+func TestPanelSecurityUsesInstallerCredentials(t *testing.T) {
+	oldPassword, hadPassword := os.LookupEnv("LALUNE_PANEL_PASSWORD")
+	oldUser, hadUser := os.LookupEnv("LALUNE_PANEL_USER")
+	oldCompatPassword, hadCompatPassword := os.LookupEnv("CSQTT_WEB_PASS")
+	oldCompatUser, hadCompatUser := os.LookupEnv("CSQTT_WEB_USER")
+	t.Cleanup(func() {
+		for key, value := range map[string]struct{ value string; had bool }{
+			"LALUNE_PANEL_PASSWORD": {oldPassword, hadPassword},
+			"LALUNE_PANEL_USER": {oldUser, hadUser},
+			"CSQTT_WEB_PASS": {oldCompatPassword, hadCompatPassword},
+			"CSQTT_WEB_USER": {oldCompatUser, hadCompatUser},
+		} {
+			if value.had { _ = os.Setenv(key, value.value) } else { _ = os.Unsetenv(key) }
+		}
+	})
+	_ = os.Unsetenv("LALUNE_PANEL_PASSWORD")
+	_ = os.Unsetenv("LALUNE_PANEL_USER")
+	_ = os.Setenv("CSQTT_WEB_PASS", "installer-secret")
+	_ = os.Setenv("CSQTT_WEB_USER", "installer-user")
+	handler := panelSecurity(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	req := httptest.NewRequest(http.MethodGet, "http://localhost/", nil)
+	req.SetBasicAuth("installer-user", "installer-secret")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent { t.Fatalf("installer credentials status = %d, want 204", w.Code) }
 }
 
 func TestPrivateClient(t *testing.T) {
@@ -471,4 +500,16 @@ func TestCaptchaStateEndpointRequiresGet(t *testing.T) {
 	if got := rec.Header().Get("Allow"); got != "GET" {
 		t.Fatalf("POST /captcha/state Allow = %q, want GET", got)
 	}
+}
+
+
+func TestPanelListenAddressUsesInstallerPort(t *testing.T) {
+    old, had := os.LookupEnv("CSQTT_LALUNE_WEB_PORT")
+    t.Cleanup(func(){ if had { _ = os.Setenv("CSQTT_LALUNE_WEB_PORT", old) } else { _ = os.Unsetenv("CSQTT_LALUNE_WEB_PORT") } })
+    _ = os.Setenv("CSQTT_LALUNE_WEB_PORT", "47002")
+    got, err := panelListenAddress()
+    if err != nil { t.Fatal(err) }
+    if got != "0.0.0.0:47002" { t.Fatalf("panelListenAddress() = %q, want 0.0.0.0:47002", got) }
+    _ = os.Setenv("CSQTT_LALUNE_WEB_PORT", "70000")
+    if _, err := panelListenAddress(); err == nil { t.Fatal("invalid panel port was accepted") }
 }

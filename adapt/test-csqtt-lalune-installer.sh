@@ -72,43 +72,35 @@ export TEST_SYSTEMCTL_LOG="$ROOT/systemctl.log" TEST_ACTIVE="$ROOT/active"
 # Simulate standard host parent directories that exist on real Linux systems.
 mkdir -p "$ROOT/host/usr/local/bin" "$ROOT/host/usr/local/lib" "$ROOT/host/etc/systemd/system" "$ROOT/host/var/lib" "$ROOT/host/var/log"
 
-# Case 1: occupied UDP listener is not killed and no managed files are created.
-if SS_MODE=occupied-udp "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
-  echo "FAIL: installer accepted occupied UDP port" >&2; exit 1
-fi
-grep -q 'UDP port 47000 is occupied' "$ROOT/out"
-[[ ! -e "$ROOT/host/etc/csqtt-lalune" && ! -e "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
-! grep -Eq 'stop|kill' "$TEST_SYSTEMCTL_LOG" 2>/dev/null
-
-# Case 1b: occupied TCP web port is also refused before any filesystem changes.
+# Case 1: occupied TCP web port is refused before any filesystem changes.
 if SS_MODE=occupied-tcp "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
   echo "FAIL: installer accepted occupied TCP port" >&2; exit 1
 fi
-grep -q 'TCP port 47002 is occupied' "$ROOT/out"
+grep -q 'TCP panel port 47002 is occupied' "$ROOT/out"
 [[ ! -e "$ROOT/host/etc/csqtt-lalune" && ! -e "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
 
-# Case 1c: an existing TUN interface is never adopted or reconfigured.
+# Case 1b: an existing TUN interface is never adopted or reconfigured.
 if IP_TUN_PRESENT=1 "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
   echo "FAIL: installer accepted existing LaLune TUN" >&2; exit 1
 fi
 grep -q 'csqtt-lalune0 already exists' "$ROOT/out"
 [[ ! -e "$ROOT/host/etc/csqtt-lalune" ]]
 
-# Case 1d: non-empty dedicated route table is never flushed or adopted.
+# Case 1c: non-empty dedicated route table is never flushed or adopted.
 if IP_ROUTE_PRESENT=1 "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
   echo "FAIL: installer accepted non-empty LaLune route table" >&2; exit 1
 fi
 grep -q 'route table 47001/47066 is non-empty' "$ROOT/out"
 [[ ! -e "$ROOT/host/etc/csqtt-lalune" ]]
 
-# Case 1e: existing namespaced firewall markers are not adopted or deleted.
+# Case 1d: existing namespaced firewall markers are not adopted or deleted.
 if IPTABLES_RULES='-A OUTPUT -m comment --comment CSQTT_LALUNE_OLD -j ACCEPT' "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
   echo "FAIL: installer accepted existing LaLune firewall markers" >&2; exit 1
 fi
 grep -q 'LaLune firewall markers already exist' "$ROOT/out"
 [[ ! -e "$ROOT/host/etc/csqtt-lalune" ]]
 
-# Case 1f: an unmarked config directory is treated as operator-owned, never adopted.
+# Case 1e: an unmarked config directory is treated as operator-owned, never adopted.
 mkdir -p "$ROOT/host/etc/csqtt-lalune"
 printf 'production-secret-placeholder\n' > "$ROOT/host/etc/csqtt-lalune/operator.conf"
 if "$ROOT/package/install.sh" >"$ROOT/out" 2>&1; then
@@ -119,7 +111,7 @@ grep -Fxq 'production-secret-placeholder' "$ROOT/host/etc/csqtt-lalune/operator.
 [[ ! -e "$ROOT/host/usr/local/bin/csqtt-lalune" ]]
 rm -rf "$ROOT/host/etc/csqtt-lalune"
 
-# Case 1g: symlinked owned paths are never followed, even if an external target exists.
+# Case 1f: symlinked owned paths are never followed, even if an external target exists.
 mkdir -p "$ROOT/external-config" "$ROOT/external-lib" "$ROOT/external-state" "$ROOT/external-log"
 printf 'external-data-must-survive\n' > "$ROOT/external-config/operator.conf"
 ln -s "$ROOT/external-config" "$ROOT/host/etc/csqtt-lalune"
@@ -151,7 +143,7 @@ grep -q 'is a symlink' "$ROOT/out"
 [[ -z "$(find "$ROOT/external-log" -mindepth 1 -print -quit)" ]]
 rm "$ROOT/host/var/log/csqtt-lalune"
 
-# Case 1h: an ownership-marker symlink cannot authorize writes into an external file.
+# Case 1g: an ownership-marker symlink cannot authorize writes into an external file.
 mkdir -p "$ROOT/host/etc/csqtt-lalune" "$ROOT/external-marker-target"
 printf 'CSQTT-LALUNE-MANAGED-V1\n' > "$ROOT/external-marker-target/marker"
 ln -s "$ROOT/external-marker-target/marker" "$ROOT/host/etc/csqtt-lalune/.managed-by-lalune"
@@ -189,7 +181,8 @@ grep -Fq 'CSQTT_WEB_USER=webUser123' "$ROOT/host/etc/csqtt-lalune/server.env"
 grep -Fq 'CSQTT_WEB_PASS=webPass123' "$ROOT/host/etc/csqtt-lalune/server.env"
 grep -Fq 'CSQTT_SERVICE_MANAGER=systemd' "$ROOT/host/etc/csqtt-lalune/server.env"
 grep -Fq 'CSQTT_SYSTEMD_UNIT=csqtt-lalune.service' "$ROOT/host/etc/csqtt-lalune/server.env"
-grep -Fq 'CSQTT_LALUNE_UDP_PORT=47000' "$ROOT/host/etc/csqtt-lalune/server.env"
+# Peer UDP/47000 is compiled into the patched server binary; this legacy standalone
+# installer does not own or override the peer listener. Deploy uses deploy-csqtt-lalune.sh.
 grep -Fq 'CSQTT_LALUNE_WEB_PORT=47002' "$ROOT/host/etc/csqtt-lalune/server.env"
 grep -Fq 'CSQTT_DEVICE_ID=01234567-89ab-cdef-0123-456789abcdef' "$ROOT/host/etc/csqtt-lalune/server.env"
 [[ "$(stat -c %a "$ROOT/host/etc/csqtt-lalune/server.env")" == 600 ]]

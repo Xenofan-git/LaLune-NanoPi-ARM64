@@ -36,6 +36,7 @@ func installTunCommandShims(t *testing.T, failContains string) string {
 		"case \"$*\" in\n" +
 		"  '-o route show table 202') [ -n \"${FAKE_IP_OCCUPIED_ROUTE:-}\" ] && echo \"$FAKE_IP_OCCUPIED_ROUTE\";;\n" +
 		"  '-o rule show pref 22020') [ -n \"${FAKE_IP_OCCUPIED_RULE:-}\" ] && echo \"$FAKE_IP_OCCUPIED_RULE\";;\n" +
+		"  '-o rule show pref 22015') [ -n \"${FAKE_IP_OCCUPIED_SOCKS_RULE:-}\" ] && echo \"$FAKE_IP_OCCUPIED_SOCKS_RULE\";;\n" +
 		"esac\nexit 0\n"
 	for name, content := range map[string]string{"sudo": sudo, "ip": ip} {
 		path := filepath.Join(dir, name)
@@ -123,6 +124,26 @@ func TestLinuxTunSuccessfulSetupBuildsIsolatedPolicy(t *testing.T) {
 	// the assertions above are limited to the CSQTT route table and DNS scope.
 }
 
+func TestLinuxTunCleanupStopsSocksEvenWhenTUNOwnershipIsMissing(t *testing.T) {
+	logPath := installTunCommandShims(t, "")
+	app := tunTestApp()
+	app.socks = NewSocks5Server("127.0.0.1:0")
+	if err := app.socks.Start(); err != nil { t.Fatalf("start SOCKS listener: %v", err) }
+	app.tun.socksRuleCreated = true
+	app.tun.CleanupRoutes()
+	app.socks.mu.Lock()
+	stopped := app.socks.stopped
+	app.socks.mu.Unlock()
+	if !stopped { t.Fatal("SOCKS5 listener remained active after CleanupRoutes") }
+	log := readTunCommandLog(t, logPath)
+	if !strings.Contains(log, "SUDO ip rule del pref 22015 fwmark 0x4d53/0xffff lookup 202") {
+		t.Fatalf("owned SOCKS5 fwmark rule was not removed before TUN ownership check:\\n%s", log)
+	}
+	if strings.Contains(log, "SUDO ip tuntap del dev csqtt0 mode tun") {
+		t.Fatalf("cleanup removed TUN despite failed ownership check:\\n%s", log)
+	}
+}
+
 func TestLinuxTunCleanupRefusesUnownedState(t *testing.T) {
 	logPath := installTunCommandShims(t, "")
 	app := tunTestApp()
@@ -161,6 +182,17 @@ func TestLinuxTunRefusesForeignTableOrRule(t *testing.T) {
 		}
 		if got := readTunCommandLog(t, logPath); strings.Contains(got, "SUDO ip tuntap add") {
 			t.Fatalf("foreign rule caused mutation: %s", got)
+		}
+	})
+	t.Run("foreign SOCKS rule priority", func(t *testing.T) {
+		logPath := installTunCommandShims(t, "")
+		t.Setenv("FAKE_IP_OCCUPIED_SOCKS_RULE", "22015: from all lookup 42424")
+		app := tunTestApp()
+		if err := app.tun.SetupRoutes("192.0.2.10", "8.8.8.8"); err == nil {
+			t.Fatal("occupied SOCKS rule priority unexpectedly accepted")
+		}
+		if got := readTunCommandLog(t, logPath); strings.Contains(got, "SUDO ip tuntap add") {
+			t.Fatalf("foreign SOCKS rule caused mutation: %s", got)
 		}
 	})
 }

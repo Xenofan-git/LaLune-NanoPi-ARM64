@@ -12,6 +12,7 @@ on:
       - test/csqtt-client-reconnect-vm
       - test/csqtt-process-recovery-e2e
       - feature/csqtt-original-app-panel
+      - fix/socks5-dynamic-address
   workflow_dispatch:
 
 permissions:
@@ -29,6 +30,11 @@ jobs:
         run: |
           set -euxo pipefail
           test -f adapt/apply-pinned-original-linux-arm64-policy.py
+          test -s adapt/lalune_socks5_linux.go
+          test -s adapt/lalune_socks5_linux_test.go
+          ! grep -Fq '192.168.4.26' adapt/lalune_socks5_linux.go
+          ! grep -Fq '192.168.4.26' adapt/apply-lalune-socks5.py
+          grep -Fq 'NewSocks5Server' adapt/apply-lalune-socks5.py
           # Client TUN must never flush a shared route table or mutate global resolver state.
           ! grep -Fq 'ip route flush table 202' adapt/apply-pinned-original-linux-arm64-policy.py
           ! grep -Fq '>> /etc/resolv.conf' adapt/apply-pinned-original-linux-arm64-policy.py
@@ -144,6 +150,9 @@ jobs:
         run: |
           set -euxo pipefail
           python3 adapt/apply-pinned-original-linux-arm64-policy.py
+          python3 adapt/apply-lalune-socks5.py
+          cp adapt/lalune_socks5_linux.go upstream-lalune/Desktop/Linux/lalune_socks5_linux.go
+          cp adapt/lalune_socks5_linux_test.go upstream-lalune/Desktop/Linux/lalune_socks5_linux_test.go
           python3 adapt/patch-csqtt-deploy-ui.py
       - name: Build and package CSQTT panel for NanoPi
         working-directory: upstream-lalune/Frontend/Core
@@ -277,6 +286,7 @@ jobs:
           set -euxo pipefail
           go test -count=1 .
           go test -count=1 ./Libs
+          go test -race -count=1 .
           # Compile the exact generated client TUN tests for execution inside the ARM64 guest.
           GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go test -c -o "$GITHUB_WORKSPACE/client-tun-tests-arm64" .
           file "$GITHUB_WORKSPACE/client-tun-tests-arm64"
@@ -415,6 +425,8 @@ jobs:
           grep -Fq 'default_value_t = 47002' server-source/rust-server/main.rs
           grep -Fq 'id="peer_port" value="47000"' server-source/rust-server/web_panel.rs
           grep -Fq 'id="wg_port" value="47001"' server-source/rust-server/web_panel.rs
+          grep -Fq 'pub const DEFAULT_LOCAL_PROXY_PORT: u16 = 47005;' server-source/rust-server/model.rs
+          grep -Fq 'id="profileDlgPort" min="1" max="65535" value="47005"' server-source/rust-server/web_panel.rs
       - name: Test pinned CSQTT client protocol suite
         working-directory: server-source/rust-client
         run: |
@@ -537,10 +549,24 @@ jobs:
           cp adapt/install-original-linux-backend.sh dist/install-original-linux-backend.sh
           chmod 0755 dist/install-original-linux-backend.sh
           sh -n dist/install-original-linux-backend.sh
+          # Backend installer contract: no service conflict, explicit activation,
+          # post-start health check, and refusal to overwrite unowned targets.
+          ! grep -Fq 'Conflicts=lalune-gateway.service' adapt/install-original-linux-backend.sh
+          grep -Fq 'systemctl restart lalune-backend.service' adapt/install-original-linux-backend.sh
+          grep -Fq 'systemctl is-active --quiet lalune-backend.service' adapt/install-original-linux-backend.sh
+          grep -Fq 'journalctl -u lalune-backend.service' adapt/install-original-linux-backend.sh
+          grep -Fq 'Existing target has no LaLune ownership marker' adapt/install-original-linux-backend.sh
+          grep -Fq 'Refusing symlinked installation path' adapt/install-original-linux-backend.sh
           cp captcha-bridge/README.md dist/CAPTCHA-BRIDGE-README.md
           test -s dist/LaLune-CAPTCHA-Bridge.zip
           test -s dist/CAPTCHA-BRIDGE-README.md
           test -x dist/install-original-linux-backend.sh
+          # The optional backend installer must match the actual DeployManager asset contract.
+          for asset in deploy-csqtt-lalune.sh csqtt-lalune-linux-arm64 csqtt-lalune-linux-amd64; do
+            test -s "dist/server-assets/$asset"
+          done
+          ! grep -Fq 'install-csqtt-lalune.sh' adapt/install-original-linux-backend.sh
+          ! grep -Fq 'uninstall-csqtt-lalune.sh' adapt/install-original-linux-backend.sh
           test -s dist/server-assets/csqtt-lalune-linux-arm64
           test -s dist/server-assets/csqtt-lalune-linux-amd64
           test -s dist/server-assets/csqtt-lalune-help.txt
@@ -575,6 +601,10 @@ jobs:
           cp protocols-source.sha256 dist/
           printf '%s\n' 'e4a6d08b63aef6025bf8ad8f77da660ea552e04b' > dist/UPSTREAM_COMMIT
           (cd dist && sha256sum lalune-original-linux-arm64 client-linux-arm64 > SHA256SUMS && sha256sum -c SHA256SUMS)
+          # Release-wide manifest covers every packaged payload, including nested assets and
+          # the component manifests; only the release manifest itself is excluded.
+          (cd dist && find . -type f ! -name RELEASE-SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > RELEASE-SHA256SUMS)
+          (cd dist && sha256sum -c RELEASE-SHA256SUMS)
           tar -C dist -czf lalune-original-linux-arm64.tar.gz .
       - uses: actions/upload-artifact@v4
         with:
@@ -632,3 +662,4 @@ jobs:
     needs: build
     uses: ./.github/workflows/csqtt-lalune-arm64-vm-test.yml
     secrets: inherit
+# CI recovery retrigger: keep Build -> ARM64 VM lifecycle as the only execution path.

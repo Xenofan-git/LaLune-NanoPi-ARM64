@@ -12,7 +12,6 @@ readonly STATE="/var/lib/csqtt-lalune"
 readonly LOG="/var/log/csqtt-lalune"
 readonly UNIT_FILE="/etc/systemd/system/csqtt-lalune.service"
 readonly MARKER="CSQTT-LALUNE-MANAGED-V1"
-UDP_PORT="${CSQTT_LALUNE_UDP_PORT:-47000}"
 WEB_PORT="${CSQTT_LALUNE_WEB_PORT:-47002}"
 SECRETS_FILE=""
 while [[ $# -gt 0 ]]; do
@@ -38,13 +37,11 @@ command -v systemctl >/dev/null 2>&1 || die "systemd is required"
 command -v ss >/dev/null 2>&1 || die "ss is required for safe port preflight"
 command -v ip >/dev/null 2>&1 || die "iproute2 is required for safe route/interface preflight"
 command -v iptables-save >/dev/null 2>&1 || die "iptables is required for safe firewall preflight"
-for port in "$UDP_PORT" "$WEB_PORT"; do
-  [[ "$port" =~ ^[0-9]{1,5}$ ]] && (( port >= 1 && port <= 65535 )) || die "invalid port: $port"
+for port in "$WEB_PORT"; do
+  [[ "$port" =~ ^[0-9]{1,5}$ ]] && (( port >= 1 && port <= 65535 )) || die "invalid web port: $port"
 done
-[[ "$UDP_PORT" != "$WEB_PORT" ]] || die "UDP and TCP ports must be different"
 SSH_PORT="${CSQTT_SSH_PORT:-22}"
 [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] && (( SSH_PORT >= 1 && SSH_PORT <= 65535 )) || die "invalid SSH port: $SSH_PORT"
-[[ "$SSH_PORT" != "$UDP_PORT" && "$SSH_PORT" != "$WEB_PORT" ]] || die "SSH, CSQTT UDP, and web TCP ports must all be different"
 
 # Reject symlinks before checking ownership markers or writing anything. A marker
 # reachable through a symlink does not make the external target LaLune-owned.
@@ -80,13 +77,10 @@ if [[ -e "$UNIT_FILE" ]] && systemctl is-active --quiet "$UNIT"; then
   die "$UNIT is already active; stop it deliberately before replacing the binary"
 fi
 
-# Do not kill listeners. Preflight both ports before making any filesystem changes.
-for port in "$UDP_PORT" "$WEB_PORT"; do
-  if ss -H -lun "sport = :$port" | grep -q .; then
-    die "UDP port $port is occupied; no listener will be killed"
-  fi
+# Do not kill listeners. Preflight the actual panel TCP listener before making filesystem changes.
+for port in "$WEB_PORT"; do
   if ss -H -ltn "sport = :$port" | grep -q .; then
-    die "TCP port $port is occupied; no listener will be killed"
+    die "TCP panel port $port is occupied; no listener will be killed"
   fi
 done
 if ip link show dev csqtt-lalune0 >/dev/null 2>&1; then
@@ -124,10 +118,11 @@ cat > "$ETC/server.env.new" <<ENV
 CSQTT_MAIN_PASSWORD=$MAIN_PASSWORD
 CSQTT_WEB_USER=$WEB_USER
 CSQTT_WEB_PASS=$WEB_PASSWORD
+LALUNE_PANEL_USER=$WEB_USER
+LALUNE_PANEL_PASSWORD=$WEB_PASSWORD
 CSQTT_DEVICE_ID=$DEVICE_ID
 CSQTT_SERVICE_MANAGER=systemd
 CSQTT_SYSTEMD_UNIT=csqtt-lalune.service
-CSQTT_LALUNE_UDP_PORT=$UDP_PORT
 CSQTT_LALUNE_WEB_PORT=$WEB_PORT
 ENV
 chmod 0600 "$ETC/server.env.new"
@@ -148,7 +143,7 @@ ConditionPathIsExecutable=/usr/local/bin/csqtt-lalune
 [Service]
 Type=simple
 EnvironmentFile=/etc/csqtt-lalune/server.env
-ExecStart=/usr/local/bin/csqtt-lalune --listen 0.0.0.0:${CSQTT_LALUNE_UDP_PORT} --web-port ${CSQTT_LALUNE_WEB_PORT} --config-dir /etc/csqtt-lalune
+ExecStart=/usr/local/bin/csqtt-lalune
 Restart=on-failure
 RestartSec=3
 UMask=0077
