@@ -71,6 +71,9 @@ replacements = [
     ("main", "46002", "47002", "server HTTPS defaults/help", 2),
     ("web", "46000", "47000", "panel DTLS client defaults", 7),
     ("web", "46001", "47001", "panel WG client defaults", 6),
+    ("model", "pub const DEFAULT_LOCAL_PROXY_PORT: u16 = 45000;", "pub const DEFAULT_LOCAL_PROXY_PORT: u16 = 47005;", "local SOCKS5 profile default", 1),
+    ("web", 'value="45000"', 'value="47005"', "local SOCKS5 profile form default", 1),
+    ("web", ".value = '45000';", ".value = '47005';", "local SOCKS5 profile reset default", 1),
     ("web", "46002", "47002", "panel HTTPS redirect fallback", 1),
     ("main", "46003", "47003", "DPI local listener port", 2),
     ("main", "46004", "47004", "syscalls local listener port", 6),
@@ -461,6 +464,10 @@ for key in ("main", "web"):
             raise SystemExit(f"{key}.rs still contains original CSQTT port {old_port}")
 if 'default_value = "0.0.0.0:47000"' not in sources["main"] or "default_value_t = 47002" not in sources["main"]:
     raise SystemExit("server CLI defaults are not namespaced to UDP/47000 and TCP/47002")
+if "pub const DEFAULT_LOCAL_PROXY_PORT: u16 = 47005;" not in sources["model"]:
+    raise SystemExit("local SOCKS5 profile default is not namespaced to 47005")
+if 'value="47005"' not in sources["web"] or ".value = '47005';" not in sources["web"]:
+    raise SystemExit("panel local SOCKS5 profile defaults are not namespaced to 47005")
 if 'id="peer_port" value="47000"' not in sources["web"] or 'id="wg_port" value="47001"' not in sources["web"]:
     raise SystemExit("panel client port defaults are not namespaced")
 
