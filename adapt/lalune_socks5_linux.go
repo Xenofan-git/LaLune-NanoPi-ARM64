@@ -397,6 +397,7 @@ func (s *Socks5Server) handleUDPAssociate(c net.Conn) {
 
 		out, err := s.dialUDP()
 		if err != nil { continue }
+		if !s.trackConn(out) { continue }
 		_ = out.SetReadDeadline(time.Now().Add(5 * time.Second))
 		if _, err = out.WriteToUDP(buf[off:n], dst); err == nil {
 			rn, ra, er := out.ReadFromUDP(buf)
@@ -407,6 +408,7 @@ func (s *Socks5Server) handleUDPAssociate(c net.Conn) {
 				}
 			}
 		}
+		s.untrackConn(out)
 		_ = out.Close()
 	}
 }
