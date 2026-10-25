@@ -425,6 +425,8 @@ jobs:
           grep -Fq 'default_value_t = 47002' server-source/rust-server/main.rs
           grep -Fq 'id="peer_port" value="47000"' server-source/rust-server/web_panel.rs
           grep -Fq 'id="wg_port" value="47001"' server-source/rust-server/web_panel.rs
+          grep -Fq 'pub const DEFAULT_LOCAL_PROXY_PORT: u16 = 47005;' server-source/rust-server/model.rs
+          grep -Fq 'id="profileDlgPort" min="1" max="65535" value="47005"' server-source/rust-server/web_panel.rs
       - name: Test pinned CSQTT client protocol suite
         working-directory: server-source/rust-client
         run: |
