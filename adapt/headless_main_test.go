@@ -501,3 +501,15 @@ func TestCaptchaStateEndpointRequiresGet(t *testing.T) {
 		t.Fatalf("POST /captcha/state Allow = %q, want GET", got)
 	}
 }
+
+
+func TestPanelListenAddressUsesInstallerPort(t *testing.T) {
+    old, had := os.LookupEnv("CSQTT_LALUNE_WEB_PORT")
+    t.Cleanup(func(){ if had { _ = os.Setenv("CSQTT_LALUNE_WEB_PORT", old) } else { _ = os.Unsetenv("CSQTT_LALUNE_WEB_PORT") } })
+    _ = os.Setenv("CSQTT_LALUNE_WEB_PORT", "47002")
+    got, err := panelListenAddress()
+    if err != nil { t.Fatal(err) }
+    if got != "0.0.0.0:47002" { t.Fatalf("panelListenAddress() = %q, want 0.0.0.0:47002", got) }
+    _ = os.Setenv("CSQTT_LALUNE_WEB_PORT", "70000")
+    if _, err := panelListenAddress(); err == nil { t.Fatal("invalid panel port was accepted") }
+}
