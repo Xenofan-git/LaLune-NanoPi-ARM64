@@ -3,7 +3,7 @@
 package main
 
 import (
-	"encoding/binary"
+	"encoding/binary"\n\t"errors"\n\t"sync"
 	"io"
 	"net"
 	"os"
@@ -342,4 +342,81 @@ func TestSocks5ListenerRebindsAfterDownstreamAddressChange(t *testing.T) {
  ar:=make([]byte,10);if _,err=io.ReadFull(ctl,ar);err!=nil{t.Fatal(err)};if ar[1]!=0{t.Fatalf("UDP ASSOCIATE after rebind: %v",ar)};rip:=net.IP(ar[4:8]);if rip.IsUnspecified(){rip=net.IPv4(127,0,0,1)}
  relay,err:=net.DialUDP("udp",nil,&net.UDPAddr{IP:rip,Port:int(binary.BigEndian.Uint16(ar[8:10]))});if err!=nil{t.Fatal(err)};defer relay.Close();_=relay.SetDeadline(time.Now().Add(3*time.Second));ud:=ue.LocalAddr().(*net.UDPAddr)
  packet:=[]byte{0,0,0,1,127,0,0,1,byte(ud.Port>>8),byte(ud.Port)};packet=append(packet,[]byte("udp-after-rebind")...);if _,err=relay.Write(packet);err!=nil{t.Fatal(err)};b:=make([]byte,1024);n,err:=relay.Read(b);if err!=nil{t.Fatal(err)};if n<10||string(b[10:n])!="udp-after-rebind"{t.Fatalf("UDP echo after rebind: %q",b[10:n])}
+}
+
+
+func TestSocks5StartWaitsForDownstreamAddress(t *testing.T) {
+	var mu sync.Mutex
+	addr := ""
+	s := NewSocks5Server("eth1:12500")
+	s.pollInterval = 10 * time.Millisecond
+	s.resolveAddr = func() (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if addr == "" { return "", errors.New("no eth1 IPv4") }
+		return addr, nil
+	}
+	if err := s.Start(); err != nil { t.Fatalf("Start must tolerate missing eth1 address: %v", err) }
+	mu.Lock()
+	addr = "127.0.0.1:0"
+	mu.Unlock()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		ln := s.ln
+		s.mu.Unlock()
+		if ln != nil { s.Stop(); return }
+		time.Sleep(5 * time.Millisecond)
+	}
+	s.Stop()
+	t.Fatal("listener did not start after downstream address appeared")
+}
+
+func TestSocks5StopClosesActiveSessions(t *testing.T) {
+	s := NewSocks5Server("127.0.0.1:0")
+	if err := s.Start(); err != nil { t.Fatal(err) }
+	s.mu.Lock()
+	addr := s.ln.Addr().String()
+	s.mu.Unlock()
+	client, err := net.Dial("tcp", addr)
+	if err != nil { t.Fatal(err) }
+	if _, err := client.Write([]byte{5, 1, 0}); err != nil { t.Fatal(err) }
+	reply := make([]byte, 2)
+	if _, err := io.ReadFull(client, reply); err != nil { t.Fatal(err) }
+	// Keep the accepted session alive waiting for the SOCKS request.
+	s.Stop()
+	_ = client.SetReadDeadline(time.Now().Add(time.Second))
+	var b [1]byte
+	if _, err := client.Read(b[:]); err == nil { t.Fatal("client connection remained open after Stop") }
+	s.mu.Lock()
+	remaining := len(s.active)
+	listener := s.ln
+	s.mu.Unlock()
+	if remaining != 0 { t.Fatalf("%d active sessions remain after Stop", remaining) }
+	if listener != nil { t.Fatal("listener remains published after Stop") }
+}
+
+func TestSocks5StopRacingWithAddressResolution(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	s := NewSocks5Server("eth1:12500")
+	s.pollInterval = time.Millisecond
+	s.resolveAddr = func() (string, error) {
+		select { case <-entered: default: close(entered) }
+		<-release
+		return "127.0.0.1:0", nil
+	}
+	if err := s.Start(); err != nil { t.Fatal(err) }
+	<-entered
+	stopped := make(chan struct{})
+	go func() { s.Stop(); close(stopped) }()
+	close(release)
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second): t.Fatal("Stop deadlocked during address resolution")
+	}
+	s.mu.Lock()
+	ln := s.ln
+	s.mu.Unlock()
+	if ln != nil { t.Fatal("listener was published after Stop") }
 }
