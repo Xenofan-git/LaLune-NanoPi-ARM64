@@ -358,7 +358,7 @@ func TestSocks5StartWaitsForDownstreamAddress(t *testing.T) {
 	}
 	if err := s.Start(); err != nil { t.Fatalf("Start must tolerate missing eth1 address: %v", err) }
 	mu.Lock()
-	addr = "127.0.0.1:0"
+	probe, err := net.Listen("tcp", "127.0.0.1:0")\n\t\tif err != nil { t.Fatal(err) }\n\t\taddr = probe.Addr().String()\n\t\t_ = probe.Close()
 	mu.Unlock()
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
@@ -400,11 +400,14 @@ func TestSocks5StopRacingWithAddressResolution(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	s := NewSocks5Server("eth1:12500")
-	s.pollInterval = time.Millisecond
+	s.pollInterval = 5 * time.Millisecond
+	var calls int
 	s.resolveAddr = func() (string, error) {
+		calls++
+		if calls == 1 { return "", errors.New("address not assigned yet") }
 		select { case <-entered: default: close(entered) }
 		<-release
-		return "127.0.0.1:0", nil
+		return "127.0.0.1:1", nil
 	}
 	if err := s.Start(); err != nil { t.Fatal(err) }
 	<-entered
