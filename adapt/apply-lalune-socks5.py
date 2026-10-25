@@ -18,6 +18,7 @@ addition = '''\tif err := t.app.runSudo("ip rule add pref 22015 fwmark 0x4d53/0x
 \t\trollback()
 \t\treturn fmt.Errorf("add SOCKS5 fwmark rule: %w", err)
 \t}
+\tt.socksRuleCreated = true
 \tif t.app.socks != nil {
 \t\tif err := t.app.socks.Start(); err != nil {
 \t\t\t_ = t.app.runSudo("ip rule del pref 22015 fwmark 0x4d53/0xffff lookup 202")
@@ -33,12 +34,20 @@ if marker not in s:
 s = s.replace(marker, addition + marker, 1)
 
 # Stop the listener and remove its dedicated fwmark rule during TUN cleanup.
-marker = '\tt.cleanupDirectRoutingLocked()\n\tt.app.core.AddLog("[TUN] Удаление TUN...")'
-replacement = '''\tif t.app.socks != nil { t.app.socks.Stop() }
-\tif err := t.app.runSudo("ip rule del pref 22015 fwmark 0x4d53/0xffff lookup 202"); err != nil {
-\t\tt.app.core.AddLog(fmt.Sprintf("[SOCKS5] Не удалось удалить fwmark rule: %v", err))
+marker = '\tdefer t.mu.Unlock()\n\t// Do not remove matching-looking entries unless the complete CSQTT route\n\t// signature is present.'
+replacement = '''\tdefer t.mu.Unlock()
+\t// SOCKS5 is an independent listener lifecycle: stop it even when the TUN
+\t// ownership signature is incomplete and route cleanup must be skipped.
+\tif t.app.socks != nil { t.app.socks.Stop() }
+\tif t.socksRuleCreated {
+\t\tif err := t.app.runSudo("ip rule del pref 22015 fwmark 0x4d53/0xffff lookup 202"); err != nil {
+\t\t\tt.app.core.AddLog(fmt.Sprintf("[SOCKS5] Не удалось удалить fwmark rule: %v", err))
+\t\t} else {
+\t\t\tt.socksRuleCreated = false
+\t\t}
 \t}
-''' + marker
+\t// Do not remove matching-looking entries unless the complete CSQTT route
+\t// ownership signature is present.'''
 if marker not in s:
     raise SystemExit("cleanup marker missing")
 s = s.replace(marker, replacement, 1)
