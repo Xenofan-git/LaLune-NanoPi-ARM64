@@ -3,7 +3,9 @@
 package main
 
 import (
-	"encoding/binary"\n\t"errors"\n\t"sync"
+	"encoding/binary"
+	"errors"
+	"sync"
 	"io"
 	"net"
 	"os"
