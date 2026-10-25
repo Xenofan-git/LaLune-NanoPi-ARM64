@@ -475,12 +475,22 @@ func panelSecurity(next http.Handler) http.Handler {
         w.Header().Set("Referrer-Policy", "same-origin")
 
         expected := os.Getenv("LALUNE_PANEL_PASSWORD")
+        if expected == "" {
+            expected = os.Getenv("CSQTT_WEB_PASS")
+        }
+        expectedUser := os.Getenv("LALUNE_PANEL_USER")
+        if expectedUser == "" {
+            expectedUser = os.Getenv("CSQTT_WEB_USER")
+        }
+        if expectedUser == "" {
+            expectedUser = "admin"
+        }
         user, password, ok := r.BasicAuth()
         if expected == "" {
             http.Error(w, "panel authentication is not configured", http.StatusServiceUnavailable)
             return
         }
-        if !ok || subtle.ConstantTimeCompare([]byte(user), []byte("admin")) != 1 ||
+        if !ok || subtle.ConstantTimeCompare([]byte(user), []byte(expectedUser)) != 1 ||
             subtle.ConstantTimeCompare([]byte(password), []byte(expected)) != 1 {
             w.Header().Set("WWW-Authenticate", `Basic realm="LaLune CSQTT", charset="UTF-8"`)
             http.Error(w, "authentication required", http.StatusUnauthorized)
