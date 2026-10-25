@@ -320,7 +320,7 @@ setup = '''func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) error {
 		dnsServers = append(dnsServers, parsed.To4().String())
 	}
 	// Refuse to touch a non-empty table or occupied rule priority.
-	if err := t.app.runSudo(\"test -z \\\"$(ip -o route show table 202 2>/dev/null)\\\" && test -z \\\"$(ip -o rule show pref 22020 2>/dev/null)\\\" && test -z \\\"$(ip -o rule show pref 22015 2>/dev/null)\\\"\"); err != nil {
+	if err := t.app.runSudo("test -z \\"$(ip -o route show table 202 2>/dev/null)\\" && test -z \\"$(ip -o rule show pref 22020 2>/dev/null)\\" && test -z \\"$(ip -o rule show pref 22015 2>/dev/null)\\""); err != nil {
 		t.app.core.AddLog(fmt.Sprintf("[TUN] ОШИБКА: table 202 или priority 22020 уже заняты; чужие записи сохранены: %v", err))
 		return fmt.Errorf("TUN routing table 202 or rule priority 22020/22015 is already occupied: %w", err)
 	}
