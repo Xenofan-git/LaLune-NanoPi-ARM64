@@ -512,7 +512,17 @@ func panelSecurity(next http.Handler) http.Handler {
     })
 }
 
+func panelListenAddress() (string, error) {
+    port := strings.TrimSpace(os.Getenv("CSQTT_LALUNE_WEB_PORT"))
+    if port == "" { return panelListen, nil }
+    n, err := strconv.Atoi(port)
+    if err != nil || n < 1 || n > 65535 { return "", fmt.Errorf("invalid CSQTT_LALUNE_WEB_PORT %q", port) }
+    return net.JoinHostPort("0.0.0.0", strconv.Itoa(n)), nil
+}
+
 func main() {
+    configuredPanelListen, listenErr := panelListenAddress()
+    if listenErr != nil { panic(listenErr) }
     app := NewApp()
     app.startup(context.Background())
 
@@ -534,11 +544,11 @@ func main() {
         if _, err := fs.Stat(panelFS, p); err != nil { p = "index.html" }
         http.ServeFileFS(w, r, panelFS, p)
     })
-    panelSrv := &http.Server{Addr: panelListen, Handler: panelSecurity(panelHandler), ReadHeaderTimeout: 5 * time.Second}
+    panelSrv := &http.Server{Addr: configuredPanelListen, Handler: panelSecurity(panelHandler), ReadHeaderTimeout: 5 * time.Second}
 
     errCh := make(chan error, 2)
     go func() { app.core.AddLog(fmt.Sprintf("[INFO] Headless API: http://%s", headlessListen)); errCh <- srv.ListenAndServe() }()
-    go func() { app.core.AddLog(fmt.Sprintf("[INFO] LaLune panel: http://%s", panelListen)); errCh <- panelSrv.ListenAndServe() }()
+    go func() { app.core.AddLog(fmt.Sprintf("[INFO] LaLune panel: http://%s", configuredPanelListen)); errCh <- panelSrv.ListenAndServe() }()
 
     sigCh := make(chan os.Signal, 1)
     signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
