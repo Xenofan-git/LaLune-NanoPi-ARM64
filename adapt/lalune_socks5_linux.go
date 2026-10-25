@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -153,9 +154,27 @@ func (s *Socks5Server) Start() error {
 	s.stop, s.done, s.stopped = stop, done, false
 	s.mu.Unlock()
 
-	// An unavailable downstream address is not fatal: keep the service closed
-	// and let the monitor bind when eth1 receives a private IPv4 address.
-	_ = s.bindCurrent(stop)
+	// A missing downstream address is expected during boot and DHCP renewal.
+	// A resolved address that cannot be bound is not: surface that error so
+	// systemd does not report a healthy SOCKS service with no listening socket.
+	initialAddr, resolveErr := s.listenAddress()
+	if resolveErr == nil {
+		ln, listenErr := net.Listen("tcp", initialAddr)
+		if listenErr != nil {
+			s.mu.Lock()
+			s.stopped = true
+			s.stop, s.done = nil, nil
+			s.mu.Unlock()
+			close(stop)
+			close(done)
+			return fmt.Errorf("bind SOCKS5 listener %s: %w", initialAddr, listenErr)
+		}
+		if !s.publishListener(ln, stop) {
+			close(stop)
+			close(done)
+			return errors.New("SOCKS5 server stopped during initial bind")
+		}
+	}
 	go func() {
 		defer close(done)
 		interval := s.pollInterval
