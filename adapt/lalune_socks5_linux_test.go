@@ -362,7 +362,10 @@ func TestSocks5StartWaitsForDownstreamAddress(t *testing.T) {
 	}
 	if err := s.Start(); err != nil { t.Fatalf("Start must tolerate missing eth1 address: %v", err) }
 	mu.Lock()
-	probe, err := net.Listen("tcp", "127.0.0.1:0")\n\t\tif err != nil { t.Fatal(err) }\n\t\taddr = probe.Addr().String()\n\t\t_ = probe.Close()
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil { t.Fatal(err) }
+	addr = probe.Addr().String()
+	_ = probe.Close()
 	mu.Unlock()
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
