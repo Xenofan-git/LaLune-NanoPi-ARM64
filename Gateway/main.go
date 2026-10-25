@@ -67,10 +67,10 @@ func(g *Gateway)setupPolicy()error{
     if o,e:=exec.Command("iptables",append([]string{"-t","nat","-A","LALUNE_POST"},rule...)...).CombinedOutput();e!=nil{return rollback(fmt.Errorf("add owned SNAT rule: %s: %w",strings.TrimSpace(string(o)),e))}
     if e:=exec.Command("iptables","-t","nat","-A","POSTROUTING","-m","comment","--comment","LALUNE_GATEWAY","-j","LALUNE_POST").Run();e!=nil{return rollback(fmt.Errorf("attach owned NAT chain: %w",e))}
     g.mu.Lock();g.natJumpCreated=true;g.mu.Unlock()
+    g.mu.Lock();g.policyCreated=true;g.mu.Unlock()
     routes:=[][]string{{"ip","route","add",wgSubnet,"dev",wgName,"table",table},{"ip","route","add","default","dev",tunName,"table",table}}
     for _,c:=range routes{if o,e:=exec.Command(c[0],c[1:]...).CombinedOutput();e!=nil{return rollback(fmt.Errorf("%v: %s: %w",c,strings.TrimSpace(string(o)),e))}}
     if o,e:=exec.Command("ip","rule","add","pref","22000","from",wgPeer,"lookup",table).CombinedOutput();e!=nil{return rollback(fmt.Errorf("add owned policy rule: %s: %w",strings.TrimSpace(string(o)),e))}
-    g.mu.Lock();g.policyCreated=true;g.mu.Unlock()
     return nil
 }
 func(g *Gateway)cleanupPolicy()error{
