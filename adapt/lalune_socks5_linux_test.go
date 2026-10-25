@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"sync"
 	"io"
 	"net"
@@ -422,7 +423,7 @@ func TestSocks5StartWaitsForDownstreamAddress(t *testing.T) {
 	s.resolveAddr = func() (string, error) {
 		mu.Lock()
 		defer mu.Unlock()
-		if addr == "" { return "", errors.New("no eth1 IPv4") }
+		if addr == "" { return "", fmt.Errorf("%w: no eth1 IPv4", errSocksAddressUnavailable) }
 		return addr, nil
 	}
 	if err := s.Start(); err != nil { t.Fatalf("Start must tolerate missing eth1 address: %v", err) }
@@ -494,4 +495,16 @@ func TestSocks5StopRacingWithAddressResolution(t *testing.T) {
 	ln := s.ln
 	s.mu.Unlock()
 	if ln != nil { t.Fatal("listener was published after Stop") }
+}
+
+
+func TestSocks5StartRejectsAmbiguousAddressResolution(t *testing.T) {
+    s := NewSocks5Server("eth1:12500")
+    s.resolveAddr = func() (string, error) { return "", errors.New("multiple private IPv4 addresses") }
+    if err := s.Start(); err == nil { s.Stop(); t.Fatal("ambiguous bind address must fail closed") }
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    if !s.stopped || s.stop != nil || s.done != nil || s.ln != nil {
+        t.Fatalf("failed Start left live state: stopped=%v stop=%v done=%v listener=%v", s.stopped, s.stop != nil, s.done != nil, s.ln)
+    }
 }
