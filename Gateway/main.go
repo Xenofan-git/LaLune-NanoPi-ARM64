@@ -11,7 +11,7 @@ const (
 )
 
 type Config struct { Peer,Password,Hashes string; Workers int; Obfs,Fingerprint,ClientIDs,CaptchaMode,VKAuthMode,TurnTransport,TurnHost,TurnPort,DeviceID,WGPeerPublicKey string }
-type Gateway struct { mu sync.Mutex; cfg Config; cmd *exec.Cmd; tun *os.File; connected bool; started time.Time; logs []string; tunCreated bool; wgCreated bool; policyCreated bool; natChainCreated bool; natJumpCreated bool; cleanupOnce sync.Once }
+type Gateway struct { mu sync.Mutex; cfg Config; cmd *exec.Cmd; tun *os.File; connected bool; started time.Time; logs []string; tunCreated bool; wgCreated bool; policyCreated bool; natChainCreated bool; natJumpCreated bool; natSourceIP string; cleanupOnce sync.Once }
 
 func main(){
  if os.Geteuid()!=0 {log.Fatal("run as root")}; _=os.MkdirAll(stateDir,0755); _=os.MkdirAll(filepath.Dir(configPath),0700); ensureToken(); g:=&Gateway{cfg:loadConfig()}
@@ -45,7 +45,7 @@ func(g *Gateway)setupTun()error{
 }
 func tunSetIFF(fd int,n string)error{const TUNSETIFF=0x400454CA;const IFF_TUN=1;const IFF_NO_PI=0x1000;var x [40]byte;copy(x[:16],n);*(*uint16)(unsafe.Pointer(&x[16]))=IFF_TUN|IFF_NO_PI;_,_,e:=syscall.Syscall(syscall.SYS_IOCTL,uintptr(fd),TUNSETIFF,uintptr(unsafe.Pointer(&x[0])));if e!=0{return e};return nil}
 func(g *Gateway)sendFD()error{c,e:=net.DialUnix("unix",nil,&net.UnixAddr{Name:"\x00lalune-csqtt-tun",Net:"unix"});if e!=nil{return e};defer c.Close();if _,_,e=c.WriteMsgUnix([]byte{1},syscall.UnixRights(int(g.tun.Fd())),nil);e!=nil{return e};_=c.SetReadDeadline(time.Now().Add(5*time.Second));b:=make([]byte,1);_,e=c.Read(b);return e}
-func(g *Gateway)setTunIP(ip string)error{if net.ParseIP(ip)==nil{return nil};if e:=exec.Command("ip","addr","replace",ip+"/32","dev",tunName).Run();e!=nil{return e};_=exec.Command("iptables","-t","nat","-F","LALUNE_POST").Run();_=exec.Command("iptables","-t","nat","-A","LALUNE_POST","-s",wgPeer,"-o",tunName,"-j","SNAT","--to-source",ip).Run();return nil}
+func(g *Gateway)setTunIP(ip string)error{parsed:=net.ParseIP(ip);if parsed==nil||parsed.To4()==nil{return nil};if e:=exec.Command("ip","addr","replace",ip+"/32","dev",tunName).Run();e!=nil{return e};g.mu.Lock();created:=g.natChainCreated;oldIP:=g.natSourceIP;g.mu.Unlock();if !created{return fmt.Errorf("Gateway NAT chain is not owned")};if oldIP!=""{_=exec.Command("iptables","-t","nat","-D","LALUNE_POST","-s",wgPeer,"-o",tunName,"-m","comment","--comment","LALUNE_GATEWAY","-j","SNAT","--to-source",oldIP).Run()};if e:=exec.Command("iptables","-t","nat","-A","LALUNE_POST","-s",wgPeer,"-o",tunName,"-m","comment","--comment","LALUNE_GATEWAY","-j","SNAT","--to-source",ip).Run();e!=nil{return e};g.mu.Lock();g.natSourceIP=ip;g.mu.Unlock();return nil}
 func(g *Gateway)setupPolicy()error{
     // Preflight all shared namespaces before changing anything.
     if o,e:=exec.Command("ip","rule","show").CombinedOutput();e!=nil{return fmt.Errorf("inspect ip rules: %w",e)}else if strings.Contains(string(o),"22000:") {
@@ -61,7 +61,7 @@ func(g *Gateway)setupPolicy()error{
     if o,e:=exec.Command("iptables","-t","nat","-N","LALUNE_POST").CombinedOutput();e!=nil {
         return fmt.Errorf("create LALUNE_POST: %s: %w",strings.TrimSpace(string(o)),e)
     }
-    g.mu.Lock();g.natChainCreated=true;g.mu.Unlock()
+    g.mu.Lock();g.natChainCreated=true;g.natSourceIP=tunIP;g.mu.Unlock()
     rollback:=func(err error)error{_=g.cleanupPolicy();return err}
     rule:=[]string{"-s",wgPeer,"-o",tunName,"-m","comment","--comment","LALUNE_GATEWAY","-j","SNAT","--to-source",tunIP}
     if o,e:=exec.Command("iptables",append([]string{"-t","nat","-A","LALUNE_POST"},rule...)...).CombinedOutput();e!=nil{return rollback(fmt.Errorf("add owned SNAT rule: %s: %w",strings.TrimSpace(string(o)),e))}
@@ -75,8 +75,8 @@ func(g *Gateway)setupPolicy()error{
 }
 func(g *Gateway)cleanupPolicy()error{
     g.mu.Lock()
-    policy,chain,jump:=g.policyCreated,g.natChainCreated,g.natJumpCreated
-    g.policyCreated=false;g.natChainCreated=false;g.natJumpCreated=false
+    policy,chain,jump,sourceIP:=g.policyCreated,g.natChainCreated,g.natJumpCreated,g.natSourceIP
+    g.policyCreated=false;g.natChainCreated=false;g.natJumpCreated=false;g.natSourceIP=""
     g.mu.Unlock()
     if policy {
         _=exec.Command("ip","rule","del","pref","22000","from",wgPeer,"lookup",table).Run()
@@ -88,7 +88,7 @@ func(g *Gateway)cleanupPolicy()error{
     }
     if chain {
         // Delete only our marked rule; never flush a chain.
-        _=exec.Command("iptables","-t","nat","-D","LALUNE_POST","-s",wgPeer,"-o",tunName,"-m","comment","--comment","LALUNE_GATEWAY","-j","SNAT","--to-source",tunIP).Run()
+        if sourceIP!=""{_=exec.Command("iptables","-t","nat","-D","LALUNE_POST","-s",wgPeer,"-o",tunName,"-m","comment","--comment","LALUNE_GATEWAY","-j","SNAT","--to-source",sourceIP).Run()}
         _=exec.Command("iptables","-t","nat","-X","LALUNE_POST").Run()
     }
     return nil
