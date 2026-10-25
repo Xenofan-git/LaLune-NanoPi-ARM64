@@ -181,7 +181,8 @@ grep -Fq 'CSQTT_WEB_USER=webUser123' "$ROOT/host/etc/csqtt-lalune/server.env"
 grep -Fq 'CSQTT_WEB_PASS=webPass123' "$ROOT/host/etc/csqtt-lalune/server.env"
 grep -Fq 'CSQTT_SERVICE_MANAGER=systemd' "$ROOT/host/etc/csqtt-lalune/server.env"
 grep -Fq 'CSQTT_SYSTEMD_UNIT=csqtt-lalune.service' "$ROOT/host/etc/csqtt-lalune/server.env"
-grep -Fq 'CSQTT_LALUNE_UDP_PORT=47000' "$ROOT/host/etc/csqtt-lalune/server.env"
+# Peer UDP/47000 is compiled into the patched server binary; this legacy standalone
+# installer does not own or override the peer listener. Deploy uses deploy-csqtt-lalune.sh.
 grep -Fq 'CSQTT_LALUNE_WEB_PORT=47002' "$ROOT/host/etc/csqtt-lalune/server.env"
 grep -Fq 'CSQTT_DEVICE_ID=01234567-89ab-cdef-0123-456789abcdef' "$ROOT/host/etc/csqtt-lalune/server.env"
 [[ "$(stat -c %a "$ROOT/host/etc/csqtt-lalune/server.env")" == 600 ]]
