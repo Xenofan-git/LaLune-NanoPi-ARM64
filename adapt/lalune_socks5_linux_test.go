@@ -398,6 +398,22 @@ func TestSocks5ListenerRebindsAfterDownstreamAddressChange(t *testing.T) {
 }
 
 
+func TestSocks5StartReturnsInitialBindConflict(t *testing.T) {
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil { t.Fatal(err) }
+	defer occupied.Close()
+	s := NewSocks5Server(occupied.Addr().String())
+	if err := s.Start(); err == nil {
+		s.Stop()
+		t.Fatal("Start must report an occupied TCP port instead of returning healthy")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ln != nil || s.stop != nil || !s.stopped {
+		t.Fatalf("failed Start left live state: listener=%v stop=%v stopped=%v", s.ln, s.stop != nil, s.stopped)
+	}
+}
+
 func TestSocks5StartWaitsForDownstreamAddress(t *testing.T) {
 	var mu sync.Mutex
 	addr := ""
