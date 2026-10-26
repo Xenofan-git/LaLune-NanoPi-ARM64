@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - test/csqtt-process-recovery-e2e
+      - fix/production-recovery-single-artifact
 
 permissions:
   contents: read
