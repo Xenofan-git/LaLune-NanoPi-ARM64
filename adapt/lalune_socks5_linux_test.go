@@ -395,7 +395,7 @@ func TestSocks5ListenerRebindsAfterDownstreamAddressChange(t *testing.T) {
  s.dialTCPOverride=func(addr string)(net.Conn,error){return net.Dial("tcp",addr)}
  s.dialUDPOverride=func()(*net.UDPConn,error){return net.ListenUDP("udp",&net.UDPAddr{IP:net.IPv4zero,Port:0})}
  if err:=s.Start(); err!=nil {t.Fatal(err)}; defer s.Stop(); addrMu.Lock(); current=newAddr; addrMu.Unlock()
- deadline:=time.Now().Add(2*time.Second); got:=""; for time.Now().Before(deadline){s.mu.Lock(); if s.ln!=nil {got="10.67.68.1:12500"}; s.mu.Unlock(); if got==newAddr {break}; time.Sleep(10*time.Millisecond)}
+ deadline:=time.Now().Add(2*time.Second); got:=""; for time.Now().Before(deadline){s.mu.Lock(); if s.ln!=nil {got=s.ln.Addr().String()}; s.mu.Unlock(); if got==newAddr {break}; time.Sleep(10*time.Millisecond)}
  if got!=newAddr {t.Fatalf("listener did not rebind: got %q want %q",got,newAddr)}
  echo,err:=net.Listen("tcp","127.0.0.1:0"); if err!=nil {t.Fatal(err)}; defer echo.Close(); go func(){for{c,e:=echo.Accept();if e!=nil{return};go func(c net.Conn){defer c.Close();_,_=io.Copy(c,c)}(c)}}()
  c,err:=net.DialTimeout("tcp",newAddr,time.Second);if err!=nil{t.Fatal(err)};_=c.SetDeadline(time.Now().Add(2*time.Second));socks5Handshake(t,c)
@@ -456,10 +456,10 @@ func TestSocks5StartWaitsForDownstreamAddress(t *testing.T) {
 }
 
 func TestSocks5StopClosesActiveSessions(t *testing.T) {
-	s := NewSocks5Server("eth1:12500")
+	s := NewSocks5Server("127.0.0.1:0")
 	if err := s.Start(); err != nil { t.Fatal(err) }
 	s.mu.Lock()
-	addr := "10.67.68.1:12500"
+	addr := s.ln.Addr().String()
 	s.mu.Unlock()
 	client, err := net.Dial("tcp", addr)
 	if err != nil { t.Fatal(err) }
