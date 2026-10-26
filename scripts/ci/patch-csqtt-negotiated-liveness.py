@@ -38,6 +38,23 @@ replace_once("client-source/rust-client/session.rs",
              'b"GETCONF:9000|device|password|7|generation-id|1|9|CSQTT-WIRE-4"',
              "update WIRE-4 first registration fixture")
 
+# The pinned upstream server repository also vendors a client crate used by
+# the release protocol regression suite. Its fixtures share server-source/shared
+# and must expect WIRE-4 after the negotiated revision is updated.
+replace_once("server-source/rust-client/protocol.rs",
+             '"GETCONF:9000|device|password|7|salt|4||CSQTT-WIRE-3"',
+             '"GETCONF:9000|device|password|7|salt|4||CSQTT-WIRE-4"',
+             "update vendored client WIRE-4 request fixture")
+replace_once("server-source/rust-client/protocol.rs",
+             '"GETCONF:9000|device|password|7|salt|4|36|CSQTT-WIRE-3"',
+             '"GETCONF:9000|device|password|7|salt|4|36|CSQTT-WIRE-4"',
+             "update vendored client WIRE-4 optional capability fixture")
+replace_once("server-source/rust-client/session.rs",
+             'b"GETCONF:9000|device|password|7|generation-id|1|9|CSQTT-WIRE-3"',
+             'b"GETCONF:9000|device|password|7|generation-id|1|9|CSQTT-WIRE-4"',
+             "update vendored client WIRE-4 registration fixture")
+
+
 replace_once("server-source/rust-server/protocol.rs",
 '''fn is_supported_wire_protocol(value: &str) -> bool {
     value == crate::wire_protocol::WIRE_PROTOCOL_REVISION
