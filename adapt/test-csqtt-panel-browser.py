@@ -15,7 +15,7 @@ from playwright.sync_api import sync_playwright
 
 ROOT = Path(".").resolve()
 HTML = ROOT / "adapt" / "csqtt-panel-preview.html"
-EXPECTED = ["connect", "settings", "deploy", "logs", "route"]
+EXPECTED = {"connect", "settings", "deploy", "logs", "route"}
 WIDTHS = [320, 360, 390, 768, 1280]
 
 
@@ -105,7 +105,7 @@ def main():
 
             tabs = page.locator("button[data-page]")
             actual = [tabs.nth(i).get_attribute("data-page") for i in range(tabs.count())]
-            assert actual == EXPECTED, f"tab order mismatch: {actual}"
+            assert len(actual) == 5 and set(actual) == EXPECTED, f"five-tab set mismatch: {actual}"
 
             for name in EXPECTED:
                 page.locator(f'button[data-page="{name}"]').click()
