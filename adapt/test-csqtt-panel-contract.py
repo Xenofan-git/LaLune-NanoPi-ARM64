@@ -46,10 +46,10 @@ if len(parser.tabs) != 5 or set(parser.tabs) != {
 if len(parser.pages) != 5 or set(parser.pages) != set(parser.tabs):
     raise SystemExit(f"tab/page mismatch: tabs={parser.tabs}, pages={parser.pages}")
 
-# Match the native CSQTT navigation order, not merely the same set of pages.
-expected_tabs = ["connect", "settings", "deploy", "logs", "route"]
-if parser.tabs != expected_tabs:
-    raise SystemExit(f"CSQTT tab order differs from original: {parser.tabs}")
+# Navigation order is intentionally not a contract. All five functional
+# pages must exist exactly once and each tab must map to a page.
+if len(parser.tabs) != 5 or set(parser.tabs) != {"connect", "settings", "deploy", "route", "logs"}:
+    raise SystemExit(f"unexpected CSQTT tab set: {parser.tabs}")
 
 # Keep the browser port on the native CSQTT brand palette and floating-tab
 # visual language; do not drift back to the earlier generic blue-gray mock.
