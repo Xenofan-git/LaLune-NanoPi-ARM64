@@ -33,6 +33,8 @@ jobs:
           test -s vm/real/client-linux-arm64
           grep -Fq 'source=Endlad2/csqtt-core@3eafb7ee868f5f2690edf3b0326153813f88eb5f' vm/real/CSQTT_CLIENT_VERSION
           grep -Fq 'patch=rjs-manual-captcha-fallback-v1' vm/real/CSQTT_CLIENT_VERSION
+          grep -Fq 'recovery=negotiated-wire-4-liveness-v1' vm/real/CSQTT_CLIENT_VERSION
+          strings -a vm/real/client-linux-arm64 | grep -Fq 'CSQTT_LIVENESS_V1'
           sha256sum vm/real/client-linux-arm64
           file vm/real/client-linux-arm64
           test -x vm/real/client-tun-tests-arm64
@@ -639,6 +641,7 @@ jobs:
             sudo install -d -m 0700 /opt/lalune-package
             sudo install -m 0755 /home/tester/deploy-csqtt-lalune.sh /opt/lalune-package/deploy-csqtt-lalune.sh
             test -s /home/tester/csqtt-lalune-linux-arm64
+            test "$(/home/tester/csqtt-lalune-linux-arm64 --protocol-revision)" = "CSQTT-WIRE-4"
             # Exercise the exact runtime CSQTT core that the pinned LaLune
             # release selector downloads. This is an executable/CLI smoke only.
             sudo install -m 0755 /home/tester/client-linux-arm64 /usr/local/bin/csqtt-client
