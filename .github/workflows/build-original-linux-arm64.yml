@@ -366,6 +366,7 @@ jobs:
           git clone https://github.com/Endlad2/csqtt-core.git client-source
           git -C client-source checkout --detach 3eafb7ee868f5f2690edf3b0326153813f88eb5f
           test "$(git -C client-source rev-parse HEAD)" = "3eafb7ee868f5f2690edf3b0326153813f88eb5f"
+          git clone --depth 1 --branch v2.1.9 https://github.com/amurcanov/csqtt.git server-source
           test "$(git -C server-source describe --tags --exact-match)" = "v2.1.9"
           cmp client-source/shared/wire_protocol.rs server-source/shared/wire_protocol.rs
           rustup toolchain install 1.97.1 --profile minimal
@@ -374,6 +375,8 @@ jobs:
           grep -F 'RJS: ошибка, fallback на ручную CAPTCHA' client-source/rust-client/captcha.rs
           grep -F 'self.webview(stream_id, captcha, "manual", Duration::from_secs(60))' client-source/rust-client/captcha.rs
           # Run the isolation audit against pristine upstream v2.1.9 before adaptation.
+          python3 adapt/audit-csqtt-isolation.py
+          python3 adapt/patch-csqtt-lalune-source.py
           python3 adapt/audit-csqtt-isolation.py
           # This is now part of the release build, not only an experimental fixture.
           # The same negotiated WIRE-4 liveness implementation is applied to the
@@ -409,12 +412,9 @@ jobs:
       - name: Audit upstream CSQTT isolation hazards
         run: |
           set -euxo pipefail
-          git clone --depth 1 --branch v2.1.9 https://github.com/amurcanov/csqtt.git server-source
-          python3 adapt/audit-csqtt-isolation.py
       - name: Patch isolated LaLune CSQTT dataplane
         run: |
           set -euxo pipefail
-          python3 adapt/patch-csqtt-lalune-source.py
           grep -Fq 'server_encrypted_tunconf_roundtrips_through_real_client_parser' server-source/rust-server/protocol.rs
           grep -Fq 'include!("../rust-client/protocol.rs");' server-source/rust-server/protocol.rs
           ! grep -R -nE 'csqtt1|10\\.66\\.67' server-source/rust-server --include='*.rs'
