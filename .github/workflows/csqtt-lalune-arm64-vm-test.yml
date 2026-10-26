@@ -31,6 +31,7 @@ jobs:
           test -s vm/real/server-assets/csqtt-lalune-linux-arm64
           test -x vm/real/server-assets/deploy-csqtt-lalune.sh
           test -s vm/real/client-linux-arm64
+          grep -Fxq 'CSQTT-WIRE-4' vm/real/CSQTT_SERVER_PROTOCOL
           grep -Fq 'source=Endlad2/csqtt-core@3eafb7ee868f5f2690edf3b0326153813f88eb5f' vm/real/CSQTT_CLIENT_VERSION
           grep -Fq 'patch=rjs-manual-captcha-fallback-v1' vm/real/CSQTT_CLIENT_VERSION
           grep -Fq 'recovery=negotiated-wire-4-liveness-v1' vm/real/CSQTT_CLIENT_VERSION
