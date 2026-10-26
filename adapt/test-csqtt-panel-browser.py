@@ -273,7 +273,7 @@ def main():
                 + "&lalune_session=fixture-bridge-session",
                 wait_until="domcontentloaded",
             )
-            bridge_page.evaluate("() => fetch('/captchaNotRobot.check').then(response => response.json())")
+            bridge_page.evaluate("() => { void fetch('/captchaNotRobot.check'); }")
             bridge_page.wait_for_url(panel_origin + "/", timeout=10000)
             bridge_page.wait_for_function(
                 "() => document.querySelector('#toast').textContent.includes('CAPTCHA автоматически передана')",
