@@ -470,6 +470,7 @@ jobs:
           aarch64-linux-gnu-readelf -d "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64" > "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-needed.txt"
           grep -Fq 'NEEDED' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-needed.txt"
           qemu-aarch64 -L /usr/aarch64-linux-gnu "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64" --help > "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
+          test "$(qemu-aarch64 -L /usr/aarch64-linux-gnu "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64" --protocol-revision)" = "CSQTT-WIRE-4"
           # Run the upstream Rust unit tests under ARM64 emulation, not only --help.
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER="qemu-aarch64 -L /usr/aarch64-linux-gnu" \
             CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
@@ -528,6 +529,7 @@ jobs:
           rm -rf dist && mkdir -p dist
           install -m 0755 client-assets/client-linux-arm64 dist/client-linux-arm64
           install -m 0644 client-assets/VERSION dist/CSQTT_CLIENT_VERSION
+          printf '%s\\n' 'CSQTT-WIRE-4' > dist/CSQTT_SERVER_PROTOCOL
           cp upstream-lalune/Desktop/Linux/lalune-original-linux-arm64 dist/
           install -m 0755 client-tun-tests-arm64 dist/client-tun-tests-arm64
           cp upstream-lalune/Core/DeployManager/target/aarch64-unknown-linux-gnu/release/deploy-manager dist/
