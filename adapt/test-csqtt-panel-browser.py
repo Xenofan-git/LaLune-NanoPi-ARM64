@@ -228,7 +228,7 @@ def main():
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
-    print("CSQTT_CHROMIUM_UI_SMOKE_PASS widths=320,360,390,768,1280 tabs=5 profile-api=PASS direct-settings-api=PASS")
+    print("CSQTT_CHROMIUM_UI_SMOKE_PASS widths=320,360,390,768,1280 tabs=5 profile-api=PASS tunnel-settings=PASS direct-settings-api=PASS deploy-api=PASS logs=PASS")
 
 
 if __name__ == "__main__":
