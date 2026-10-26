@@ -30,6 +30,7 @@ def main():
         {"id": 2, "name": "Profile two", "protocol": "CSQTT", "hashes": "hash-two"},
     ]
     selected = {"profile": profiles[0]}
+    vpn_connected = {"value": False}
     settings = {
         "authMode": "manual", "workers": 9, "autoApiWorkers": 9,
         "obfs": "video", "fingerprint": "firefox", "turnTransport": "udp",
@@ -72,7 +73,13 @@ def main():
             settings.update(json.loads(request.post_data or "{}"))
             body = {"ok": True}
         elif path == "/vpn/status":
-            body = {"connected": False}
+            body = {"connected": vpn_connected["value"]}
+        elif path == "/vpn/connect" and method == "POST":
+            vpn_connected["value"] = True
+            body = {"ok": True}
+        elif path == "/vpn/disconnect" and method == "POST":
+            vpn_connected["value"] = False
+            body = {"ok": True}
         elif path == "/vk/state":
             body = {"hasToken": False, "fetching": False}
         elif path == "/captcha/state":
@@ -148,6 +155,16 @@ def main():
             )
             assert page.locator("#vkHashes").is_disabled() is False
             assert page.locator("#vkHashes").evaluate("el => el.readOnly")
+
+            # Connect tab: power button must send connect and disconnect actions.
+            page.locator("#power").click()
+            page.wait_for_function("""() => document.querySelector("#toast").textContent.includes("Подключение запрошено")""")
+            page.wait_for_function("""() => document.querySelector("#power").getAttribute("aria-pressed") === "true" """)
+            page.locator("#power").click()
+            page.wait_for_function("""() => document.querySelector("#toast").textContent.includes("Отключение запрошено")""")
+            page.wait_for_function("""() => document.querySelector("#power").getAttribute("aria-pressed") === "false" """)
+            assert any(method == "POST" and path == "/vpn/connect" for method, path, _ in calls)
+            assert any(method == "POST" and path == "/vpn/disconnect" for method, path, _ in calls)
 
             # Direct rules are validated and persisted through the settings API.
             page.locator('button[data-page="route"]').click()
@@ -229,7 +246,7 @@ def main():
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
-    print("CSQTT_CHROMIUM_UI_SMOKE_PASS widths=320,360,390,768,1280 tabs=5 profile-api=PASS tunnel-settings=PASS direct-settings-api=PASS deploy-api=PASS logs=PASS")
+    print("CSQTT_CHROMIUM_UI_SMOKE_PASS widths=320,360,390,768,1280 tabs=5 profile-api=PASS connect-disconnect=PASS tunnel-settings=PASS direct-settings-api=PASS deploy-api=PASS logs=PASS")
 
 
 if __name__ == "__main__":
