@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Patch only disposable pinned CSQTT client/server clones for negotiated liveness E2E.
+"""Apply the negotiated WIRE-4 liveness patch to pinned CSQTT source checkouts.
 
-This is a CI fixture, not a production artifact patch. It implements an authenticated
-PING/PONG control exchange gated by WIRE-4/TUNCONF capability confirmation.
+The release workflow builds its production ARM64 client/server binaries from these
+patched checkouts. The recovery E2E workflow applies the same patch plus separate
+CI-only TURN/test instrumentation to disposable clones. No upstream repository is
+modified. The authenticated PING/PONG exchange is gated by WIRE-4/TUNCONF capability.
 """
 from pathlib import Path
 
@@ -349,4 +351,4 @@ replace_once("client-source/rust-client/protocol.rs",
     ]''', "classify liveness as control")
 
 # Server advertises liveness only to WIRE-4 clients; WIRE-3 clients retain legacy behavior.
-print("PASS: installed disposable WIRE-4 negotiated authenticated liveness PING/PONG in pinned client/server clones.")
+print("PASS: installed WIRE-4 negotiated authenticated liveness PING/PONG in pinned client/server source clones.")
