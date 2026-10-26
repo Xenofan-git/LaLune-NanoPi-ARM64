@@ -368,7 +368,7 @@ func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 		if _, err := io.ReadFull(control, reply); err != nil { t.Fatal(err) }
 		if reply[1] != 0 { t.Fatalf("UDP ASSOCIATE failed: %v", reply) }
 		relayIP := net.IP(reply[4:8])
-		if relayIP.IsUnspecified() { relayIP = net.IPv4(127,0,0,1) }
+		if relayIP.IsUnspecified() { relayIP = net.ParseIP("10.67.68.1").To4() }
 		relay, err := net.DialUDP("udp", nil, &net.UDPAddr{IP:relayIP, Port:int(binary.BigEndian.Uint16(reply[8:10]))})
 		if err != nil { t.Fatal(err) }
 		defer relay.Close()
