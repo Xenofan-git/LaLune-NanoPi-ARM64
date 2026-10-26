@@ -925,10 +925,10 @@ jobs:
             sudo systemctl is-active --quiet csqtt-lalune.service
             sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-after-probe.log
             diff -u /tmp/csqtt-lalune-before-probe.log /tmp/csqtt-lalune-after-probe.log > /tmp/csqtt-lalune-probe-diff.log || true
-            python3 /home/tester/csqtt-server-listener-restart.py | tee /tmp/csqtt-same-process-recovery.log
-            grep -q "^SERVER_LISTENER_TUNCONF before_restart " /tmp/csqtt-same-process-recovery.log
-            grep -q "^SERVER_LISTENER_TUNCONF after_restart " /tmp/csqtt-same-process-recovery.log
-            grep -q "^CSQTT_SERVER_LISTENER_RESTART_SMOKE_PASS " /tmp/csqtt-same-process-recovery.log
+            python3 /home/tester/csqtt-server-listener-restart.py | tee /tmp/csqtt-server-listener-restart-smoke.log
+            grep -q "^SERVER_LISTENER_TUNCONF before_restart " /tmp/csqtt-server-listener-restart-smoke.log
+            grep -q "^SERVER_LISTENER_TUNCONF after_restart " /tmp/csqtt-server-listener-restart-smoke.log
+            grep -q "^CSQTT_SERVER_LISTENER_RESTART_SMOKE_PASS " /tmp/csqtt-server-listener-restart-smoke.log
             python3 /home/tester/csqtt-vm-probe.py | tee /tmp/csqtt-vm-probe-after-restart.log
             grep -q "^LIVE_TUN_BIDIRECTIONAL_IPV4_PASS " /tmp/csqtt-vm-probe-after-restart.log
             sudo systemctl is-active --quiet csqtt-lalune.service
