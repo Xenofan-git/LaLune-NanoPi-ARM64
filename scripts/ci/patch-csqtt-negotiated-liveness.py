@@ -16,6 +16,17 @@ def replace_once(path: str, old: str, new: str, label: str) -> None:
         raise SystemExit(f"{label}: expected exactly one match in {path}, found {count}")
     p.write_text(source.replace(old, new, 1), encoding="utf-8")
 
+def replace_if_present(path: str, old: str, new: str, label: str) -> None:
+    p = Path(path)
+    source = p.read_text(encoding="utf-8")
+    count = source.count(old)
+    if count == 0:
+        return
+    if count != 1:
+        raise SystemExit(f"{label}: expected at most one match in {path}, found {count}")
+    p.write_text(source.replace(old, new, 1), encoding="utf-8")
+
+
 # Negotiate a new revision only in the disposable clones. Preserve WIRE-3 server
 # compatibility for old clients; only WIRE-4 clients get the liveness capability.
 for path in ("client-source/shared/wire_protocol.rs", "server-source/shared/wire_protocol.rs"):
@@ -158,15 +169,15 @@ replace_once("server-source/rust-server/protocol.rs",
 # patch runs. Keep that test aligned with the negotiated WIRE-4 request and
 # the WIRE-4 TUNCONF capability marker; otherwise the release server test
 # fails against its own intentionally upgraded protocol fixture.
-replace_once("server-source/rust-server/protocol.rs",
+replace_if_present("server-source/rust-server/protocol.rs",
              '"GETCONF:9000|wire-device|wire-password|7|ci-salt|1|1|CSQTT-WIRE-3"',
              '"GETCONF:9000|wire-device|wire-password|7|ci-salt|1|1|CSQTT-WIRE-4"',
              "update injected server WIRE-4 request fixture")
-replace_once("server-source/rust-server/protocol.rs",
+replace_if_present("server-source/rust-server/protocol.rs",
              'b"TUNCONF:10.67.68.42:1.1.1.1,8.8.8.8:0:stream-v2"',
              'b"TUNCONF:10.67.68.42:1.1.1.1,8.8.8.8:0:stream-v2:liveness-v1"',
              "update injected WIRE-4 TUNCONF fixture")
-replace_once("server-source/rust-server/protocol.rs",
+replace_if_present("server-source/rust-server/protocol.rs",
              '["10.67.68.42", "1.1.1.1,8.8.8.8", "0", "stream-v2"]',
              '["10.67.68.42", "1.1.1.1,8.8.8.8", "0", "stream-v2", "liveness-v1"]',
              "update injected WIRE-4 TUNCONF parser assertion")
