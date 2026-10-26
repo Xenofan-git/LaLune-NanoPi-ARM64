@@ -20,16 +20,25 @@
     if (!token || sent) return;
     const origin = panelOrigin();
     if (!origin) return;
+    const sessionToken = (function () {
+      try {
+        const hash = location.hash || '';
+        const match = hash.match(/(?:^|[#&])lalune_session=([^&]+)/);
+        return match ? decodeURIComponent(match[1]) :
+          (new URL(location.href).searchParams.get('session_token') || '');
+      } catch (_) { return ''; }
+    })();
+    if (!sessionToken) return;
+    // Return to the panel instead of making a cross-origin POST from VK.
+    // The fragment is never sent in the HTTP request; the authenticated panel
+    // consumes it and submits the result through its own same-origin API.
+    const target = new URL('/', origin);
+    target.hash = new URLSearchParams({
+      lalune_captcha_session: sessionToken,
+      lalune_captcha_result: String(token)
+    }).toString();
     sent = true;
-    fetch(origin + '/api/captcha/result', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        sessionToken: (function(){ try { const h=location.hash||''; const m=h.match(/(?:^|[#&])lalune_session=([^&]+)/); return m ? decodeURIComponent(m[1]) : (new URL(location.href).searchParams.get('session_token') || ''); } catch (_) { return ''; } })(),
-        result: String(token)
-      }),
-      credentials: 'omit'
-    }).catch(function () { sent = false; });
+    location.replace(target.toString());
   }
 
   function inspect(data) {

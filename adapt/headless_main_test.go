@@ -378,6 +378,52 @@ func TestCaptchaResultEndpointForwardsToCoreStdin(t *testing.T) {
 	}
 }
 
+func TestCaptchaBridgeRoundTripThroughProtectedPanelAPI(t *testing.T) {
+	const session = "ci-captcha-bridge-session"
+	const result = "fixture-bridge-success-token"
+	setCaptchaTestState(t, session)
+	t.Setenv("LALUNE_PANEL_USER", "fixture-admin")
+	t.Setenv("LALUNE_PANEL_PASSWORD", "fixture-panel-password")
+
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	app := &App{runner: &LinuxRunner{}}
+	linuxRunnerInputs.Store(app.runner, writer)
+	defer linuxRunnerInputs.Delete(app.runner)
+
+	expected := "CAPTCHA_RESULT|" + result + "\n"
+	readResult := make(chan string, 1)
+	readErr := make(chan error, 1)
+	go func() {
+		buf := make([]byte, len(expected))
+		_, err := io.ReadFull(reader, buf)
+		if err != nil { readErr <- err; return }
+		readResult <- string(buf)
+	}()
+
+	body := strings.NewReader(`{"sessionToken":"ci-captcha-bridge-session","result":"fixture-bridge-success-token"}`)
+	req := httptest.NewRequest(http.MethodPost, "http://panel.test/api/captcha/result", body)
+	req.SetBasicAuth("fixture-admin", "fixture-panel-password")
+	req.Header.Set("Origin", "http://panel.test")
+	rec := httptest.NewRecorder()
+	panelSecurity(panelAPIHandler(apiHandler(app))).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("protected same-origin CAPTCHA bridge POST status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var response map[string]bool
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil { t.Fatalf("invalid CAPTCHA response JSON: %v", err) }
+	if !response["ok"] { t.Fatalf("protected panel rejected valid bridge result: %s", rec.Body.String()) }
+	select {
+	case got := <-readResult:
+		if got != expected { t.Fatalf("core stdin = %q, want %q", got, expected) }
+	case err := <-readErr:
+		t.Fatalf("reading core stdin fixture: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("same-origin protected panel did not forward CAPTCHA result to core stdin")
+	}
+}
+
 func TestCaptchaResultEndpointRejectsStaleSessionAndUnsafeResult(t *testing.T) {
 	const session = "ci-captcha-session"
 	setCaptchaTestState(t, session)

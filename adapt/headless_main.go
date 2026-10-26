@@ -512,6 +512,23 @@ func panelSecurity(next http.Handler) http.Handler {
     })
 }
 
+// panelAPIHandler maps the public /api prefix to backend routes. Sharing it
+// with tests keeps the browser's public URL and protected handler in sync.
+func panelAPIHandler(api http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if r.URL.Path != "/api" && !strings.HasPrefix(r.URL.Path, "/api/") {
+            http.NotFound(w, r)
+            return
+        }
+        u := *r.URL
+        u.Path = strings.TrimPrefix(r.URL.Path, "/api")
+        if u.Path == "" { u.Path = "/" }
+        rr := r.Clone(r.Context())
+        rr.URL = &u
+        api.ServeHTTP(w, rr)
+    })
+}
+
 func panelListenAddress() (string, error) {
     port := strings.TrimSpace(os.Getenv("CSQTT_LALUNE_WEB_PORT"))
     if port == "" { return panelListen, nil }
@@ -527,16 +544,13 @@ func main() {
     app.startup(context.Background())
 
     api := apiHandler(app)
+    apiRoutes := panelAPIHandler(api)
     secureAPI := panelSecurity(api)
     srv := &http.Server{Addr: headlessListen, Handler: secureAPI, ReadHeaderTimeout: 5 * time.Second}
     panelFS, _ := fs.Sub(panelAssets, "frontend")
     panelHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
-            u := *r.URL
-            u.Path = strings.TrimPrefix(r.URL.Path, "/api")
-            if u.Path == "" { u.Path = "/" }
-            rr := r.Clone(r.Context()); rr.URL = &u
-            api.ServeHTTP(w, rr)
+            apiRoutes.ServeHTTP(w, r)
             return
         }
         p := strings.TrimPrefix(r.URL.Path, "/")

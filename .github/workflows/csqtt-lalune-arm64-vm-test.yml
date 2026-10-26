@@ -667,9 +667,14 @@ jobs:
               sudo ip route del blackhole 198.18.77.0/24 2>/dev/null || true
               sudo ip netns del socks5-echo 2>/dev/null || true
               sudo ip link del csqtt0 2>/dev/null || true
+              sudo ip link del eth1 2>/dev/null || true
             }
             trap cleanup_socks5_marked EXIT
             sudo ip netns add socks5-echo
+            # Provide the exact downstream interface/address used by production SOCKS5.
+            sudo ip link add eth1 type dummy
+            sudo ip addr add 10.67.68.1/24 dev eth1
+            sudo ip link set eth1 up
             sudo ip link add csqtt0 type veth peer name socks5-peer
             sudo ip link set socks5-peer netns socks5-echo
             sudo ip link set csqtt0 up

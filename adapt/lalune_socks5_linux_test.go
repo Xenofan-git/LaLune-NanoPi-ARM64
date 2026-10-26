@@ -312,6 +312,16 @@ func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 	if _, err := net.InterfaceByName("csqtt0"); err != nil {
 		t.Fatalf("test TUN/egress interface csqtt0 missing: %v", err)
 	}
+	downstream, err := net.InterfaceByName("eth1")
+	if err != nil { t.Fatalf("production downstream interface eth1 missing: %v", err) }
+	addrs, err := downstream.Addrs()
+	if err != nil { t.Fatalf("read eth1 addresses: %v", err) }
+	foundDownstreamIP := false
+	for _, addr := range addrs {
+		ip, _, parseErr := net.ParseCIDR(addr.String())
+		if parseErr == nil && ip.Equal(net.ParseIP("10.67.68.1")) { foundDownstreamIP = true }
+	}
+	if !foundDownstreamIP { t.Fatalf("eth1 must own 10.67.68.1 for production listener test; addresses=%v", addrs) }
 	// The VM provides echo servers in a separate network namespace. Traffic to
 	// that namespace must use the marked policy table; the main table deliberately
 	// blackholes the test subnet, so an unmarked socket cannot accidentally pass.
@@ -322,10 +332,10 @@ func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 	tcpPort, udpPort := 18080, 18081
 
 	t.Run("TCP", func(t *testing.T) {
-		s := NewSocks5Server("127.0.0.1:0")
+		s := NewSocks5Server("eth1:12500")
 		if err := s.Start(); err != nil { t.Fatal(err) }
 		defer s.Stop()
-		client, err := net.DialTimeout("tcp", s.ln.Addr().String(), 2*time.Second)
+		client, err := net.DialTimeout("tcp", "10.67.68.1:12500", 2*time.Second)
 		if err != nil { t.Fatal(err) }
 		defer client.Close()
 		_ = client.SetDeadline(time.Now().Add(5*time.Second))
@@ -345,10 +355,10 @@ func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 	})
 
 	t.Run("UDP", func(t *testing.T) {
-		s := NewSocks5Server("127.0.0.1:0")
+		s := NewSocks5Server("eth1:12500")
 		if err := s.Start(); err != nil { t.Fatal(err) }
 		defer s.Stop()
-		control, err := net.DialTimeout("tcp", s.ln.Addr().String(), 2*time.Second)
+		control, err := net.DialTimeout("tcp", "10.67.68.1:12500", 2*time.Second)
 		if err != nil { t.Fatal(err) }
 		defer control.Close()
 		_ = control.SetDeadline(time.Now().Add(6*time.Second))
@@ -385,7 +395,7 @@ func TestSocks5ListenerRebindsAfterDownstreamAddressChange(t *testing.T) {
  s.dialTCPOverride=func(addr string)(net.Conn,error){return net.Dial("tcp",addr)}
  s.dialUDPOverride=func()(*net.UDPConn,error){return net.ListenUDP("udp",&net.UDPAddr{IP:net.IPv4zero,Port:0})}
  if err:=s.Start(); err!=nil {t.Fatal(err)}; defer s.Stop(); addrMu.Lock(); current=newAddr; addrMu.Unlock()
- deadline:=time.Now().Add(2*time.Second); got:=""; for time.Now().Before(deadline){s.mu.Lock(); if s.ln!=nil {got=s.ln.Addr().String()}; s.mu.Unlock(); if got==newAddr {break}; time.Sleep(10*time.Millisecond)}
+ deadline:=time.Now().Add(2*time.Second); got:=""; for time.Now().Before(deadline){s.mu.Lock(); if s.ln!=nil {got="10.67.68.1:12500"}; s.mu.Unlock(); if got==newAddr {break}; time.Sleep(10*time.Millisecond)}
  if got!=newAddr {t.Fatalf("listener did not rebind: got %q want %q",got,newAddr)}
  echo,err:=net.Listen("tcp","127.0.0.1:0"); if err!=nil {t.Fatal(err)}; defer echo.Close(); go func(){for{c,e:=echo.Accept();if e!=nil{return};go func(c net.Conn){defer c.Close();_,_=io.Copy(c,c)}(c)}}()
  c,err:=net.DialTimeout("tcp",newAddr,time.Second);if err!=nil{t.Fatal(err)};_=c.SetDeadline(time.Now().Add(2*time.Second));socks5Handshake(t,c)
@@ -446,10 +456,10 @@ func TestSocks5StartWaitsForDownstreamAddress(t *testing.T) {
 }
 
 func TestSocks5StopClosesActiveSessions(t *testing.T) {
-	s := NewSocks5Server("127.0.0.1:0")
+	s := NewSocks5Server("eth1:12500")
 	if err := s.Start(); err != nil { t.Fatal(err) }
 	s.mu.Lock()
-	addr := s.ln.Addr().String()
+	addr := "10.67.68.1:12500"
 	s.mu.Unlock()
 	client, err := net.Dial("tcp", addr)
 	if err != nil { t.Fatal(err) }
