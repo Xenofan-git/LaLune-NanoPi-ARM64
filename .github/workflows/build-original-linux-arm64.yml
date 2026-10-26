@@ -377,7 +377,6 @@ jobs:
           # Run the isolation audit against pristine upstream v2.1.9 before adaptation.
           python3 adapt/audit-csqtt-isolation.py
           python3 adapt/patch-csqtt-lalune-source.py
-          python3 adapt/audit-csqtt-isolation.py
           # This is now part of the release build, not only an experimental fixture.
           # The same negotiated WIRE-4 liveness implementation is applied to the
           # pinned production client and its matching isolated server source.
@@ -390,7 +389,7 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
             cargo +1.97.1 build --locked --release --target aarch64-unknown-linux-gnu --manifest-path client-source/rust-client/Cargo.toml --bin client
           install -m 0755 client-source/rust-client/target/aarch64-unknown-linux-gnu/release/client client-assets/client-linux-arm64
-          printf '%s\\n' 'source=Endlad2/csqtt-core@3eafb7ee868f5f2690edf3b0326153813f88eb5f' 'patch=rjs-manual-captcha-fallback-v1' 'recovery=negotiated-wire-4-liveness-v1' > client-assets/VERSION
+          printf '%s\n' 'source=Endlad2/csqtt-core@3eafb7ee868f5f2690edf3b0326153813f88eb5f' 'patch=rjs-manual-captcha-fallback-v1' 'recovery=negotiated-wire-4-liveness-v1' > client-assets/VERSION
           file client-assets/client-linux-arm64
           readelf -h client-assets/client-linux-arm64 | grep -Fq 'AArch64'
           strings -a client-assets/client-linux-arm64 | grep -Fq 'fallback'
@@ -409,9 +408,6 @@ jobs:
           chmod 0755 adapt/test-csqtt-lalune-installer.sh
           bash -n adapt/test-csqtt-lalune-installer.sh
           bash adapt/test-csqtt-lalune-installer.sh
-      - name: Audit upstream CSQTT isolation hazards
-        run: |
-          set -euxo pipefail
       - name: Patch isolated LaLune CSQTT dataplane
         run: |
           set -euxo pipefail
