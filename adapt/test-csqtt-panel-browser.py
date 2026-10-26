@@ -259,6 +259,12 @@ def main():
                 ),
             )
             bridge_page.route(
+                panel_origin + "/",
+                lambda route: route.fulfill(
+                    status=200, content_type="text/html", body=HTML.read_text()
+                ),
+            )
+            bridge_page.route(
                 "**/captchaNotRobot.check",
                 lambda route: route.fulfill(
                     status=200,
