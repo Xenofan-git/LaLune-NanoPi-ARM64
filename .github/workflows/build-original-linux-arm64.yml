@@ -529,7 +529,7 @@ jobs:
           rm -rf dist && mkdir -p dist
           install -m 0755 client-assets/client-linux-arm64 dist/client-linux-arm64
           install -m 0644 client-assets/VERSION dist/CSQTT_CLIENT_VERSION
-          printf '%s\\n' 'CSQTT-WIRE-4' > dist/CSQTT_SERVER_PROTOCOL
+          printf '%s\n' 'CSQTT-WIRE-4' > dist/CSQTT_SERVER_PROTOCOL
           cp upstream-lalune/Desktop/Linux/lalune-original-linux-arm64 dist/
           install -m 0755 client-tun-tests-arm64 dist/client-tun-tests-arm64
           cp upstream-lalune/Core/DeployManager/target/aarch64-unknown-linux-gnu/release/deploy-manager dist/
