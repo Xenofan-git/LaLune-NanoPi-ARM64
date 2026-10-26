@@ -85,6 +85,10 @@ def main():
             body = {"backend": "fixture", "ui": "test"}
         elif path == "/logs":
             body = []
+        elif path == "/logs/clear" and method == "POST":
+            body = {"ok": True}
+        elif path == "/deploy" and method == "POST":
+            body = {"ok": True}
         elif path == "/updates/lalune":
             body = {"hasUpdate": False}
         else:
@@ -98,6 +102,7 @@ def main():
             page = browser.new_page()
             page_errors = []
             page.on("pageerror", lambda error: page_errors.append(str(error)))
+            page.on("dialog", lambda dialog: dialog.accept())
             page.route("**/api/**", api_fixture)
             page.goto(base_url, wait_until="domcontentloaded")
             page.wait_for_function("document.querySelector('#profileList .profile') !== null")
@@ -161,6 +166,52 @@ def main():
 
             assert page.locator("#page-route").is_visible()
             assert not page.locator("#deploySecretsOverlay").is_visible()
+
+            # Tunnel settings: changing the worker count must persist through /settings.
+            page.locator('button[data-page="settings"]').click()
+            page.locator("#workers").evaluate("""el => {
+              el.value = "11";
+              el.dispatchEvent(new Event("input", {bubbles:true}));
+            }""")
+            page.locator("#saveSettings").click()
+            page.wait_for_function("""() => document.querySelector("#workersValue").textContent === "11" """)
+            saved_settings = [json.loads(raw) for method, path, raw in calls
+                              if method == "POST" and path == "/settings" and raw]
+            assert saved_settings and saved_settings[-1]["workers"] == 11, (
+                "Tunnel settings were not persisted"
+            )
+
+            # Logs: refresh reads the log endpoint and clear sends the explicit POST.
+            page.locator('button[data-page="logs"]').click()
+            page.locator("#refreshLogs").click()
+            page.wait_for_function("""() => document.querySelector("#logs").textContent.includes("Записей пока нет")""")
+            assert any(method == "GET" and path == "/logs" for method, path, _ in calls), (
+                "Logs tab did not load /logs"
+            )
+            page.locator("#clearLogs").click()
+            page.wait_for_function("""() => document.querySelector("#toast").textContent.includes("Журнал очищен")""")
+            assert any(method == "POST" and path == "/logs/clear" for method, path, _ in calls), (
+                "Logs clear action did not reach backend"
+            )
+
+            # Deploy: validate the one-button flow against a deterministic API fixture.
+            # This proves the page constructs the expected request without SSHing anywhere.
+            page.locator('button[data-page="deploy"]').click()
+            page.locator("#deployHost").fill("192.0.2.50")
+            page.locator("#deployPassword").fill("fixture-ssh-password")
+            page.locator("#editDeployAuth").click()
+            page.locator("#mainPassword").fill("fixture-tunnel-password")
+            page.locator("#webLogin").fill("fixture-admin")
+            page.locator("#webPassword").fill("fixture-web-password")
+            page.locator("#saveDeployAuth").click()
+            page.locator("#startDeploy").click()
+            page.wait_for_function("""() => document.querySelector("#toast").textContent.includes("Деплой запущен")""")
+            deploy_requests = [json.loads(raw) for method, path, raw in calls
+                               if method == "POST" and path == "/deploy" and raw]
+            assert deploy_requests, "Deploy button did not call /deploy"
+            assert deploy_requests[-1]["host"] == "192.0.2.50"
+            assert deploy_requests[-1]["deviceId"] == "fixture-device"
+            assert deploy_requests[-1]["corePort"] == 47000 and deploy_requests[-1]["warpPort"] == 47002
 
             # A failed status endpoint must not be misreported as a real disconnect,
             # and deployment actions must remain blocked when operation state is unknown.
