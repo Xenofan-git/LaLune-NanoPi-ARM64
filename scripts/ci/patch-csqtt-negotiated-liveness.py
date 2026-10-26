@@ -154,6 +154,23 @@ replace_once("server-source/rust-server/protocol.rs",
                             )
                         }''', "server confirms negotiated liveness")
 
+# The LaLune adaptation injects a server/client round-trip test before this
+# patch runs. Keep that test aligned with the negotiated WIRE-4 request and
+# the WIRE-4 TUNCONF capability marker; otherwise the release server test
+# fails against its own intentionally upgraded protocol fixture.
+replace_once("server-source/rust-server/protocol.rs",
+             '"GETCONF:9000|wire-device|wire-password|7|ci-salt|1|1|CSQTT-WIRE-3"',
+             '"GETCONF:9000|wire-device|wire-password|7|ci-salt|1|1|CSQTT-WIRE-4"',
+             "update injected server WIRE-4 request fixture")
+replace_once("server-source/rust-server/protocol.rs",
+             'b"TUNCONF:10.67.68.42:1.1.1.1,8.8.8.8:0:stream-v2"',
+             'b"TUNCONF:10.67.68.42:1.1.1.1,8.8.8.8:0:stream-v2:liveness-v1"',
+             "update injected WIRE-4 TUNCONF fixture")
+replace_once("server-source/rust-server/protocol.rs",
+             '["10.67.68.42", "1.1.1.1,8.8.8.8", "0", "stream-v2"]',
+             '["10.67.68.42", "1.1.1.1,8.8.8.8", "0", "stream-v2", "liveness-v1"]',
+             "update injected WIRE-4 TUNCONF parser assertion")
+
 # Client-side codec and runtime. PINGs use the existing authenticated packet envelope.
 replace_once("client-source/rust-client/session.rs",
 '''const CONFIG_RESPONSE_TIMEOUT_MS: [u64; 3] = [750, 1_500, 3_000];''',
