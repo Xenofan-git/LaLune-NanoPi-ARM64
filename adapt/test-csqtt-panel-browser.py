@@ -167,7 +167,10 @@ def main():
             # Selecting another profile must round-trip through the API and refresh
             # the profile-specific hash shown on the Tunnel page.
             page.locator('button[data-page="connect"]').click()
+            page.locator("#topSwitch").click()
+            page.wait_for_function("!document.querySelector('#profileManagerOverlay').classList.contains('hidden')")
             page.locator('.profile[data-id="2"]').click()
+            page.wait_for_function("document.querySelector('#profileManagerOverlay').classList.contains('hidden')")
             page.wait_for_function("document.querySelector('#vkHashes').value === 'hash-two'")
             assert any(m == "POST" and path == "/configs/selected" for m, path, _ in calls), (
                 "profile selection did not reach backend API"
