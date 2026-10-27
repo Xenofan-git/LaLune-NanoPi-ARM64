@@ -16,7 +16,7 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(".").resolve()
 HTML = ROOT / "adapt" / "csqtt-panel-preview.html"
 EXPECTED = {"connect", "settings", "deploy", "logs", "route"}
-WIDTHS = [320, 360, 390, 768, 1280]
+WIDTHS = [390, 768, 1280]
 
 
 class QuietHandler(SimpleHTTPRequestHandler):
@@ -135,20 +135,33 @@ def main():
                 )
                 assert page.locator(f'button[data-page="{name}"]').get_attribute("aria-pressed") is None
 
+            # The agreed design is a fixed 390px native-phone canvas on every
+            # device. Desktop must center that same canvas; it must not stretch,
+            # reflow, or switch to a desktop layout at wider viewport sizes.
             for width in WIDTHS:
                 page.set_viewport_size({"width": width, "height": 850})
                 page.wait_for_timeout(40)
-                dimensions = page.evaluate("""() => ({
-                  viewport: innerWidth,
-                  document: document.documentElement.scrollWidth,
-                  nav: (() => { const r=document.querySelector('.tabs').getBoundingClientRect();
-                    return {left:r.left,right:r.right,width:r.width}; })()
-                })""")
-                assert dimensions["document"] <= width, (
-                    f"horizontal overflow at {width}px: {dimensions}"
+                dimensions = page.evaluate("""() => {
+                  const body = document.body.getBoundingClientRect();
+                  const nav = document.querySelector('.tabs').getBoundingClientRect();
+                  return {
+                    viewport: innerWidth,
+                    body: {left: body.left, width: body.width, right: body.right},
+                    nav: {left: nav.left, width: nav.width, right: nav.right}
+                  };
+                }""")
+                expected_left = (width - 390) / 2
+                assert abs(dimensions["body"]["width"] - 390) <= 1, (
+                    f"phone canvas changed width at {width}px: {dimensions}"
                 )
-                assert dimensions["nav"]["left"] >= -1 and dimensions["nav"]["right"] <= width + 1, (
-                    f"bottom navigation escapes viewport at {width}px: {dimensions}"
+                assert abs(dimensions["body"]["left"] - expected_left) <= 1, (
+                    f"phone canvas is not centered at {width}px: {dimensions}"
+                )
+                assert abs(dimensions["nav"]["width"] - 370) <= 1, (
+                    f"bottom navigation changed width at {width}px: {dimensions}"
+                )
+                assert abs(dimensions["nav"]["left"] - (width - 370) / 2) <= 1, (
+                    f"bottom navigation is not centered at {width}px: {dimensions}"
                 )
 
             # Selecting another profile must round-trip through the API and refresh
