@@ -5,6 +5,9 @@ on:
     branches:
       - test/csqtt-process-recovery-e2e
       - fix/production-recovery-single-artifact
+    paths:
+      - scripts/ci/**
+      - .github/workflows/csqtt-real-client-process-recovery-e2e.yml
 
 permissions:
   contents: read
