@@ -141,6 +141,10 @@ def main():
                     f"active tab missing aria-current state: {name}"
                 )
                 assert page.locator(f'button[data-page="{name}"]').get_attribute("aria-pressed") is None
+                if name == "route":
+                    # Route is a full-screen dialog; close it before using bottom navigation again.
+                    page.locator("#routeClose").click()
+                    assert page.locator("#page-connect").evaluate("el => el.classList.contains('active')")
 
             # The agreed design is a fixed 390px native-phone canvas on every
             # device. Desktop must center that same canvas; it must not stretch,
