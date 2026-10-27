@@ -624,6 +624,7 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \t\tif err := writeDirectFileAtomic(directDnsmasqPath, []byte(dnsmasq.String()), 0644); err != nil {
 \t\t\treturn fmt.Errorf("атомарная запись dnsmasq direct-конфига: %w", err)
 \t\t}
+\t\tdnsmasqChanged = true
 \t}
 \tif dnsmasqChanged {
 \t\tif err := t.app.runSudo("systemctl restart dnsmasq"); err != nil {
