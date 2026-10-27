@@ -76,6 +76,9 @@ def main():
             body = {"ok": True}
         elif path == "/tunnel/auth" and method == "GET":
             body = dict(tunnel_auth)
+        elif path == "/tunnel/auth" and method == "PUT":
+            tunnel_auth["configured"] = True
+            body = {"ok": True, "configured": True}
         elif path == "/vpn/status":
             body = {"connected": vpn_connected["value"]}
         elif path == "/vpn/connect" and method == "POST":
@@ -124,6 +127,10 @@ def main():
             tabs = page.locator("button[data-page]")
             actual = [tabs.nth(i).get_attribute("data-page") for i in range(tabs.count())]
             assert len(actual) == 5 and set(actual) == EXPECTED, f"five-tab set mismatch: {actual}"
+            assert page.locator("#page-connect > .connect-hero").count() == 1
+            assert page.locator("#page-connect > .card").count() == 1, "Connect must retain the clean 2.5.0 single-card composition"
+            assert page.locator("#topHeart").count() == 1 and page.locator("#topSwitch").count() == 1 and page.locator("#topSettings").count() == 1
+            assert page.locator("#topQr, #qrImage").count() == 0, "QR controls must remain absent"
 
             for name in EXPECTED:
                 page.locator(f'button[data-page="{name}"]').click()
@@ -189,10 +196,14 @@ def main():
             assert page.locator("#page-settings").evaluate("el => el.classList.contains('active')"), (
                 "missing tunnel password did not direct the user to Tunnel settings"
             )
-            tunnel_auth["configured"] = True
-            page.locator('button[data-page="connect"]').click()
-            page.locator("#quickRefreshStatus").click()
+            page.locator('button[data-page="settings"]').click()
+            page.locator("#editTunnelAuth").click()
+            page.locator("#tunnelPassword").fill("fixture-tunnel-pass_123")
+            page.locator("#saveTunnelAuth").click()
+            page.wait_for_function('''() => document.querySelector("#tunnelAuthOverlay").classList.contains("hidden")''')
+            assert any(method == "PUT" and path == "/tunnel/auth" for method, path, _ in calls), "Tunnel password dialog did not persist to API"
             page.wait_for_function('''() => document.querySelector("#tunnelAuthSummary").textContent.includes("сохранён")''')
+            page.locator('button[data-page="connect"]').click()
 
             # With tunnel auth configured, power button must send connect/disconnect.
             page.locator("#power").click()
@@ -227,12 +238,22 @@ def main():
               el.value = "11";
               el.dispatchEvent(new Event("input", {bubbles:true}));
             }""")
+            page.locator("#serverPeer").fill("192.0.2.55")
+            page.locator("#saveServerPeer").click()
+            page.wait_for_function("""() => document.querySelector("#serverPeer").value === "192.0.2.55" """)
+            assert selected["profile"]["peer"] == "192.0.2.55", "server peer did not persist through selected-profile API"
+            page.locator("#vkAuthMode").select_option("auto_js")
+            page.locator("#turnTransport").select_option("tcp_tls")
+            page.locator("#captchaMode").select_option("manual")
             page.locator("#saveSettings").click()
             page.wait_for_function("""() => document.querySelector("#workersValue").textContent === "11" """)
             saved_settings = [json.loads(raw) for method, path, raw in calls
                               if method == "POST" and path == "/settings" and raw]
             assert saved_settings and saved_settings[-1]["workers"] == 11, (
                 "Tunnel settings were not persisted"
+            )
+            assert saved_settings[-1]["vkAuthMode"] == "auto_js" and saved_settings[-1]["turnTransport"] == "tcp_tls" and saved_settings[-1]["captchaMode"] == "manual", (
+                "VK credential mode, transport, or CAPTCHA mode did not persist"
             )
 
             # Logs: refresh reads the log endpoint and clear sends the explicit POST.
