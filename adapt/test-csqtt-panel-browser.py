@@ -31,6 +31,8 @@ def main():
     ]
     selected = {"profile": profiles[0]}
     vpn_connected = {"value": False}
+    # A fresh device has no tunnel password; the success path provisions one below.
+    tunnel_auth = {"configured": False}
     settings = {
         "authMode": "manual", "workers": 9, "autoApiWorkers": 9,
         "obfs": "video", "fingerprint": "firefox", "turnTransport": "udp",
@@ -72,6 +74,8 @@ def main():
             settings.clear()
             settings.update(json.loads(request.post_data or "{}"))
             body = {"ok": True}
+        elif path == "/tunnel/auth" and method == "GET":
+            body = dict(tunnel_auth)
         elif path == "/vpn/status":
             body = {"connected": vpn_connected["value"]}
         elif path == "/vpn/connect" and method == "POST":
@@ -158,7 +162,22 @@ def main():
             assert page.locator("#vkHashes").is_disabled() is False
             assert page.locator("#vkHashes").evaluate("el => el.readOnly")
 
-            # Connect tab: power button must send connect and disconnect actions.
+            # Match the real panel guard: without a configured tunnel password,
+            # Connect must not call /vpn/connect. Provision the fixture only after
+            # proving the guarded path, then exercise connect/disconnect.
+            page.locator("#power").click()
+            page.wait_for_function('''() => document.querySelector("#toast").textContent.includes("Сначала задайте пароль туннеля")''')
+            assert not any(method == "POST" and path == "/vpn/connect" for method, path, _ in calls), (
+                "Connect bypassed the required tunnel-password guard"
+            )
+            assert page.locator("#page-settings").evaluate("el => el.classList.contains('active')"), (
+                "missing tunnel password did not direct the user to Tunnel settings"
+            )
+            tunnel_auth["configured"] = True
+            page.locator("#quickRefreshStatus").click()
+            page.locator('button[data-page="connect"]').click()
+
+            # With tunnel auth configured, power button must send connect/disconnect.
             page.locator("#power").click()
             page.wait_for_function("""() => document.querySelector("#toast").textContent.includes("Подключение запрошено")""")
             page.wait_for_function("""() => document.querySelector("#power").getAttribute("aria-pressed") === "true" """)
