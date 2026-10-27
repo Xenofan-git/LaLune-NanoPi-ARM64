@@ -174,8 +174,9 @@ def main():
                 "missing tunnel password did not direct the user to Tunnel settings"
             )
             tunnel_auth["configured"] = True
-            page.locator("#quickRefreshStatus").click()
             page.locator('button[data-page="connect"]').click()
+            page.locator("#quickRefreshStatus").click()
+            page.wait_for_function('''() => document.querySelector("#tunnelAuthSummary").textContent.includes("сохранён")''')
 
             # With tunnel auth configured, power button must send connect/disconnect.
             page.locator("#power").click()
