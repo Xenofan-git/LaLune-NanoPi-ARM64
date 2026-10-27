@@ -221,6 +221,8 @@ func TestDirectDomainValidation(t *testing.T) {
 		{name: "reject path", domain: "example.com/path", want: false},
 		{name: "reject empty label", domain: "example..com", want: false},
 		{name: "reject leading hyphen", domain: "-bad.example", want: false},
+		{name: "reject IPv4 literal", domain: "192.0.2.1", want: false},
+		{name: "reject IPv6 literal", domain: "2001:db8::1", want: false},
 		{name: "reject blank", domain: "", want: false},
 	}
 	for _, tt := range tests {
@@ -267,7 +269,8 @@ func TestDirectPlanTransitions(t *testing.T) {
 		{name: "multiple domains", domains: "example.com, api.example.com", wantDomains: []string{"example.com", "api.example.com"}, wantDNS: true, wantEnabled: true},
 		{name: "empty list", wantEnabled: false},
 		{name: "reject URL", domains: "https://example.com", wantErr: true},
-		{name: "reject IP literal", domains: "192.0.2.1", wantErr: true},
+		{name: "reject IPv4 literal", domains: "192.0.2.1", wantErr: true},
+		{name: "reject IPv6 literal", domains: "2001:db8::1", wantErr: true},
 		{name: "reject CIDR", domains: "192.0.2.0/24", wantErr: true},
 	}
 	for _, tt := range tests {
