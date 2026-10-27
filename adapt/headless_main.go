@@ -14,6 +14,8 @@ import (
     "net/http"
     "net/url"
     "os"
+    "path/filepath"
+    "regexp"
     "os/signal"
     "strconv"
     "strings"
@@ -46,6 +48,108 @@ type connectBody struct {
 type configBody struct {
     Link     string `json:"link"`
     Protocol string `json:"protocol"`
+}
+
+type tunnelAuthBody struct {
+    Password string `json:"password"`
+}
+
+// The panel and LinuxRunner share a private per-user secret file. It is
+// outside the web root, atomically replaced, and never returned by the API.
+func tunnelAuthFile() (string, error) {
+    dir, err := os.UserConfigDir()
+    if err != nil { return "", err }
+    dir = filepath.Join(dir, "csqtt-lalune")
+    if err := os.MkdirAll(dir, 0700); err != nil { return "", err }
+    return filepath.Join(dir, "tunnel-password"), nil
+}
+
+func loadTunnelAuthPassword() (string, error) {
+    path, err := tunnelAuthFile()
+    if err != nil { return "", err }
+    data, err := os.ReadFile(path)
+    if err != nil { return "", err }
+    password := strings.TrimSpace(string(data))
+    if password == "" { return "", fmt.Errorf("пароль туннеля не задан") }
+    return password, nil
+}
+
+func saveTunnelAuthPassword(password string) error {
+    password = strings.TrimSpace(password)
+    if password == "" {
+        path, err := tunnelAuthFile()
+        if err != nil { return err }
+        if err := os.Remove(path); err != nil && !os.IsNotExist(err) { return err }
+        return nil
+    }
+    if len(password) > 256 || !regexp.MustCompile(`^[a-zA-Z0-9_.!?:#/-]+//go:build linux
+
+package main
+
+import (
+    "sync"
+    "crypto/subtle"
+    "context"
+    "embed"
+    "io/fs"
+    "encoding/json"
+    "fmt"
+    "net"
+    "net/http"
+    "net/url"
+    "os"
+    "path/filepath"
+    "os/signal"
+    "strconv"
+    "strings"
+    "syscall"
+    "time"
+
+    "lalune-desktop/Libs"
+)
+
+const headlessListen = "127.0.0.1:1062"
+const panelListen = "0.0.0.0:1061"
+
+// Set by the pinned ARM64 build workflow through Go -ldflags.
+var (
+    buildCommit = "unknown"
+    buildRunID = "unknown"
+    buildRunNumber = "unknown"
+    buildDate = "unknown"
+    buildBranch = "unknown"
+    buildUpstreamCommit = "unknown"
+)
+
+//go:embed frontend
+var panelAssets embed.FS
+
+type connectBody struct {
+    ID int64 `json:"id"`
+}
+
+).MatchString(password) {
+        return fmt.Errorf("недопустимый формат пароля туннеля")
+    }
+    path, err := tunnelAuthFile()
+    if err != nil { return err }
+    f, err := os.CreateTemp(filepath.Dir(path), ".tunnel-password-*")
+    if err != nil { return err }
+    tmp := f.Name()
+    defer os.Remove(tmp)
+    if err := f.Chmod(0600); err != nil { f.Close(); return err }
+    if _, err := f.WriteString(password); err != nil { f.Close(); return err }
+    if err := f.Sync(); err != nil { f.Close(); return err }
+    if err := f.Close(); err != nil { return err }
+    return os.Rename(tmp, path)
+}
+
+func csqttDeviceID(core *libs.AppCore) string {
+    if core == nil { return "" }
+    var settings map[string]any
+    if err := json.Unmarshal([]byte(core.GetSettingsJson()), &settings); err != nil { return "" }
+    id, _ := settings["deviceId"].(string)
+    return strings.TrimSpace(id)
 }
 
 func writeRaw(w http.ResponseWriter, value string) {
@@ -291,6 +395,27 @@ func apiHandler(app *App) http.Handler {
         http.Error(w, "settings reset is not implemented by pinned LaLune", http.StatusNotImplemented)
     })
 
+
+    mux.HandleFunc("/tunnel/auth", func(w http.ResponseWriter, r *http.Request) {
+        switch r.Method {
+        case http.MethodGet:
+            _, err := loadTunnelAuthPassword()
+            writeJSON(w, map[string]bool{"configured": err == nil})
+        case http.MethodPut, http.MethodPost:
+            var body tunnelAuthBody
+            if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+                http.Error(w, "bad json", http.StatusBadRequest); return
+            }
+            if err := saveTunnelAuthPassword(body.Password); err != nil {
+                http.Error(w, err.Error(), http.StatusBadRequest); return
+            }
+            writeJSON(w, map[string]bool{"ok": true, "configured": strings.TrimSpace(body.Password) != ""})
+        default:
+            w.Header().Set("Allow", "GET, PUT, POST")
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        }
+    })
+
     mux.HandleFunc("/vpn/status", func(w http.ResponseWriter, r *http.Request) {
         if !method(w, r, http.MethodGet) { return }
         writeRaw(w, app.GetStatusJson())
@@ -303,6 +428,8 @@ func apiHandler(app *App) http.Handler {
             http.Error(w, "bad json", http.StatusBadRequest)
             return
         }
+        if _, err := loadTunnelAuthPassword(); err != nil { http.Error(w, "пароль туннеля не задан", http.StatusPreconditionRequired); return }
+        if csqttDeviceID(app.core) == "" { http.Error(w, "ID устройства LaLune не задан", http.StatusPreconditionRequired); return }
         writeJSON(w, map[string]bool{"ok": app.Connect(body.ID)})
     })
 
