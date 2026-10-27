@@ -267,10 +267,11 @@ func TestDirectPlanTransitions(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "multiple domains", domains: "example.com, api.example.com", wantDomains: []string{"example.com", "api.example.com"}, wantDNS: true, wantEnabled: true},
+		{name: "mixed domains and IPv4 IPv6", domains: "example.com, 192.0.2.1, 2001:db8::1", wantDomains: []string{"example.com", "192.0.2.1", "2001:db8::1"}, wantDNS: true, wantEnabled: true},
+		{name: "IPv4 only", domains: "192.0.2.1", wantDomains: []string{"192.0.2.1"}, wantDNS: false, wantEnabled: true},
+		{name: "IPv6 only", domains: "2001:db8::1", wantDomains: []string{"2001:db8::1"}, wantDNS: false, wantEnabled: true},
 		{name: "empty list", wantEnabled: false},
 		{name: "reject URL", domains: "https://example.com", wantErr: true},
-		{name: "reject IPv4 literal", domains: "192.0.2.1", wantErr: true},
-		{name: "reject IPv6 literal", domains: "2001:db8::1", wantErr: true},
 		{name: "reject CIDR", domains: "192.0.2.0/24", wantErr: true},
 	}
 	for _, tt := range tests {
