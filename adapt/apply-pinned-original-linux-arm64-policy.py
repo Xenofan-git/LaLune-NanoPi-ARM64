@@ -522,7 +522,11 @@ func prepareDirectPlan(domainsRaw string) ([]string, bool, error) {
 \t\t\treturn nil, false, fmt.Errorf("некорректный домен Direct: %s", domain)
 \t\t}
 \t}
-\treturn domains, len(domains) > 0, nil
+\tneedsDNS := false
+\tfor _, entry := range domains {
+\t\tif net.ParseIP(entry) == nil { needsDNS = true; break }
+\t}
+\treturn domains, needsDNS, nil
 }
 
 func (t *LinuxTun) cleanupDirectRoutingLocked() {
@@ -596,7 +600,7 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \tnft.WriteString(" }\\n")
 \tnft.WriteString("  chain prerouting { type filter hook prerouting priority -150; policy accept;\\n")
 \tnft.WriteString("    ip saddr 192.168.5.0/24 ip daddr @direct4 meta mark set " + directMark + "\\n")
-\tnft.WriteString("    ip6 saddr 192.168.5.0/24 ip6 daddr @direct6 meta mark set " + directMark + "\\n")
+\tnft.WriteString("    ip6 daddr @direct6 meta mark set " + directMark + "\\n")
 \tnft.WriteString("  }\\n")
 \tnft.WriteString("}\\n")
 
@@ -620,6 +624,7 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \t\tif err := writeDirectFileAtomic(directDnsmasqPath, []byte(dnsmasq.String()), 0644); err != nil {
 \t\t\treturn fmt.Errorf("атомарная запись dnsmasq direct-конфига: %w", err)
 \t\t}
+\t}
 \tif dnsmasqChanged {
 \t\tif err := t.app.runSudo("systemctl restart dnsmasq"); err != nil {
 \t\t\treturn fmt.Errorf("перезапуск dnsmasq после изменения Direct: %w", err)
