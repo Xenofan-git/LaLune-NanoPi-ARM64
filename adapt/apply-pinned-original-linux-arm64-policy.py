@@ -507,7 +507,7 @@ func splitDirectList(raw string) []string {
 }
 
 func validDirectDomain(s string) bool {
-\tif s == "" || strings.ContainsAny(s, "/#:=<>\\"'\\\\") {
+\tif s == "" || net.ParseIP(s) != nil || strings.ContainsAny(s, "/#:=<>\\"'\\\\") {
 \t\treturn false
 \t}
 \treturn regexp.MustCompile("(?i)^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[.])+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$").MatchString(s)
