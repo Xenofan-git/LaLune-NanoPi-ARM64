@@ -535,7 +535,10 @@ func prepareDirectPlan(domainsRaw string) ([]string, bool, error) {
 }
 
 func (t *LinuxTun) cleanupDirectRoutingLocked() {
-\tt.app.runSudo("ip rule del pref " + directRulePref + " 2>/dev/null || true")
+\t// Remove only rules carrying our exact mark/table signature; never delete
+\t// an unrelated rule merely because it shares the preference number.
+\tt.app.runSudo("ip rule del pref " + directRulePref + " fwmark " + directMark + "/0xffff lookup main 2>/dev/null || true")
+\tt.app.runSudo("ip -6 rule del pref " + directRulePref + " fwmark " + directMark + "/0xffff lookup main 2>/dev/null || true")
 \tt.app.runSudo("nft delete table inet lalune_direct 2>/dev/null || true")
 \tincludeRemoved, includeErr := removeDirectDnsmasqInclude()
 \tconfigRemoved := false
@@ -638,7 +641,10 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \t}
 
 \tif err := t.app.runSudo("ip rule add pref " + directRulePref + " fwmark " + directMark + "/0xffff lookup main"); err != nil {
-\t\treturn fmt.Errorf("ip rule Direct: %w", err)
+\t\treturn fmt.Errorf("IPv4 ip rule Direct: %w", err)
+\t}
+\tif err := t.app.runSudo("ip -6 rule add pref " + directRulePref + " fwmark " + directMark + "/0xffff lookup main"); err != nil {
+\t\treturn fmt.Errorf("IPv6 ip rule Direct: %w", err)
 \t}
 
 \tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Активно: доменов=%d; mark=%s; LTE=main", len(domains), directMark))
