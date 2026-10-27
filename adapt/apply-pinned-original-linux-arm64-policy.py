@@ -559,7 +559,7 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \t\t}
 \t}()
 \tsettings := t.app.core.GetSettings()
-\tdomains, needsDnsmasq, err := prepareDirectPlan(settings.DirectDomains)
+\tdomains, _, err := prepareDirectPlan(settings.DirectDomains)
 \tif err != nil { return err }
 
 \tmutating = true
