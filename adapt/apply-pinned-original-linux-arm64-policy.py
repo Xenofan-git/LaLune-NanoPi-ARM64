@@ -605,7 +605,7 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \tnft.WriteString(" }\\n")
 \tnft.WriteString("  chain prerouting { type filter hook prerouting priority -150; policy accept;\\n")
 \tnft.WriteString("    ip saddr 192.168.5.0/24 ip daddr @direct4 meta mark set " + directMark + "\\n")
-\tnft.WriteString("    ip6 daddr @direct6 meta mark set " + directMark + "\\n")
+\tnft.WriteString("    iifname \\"eth1\\" ip6 daddr @direct6 meta mark set " + directMark + "\\n")
 \tnft.WriteString("  }\\n")
 \tnft.WriteString("}\\n")
 
