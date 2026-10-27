@@ -82,53 +82,7 @@ func saveTunnelAuthPassword(password string) error {
         if err := os.Remove(path); err != nil && !os.IsNotExist(err) { return err }
         return nil
     }
-    if len(password) > 256 || !regexp.MustCompile(`^[a-zA-Z0-9_.!?:#/-]+//go:build linux
-
-package main
-
-import (
-    "sync"
-    "crypto/subtle"
-    "context"
-    "embed"
-    "io/fs"
-    "encoding/json"
-    "fmt"
-    "net"
-    "net/http"
-    "net/url"
-    "os"
-    "path/filepath"
-    "os/signal"
-    "strconv"
-    "strings"
-    "syscall"
-    "time"
-
-    "lalune-desktop/Libs"
-)
-
-const headlessListen = "127.0.0.1:1062"
-const panelListen = "0.0.0.0:1061"
-
-// Set by the pinned ARM64 build workflow through Go -ldflags.
-var (
-    buildCommit = "unknown"
-    buildRunID = "unknown"
-    buildRunNumber = "unknown"
-    buildDate = "unknown"
-    buildBranch = "unknown"
-    buildUpstreamCommit = "unknown"
-)
-
-//go:embed frontend
-var panelAssets embed.FS
-
-type connectBody struct {
-    ID int64 `json:"id"`
-}
-
-).MatchString(password) {
+    if len(password) > 256 || !regexp.MustCompile(`^[a-zA-Z0-9_.!?:#/-]+$`).MatchString(password) {
         return fmt.Errorf("недопустимый формат пароля туннеля")
     }
     path, err := tunnelAuthFile()
