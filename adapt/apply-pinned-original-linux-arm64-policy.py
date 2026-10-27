@@ -507,11 +507,16 @@ func splitDirectList(raw string) []string {
 }
 
 func validDirectDomain(s string) bool {
-\tif s == "" || strings.ContainsAny(s, "/#:=<>\"'\\\\") {
+\tif s == "" {
 \t\treturn false
 \t}
+\t// Parse IP literals before rejecting domain delimiters: IPv6 uses colons.
+\t// CIDR and URL forms remain rejected by the delimiter filter below.
 \tif net.ParseIP(s) != nil {
 \t\treturn true
+\t}
+\tif strings.ContainsAny(s, "/#:=<>\\"'\\\\") {
+\t\treturn false
 \t}
 \treturn regexp.MustCompile("(?i)^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[.])+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$").MatchString(s)
 }
