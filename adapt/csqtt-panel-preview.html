@@ -102,6 +102,16 @@ button.small{min-height:40px;padding:8px 14px;font-size:14px}
 /* Desktop/mobile layout intentionally kept identical. */
 
 .logs-card .log-line{white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 8px;color:#d2d5dc}.logs-card .log-ok{display:inline-block;color:#42d987;background:#06351f;border:1px solid #0d653b;border-radius:20px;padding:0 8px;margin-right:10px}.logs-card .log-turn{display:inline-block;color:#36b7ff;background:#102d49;border:1px solid #145b91;border-radius:20px;padding:0 8px;margin-right:10px}.logs-card .log-count{float:right;color:#36b7ff;border:1px solid #145b91;border-radius:20px;padding:0 8px}
+
+/* Fixed native-phone canvas on every device: desktop previews the same 390px
+   CSQTT screen instead of stretching or reflowing the interface. */
+html{min-width:390px}
+body{width:390px;min-width:390px;max-width:390px;margin-left:auto;margin-right:auto;padding-left:0;padding-right:0}
+main{width:100%;max-width:100%}
+.top{width:100%;padding-left:2px;padding-right:2px}
+.tabs{width:370px;max-width:none;left:50%;transform:translateX(-50%)}
+.route-page.active{padding-left:10px;padding-right:10px}
+.route-dialog{width:370px;max-width:none}
 </style>
 </head>
 <body>
