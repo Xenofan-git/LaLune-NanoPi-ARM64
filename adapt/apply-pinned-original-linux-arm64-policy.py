@@ -653,7 +653,7 @@ for _line in linux_direct.splitlines():
     _normalized_lines.append(_indent + _line)
 linux_direct = "\n".join(_normalized_lines) + "\n"
 
-# Integrate direct-domain/IP bypass into the Linux adapter and settings UI.
+# Integrate Direct-domain-only bypass into the Linux adapter and settings UI.
 s = LINUX.read_text()
 marker = 'func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) error {'
 if s.count(marker) != 1:
@@ -667,7 +667,7 @@ LINUX.write_text(s)
 # Add direct routing preferences to the persisted settings model.
 s = API_DART.read_text()
 replacements = [
-    ('''  final bool validateVkHashes;\n  final String directDomains;\n  final String directIPs;\n\n  /// Экспериментальные функции.''', '''  final bool validateVkHashes;\n  final String directDomains;\n  final String directIPs;\n\n  /// Экспериментальные функции.'''),
+    ('''  final bool validateVkHashes;\n\n  /// Экспериментальные функции.''', '''  final bool validateVkHashes;\n  final String directDomains;\n\n  /// Экспериментальные функции.'''),
     ('''    this.validateVkHashes = false,\n    this.enableSmartTunnel = false,''', '''    this.validateVkHashes = false,\n    this.directDomains = '',\n    this.enableSmartTunnel = false,'''),
     ('''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      enableSmartTunnel:''', '''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      directDomains: (j['directDomains'] ?? '') as String,\n      enableSmartTunnel:'''),
     ('''    'validateVkHashes': validateVkHashes,\n    'enableSmartTunnel': enableSmartTunnel,''', '''    'validateVkHashes': validateVkHashes,\n    'directDomains': directDomains,\n    'enableSmartTunnel': enableSmartTunnel,'''),
@@ -680,7 +680,7 @@ for old, new in replacements:
     s = s.replace(old, new, 1)
 API_DART.write_text(s)
 
-# Add editable domain and IPv4/CIDR lists to Settings.
+# Add the Direct-domain-only list to Settings.
 s = SETTINGS_PAGE.read_text()
 replacements = [
     ('''  final _deviceIdCtl = TextEditingController();''', '''  final _deviceIdCtl = TextEditingController();\n  final _directDomainsCtl = TextEditingController();'''),
