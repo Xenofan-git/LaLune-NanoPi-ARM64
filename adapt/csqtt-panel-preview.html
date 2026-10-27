@@ -112,7 +112,7 @@ button.small{min-height:40px;padding:8px 14px;font-size:14px}
 <main>
 <section class="page active" id="page-connect">
  <div class="card hero"><button id="power" class="power" aria-label="Подключить" aria-pressed="false">⏻</button><div id="connState" class="bigstate">Проверка состояния…</div><div id="connMessage" class="muted">CSQTT / LaLune Linux ARM64</div><div class="metrics"><div class="metric"><strong id="profileCount">—</strong><span>Профили</span></div><div class="metric"><strong id="workerCount">—</strong><span>Потоки</span></div><div class="metric"><strong id="vkBadge">—</strong><span>VK</span></div></div></div>
- <div class="card"><h2>Сервер и Хеши</h2><div id="profileList"><div class="muted">Загрузка профилей…</div></div><div class="row" style="margin-top:12px"><button class="secondary" id="refreshProfiles">Обновить</button><button id="showAddProfile">＋ Добавить профиль</button></div><div id="addProfile" class="hidden" style="margin-top:14px"><div class="field"><label>Протокол</label><select id="newProtocol"><option>CSQTT</option><option>FreeTurn</option><option>OlcRTC</option><option>OpenFlux</option><option>ToTS</option></select></div><div class="field"><label>Ссылка подключения</label><textarea id="newLink" placeholder="csqtt://connect?..." autocomplete="off" spellcheck="false"></textarea></div><button id="saveProfile">Сохранить профиль</button></div></div>
+ <div class="card"><h2>Профиль подключения</h2><div id="profileList"><div class="muted">Загрузка профилей…</div></div><div class="row" style="margin-top:12px"><button class="secondary" id="refreshProfiles">Обновить</button><button id="showAddProfile">＋ Добавить профиль</button></div><div id="addProfile" class="hidden" style="margin-top:14px"><div class="field"><label>Протокол</label><select id="newProtocol"><option>CSQTT</option><option>FreeTurn</option><option>OlcRTC</option><option>OpenFlux</option><option>ToTS</option></select></div><div class="field"><label>Ссылка подключения</label><textarea id="newLink" placeholder="csqtt://connect?..." autocomplete="off" spellcheck="false"></textarea></div><button id="saveProfile">Сохранить профиль</button></div></div>
 <div class="card">
 <h2>Информация о соединении</h2>
 <div class="status-details">
@@ -121,7 +121,7 @@ button.small{min-height:40px;padding:8px 14px;font-size:14px}
 <div><span>Удалённый IP</span><strong id="statusRemoteIp">—</strong></div>
 <div><span>DNS</span><strong id="statusDns">—</strong></div>
 <div><span>Режим</span><strong id="statusMode">—</strong></div>
-<div><span>Режим хешей</span><strong id="statusObfs">—</strong></div>
+<div><span>Маскировка</span><strong id="statusObfs">—</strong></div>
 <div><span>Текущий хеш</span><strong id="statusHash">—</strong></div>
 </div>
 </div>
