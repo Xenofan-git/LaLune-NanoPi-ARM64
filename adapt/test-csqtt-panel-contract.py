@@ -235,7 +235,7 @@ for contract in (
 
 # Keep the user-facing route save explicit: it stores rules but must not claim
 # that active routing changed immediately without a reconnect.
-if "Переподключите CSQTT" not in html:
+if "Переподключите туннель CSQTT" not in html:
     raise SystemExit("Direct rules must explain that reconnect is required to apply changes")
 
 print(
