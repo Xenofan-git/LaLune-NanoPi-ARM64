@@ -446,7 +446,7 @@ SETTINGS_PAGE = UPSTREAM / "Frontend/Core/lib/pages/settings_page.dart"
 replace_once(
     COMMON,
     '''\tValidateVkHashes        bool   `json:"validateVkHashes"`\n\n\t// Экспериментальные функции.''',
-    '''\tValidateVkHashes        bool   `json:"validateVkHashes"`\n\tDirectDomains           string `json:"directDomains"`\n\tDirectIPs               string `json:"directIPs"`\n\n\t// Экспериментальные функции.''',
+    '''\tValidateVkHashes        bool   `json:"validateVkHashes"`\n\tDirectDomains           string `json:"directDomains"`\n\n\t// Экспериментальные функции.''',
 )
 
 linux_direct = r'''
@@ -512,42 +512,14 @@ func validDirectDomain(s string) bool {
 \t}
 \treturn regexp.MustCompile("(?i)^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[.])+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$").MatchString(s)
 }
-func normalizeDirectIPs(raw string) ([]string, error) {
-\tvar out []string
-\tfor _, token := range splitDirectList(raw) {
-\t\tif token == "" {
-\t\t\tcontinue
-\t\t}
-\t\tif ip := net.ParseIP(token); ip != nil {
-\t\t\tif ip.To4() == nil {
-\t\t\t\treturn nil, fmt.Errorf("IPv6 пока не поддерживается: %s", token)
-\t\t\t}
-\t\t\tout = append(out, ip.To4().String())
-\t\t\tcontinue
-\t\t}
-\t\t_, n, err := net.ParseCIDR(token)
-\t\tif err != nil || n.IP.To4() == nil {
-\t\t\treturn nil, fmt.Errorf("некорректный IPv4/CIDR: %s", token)
-\t\t}
-\t\tones, _ := n.Mask.Size()
-\t\tif ones == 0 {
-\t\t\treturn nil, fmt.Errorf("CIDR по умолчанию запрещён для Direct: %s", token)
-\t\t}
-\t\tout = append(out, n.String())
-\t}
-\treturn out, nil
-}
-
-func prepareDirectPlan(domainsRaw, ipsRaw string) ([]string, []string, bool, error) {
+func prepareDirectPlan(domainsRaw string) ([]string, bool, error) {
 \tdomains := splitDirectList(domainsRaw)
-\tips, err := normalizeDirectIPs(ipsRaw)
-\tif err != nil { return nil, nil, false, err }
 \tfor _, domain := range domains {
 \t\tif !validDirectDomain(domain) {
-\t\t\treturn nil, nil, false, fmt.Errorf("некорректный домен Direct: %s", domain)
+\t\t\treturn nil, false, fmt.Errorf("некорректный домен Direct: %s", domain)
 \t\t}
 \t}
-\treturn domains, ips, len(domains) > 0, nil
+\treturn domains, len(domains) > 0, nil
 }
 
 func (t *LinuxTun) cleanupDirectRoutingLocked() {
@@ -580,7 +552,7 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \t\t}
 \t}()
 \tsettings := t.app.core.GetSettings()
-\tdomains, ips, needsDnsmasq, err := prepareDirectPlan(settings.DirectDomains, settings.DirectIPs)
+\tdomains, needsDnsmasq, err := prepareDirectPlan(settings.DirectDomains)
 \tif err != nil { return err }
 
 \tmutating = true
@@ -598,7 +570,7 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \tdnsmasqChanged := includeRemoved || hadDnsmasq
 \t_ = os.Remove(directNftPath)
 
-\tif len(domains) == 0 && len(ips) == 0 {
+\tif len(domains) == 0 {
 \t\tif dnsmasqChanged {
 \t\t\tif err := t.app.runSudo("systemctl restart dnsmasq"); err != nil { return fmt.Errorf("перезапуск dnsmasq после очистки Direct: %w", err) }
 \t\t}
@@ -608,11 +580,6 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \tvar nft strings.Builder
 \tnft.WriteString("table inet lalune_direct {\n")
 \tnft.WriteString("  set direct4 { type ipv4_addr; flags interval;")
-\tif len(ips) > 0 {
-\t\tnft.WriteString(" elements = { ")
-\t\tnft.WriteString(strings.Join(ips, ", "))
-\t\tnft.WriteString(" }")
-\t}
 \tnft.WriteString(" }\n")
 \tnft.WriteString("  chain prerouting { type filter hook prerouting priority -150; policy accept;\n")
 \tnft.WriteString("    ip saddr 192.168.5.0/24 ip daddr @direct4 meta mark set " + directMark + "\n")
@@ -657,7 +624,7 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \t\treturn fmt.Errorf("ip rule Direct: %w", err)
 \t}
 
-\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Активно: доменов=%d, IP/CIDR=%d; mark=%s; LTE=main", len(domains), len(ips), directMark))
+\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Активно: доменов=%d; mark=%s; LTE=main", len(domains), directMark))
 \treturn nil
 }
 
@@ -700,12 +667,12 @@ LINUX.write_text(s)
 # Add direct routing preferences to the persisted settings model.
 s = API_DART.read_text()
 replacements = [
-    ('''  final bool validateVkHashes;\n\n  /// Экспериментальные функции.''', '''  final bool validateVkHashes;\n  final String directDomains;\n  final String directIPs;\n\n  /// Экспериментальные функции.'''),
-    ('''    this.validateVkHashes = false,\n    this.enableSmartTunnel = false,''', '''    this.validateVkHashes = false,\n    this.directDomains = '',\n    this.directIPs = '',\n    this.enableSmartTunnel = false,'''),
-    ('''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      enableSmartTunnel:''', '''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      directDomains: (j['directDomains'] ?? '') as String,\n      directIPs: (j['directIPs'] ?? '') as String,\n      enableSmartTunnel:'''),
-    ('''    'validateVkHashes': validateVkHashes,\n    'enableSmartTunnel': enableSmartTunnel,''', '''    'validateVkHashes': validateVkHashes,\n    'directDomains': directDomains,\n    'directIPs': directIPs,\n    'enableSmartTunnel': enableSmartTunnel,'''),
-    ('''    String? vkAuthMode, bool? allowHashRedistribution, bool? validateVkHashes,\n    bool? enableSmartTunnel,''', '''    String? vkAuthMode, bool? allowHashRedistribution, bool? validateVkHashes,\n    String? directDomains, String? directIPs,\n    bool? enableSmartTunnel,'''),
-    ('''    validateVkHashes: validateVkHashes ?? this.validateVkHashes,\n    enableSmartTunnel:''', '''    validateVkHashes: validateVkHashes ?? this.validateVkHashes,\n    directDomains: directDomains ?? this.directDomains,\n    directIPs: directIPs ?? this.directIPs,\n    enableSmartTunnel:'''),
+    ('''  final bool validateVkHashes;\n  final String directDomains;\n  final String directIPs;\n\n  /// Экспериментальные функции.''', '''  final bool validateVkHashes;\n  final String directDomains;\n  final String directIPs;\n\n  /// Экспериментальные функции.'''),
+    ('''    this.validateVkHashes = false,\n    this.enableSmartTunnel = false,''', '''    this.validateVkHashes = false,\n    this.directDomains = '',\n    this.enableSmartTunnel = false,'''),
+    ('''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      enableSmartTunnel:''', '''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      directDomains: (j['directDomains'] ?? '') as String,\n      enableSmartTunnel:'''),
+    ('''    'validateVkHashes': validateVkHashes,\n    'enableSmartTunnel': enableSmartTunnel,''', '''    'validateVkHashes': validateVkHashes,\n    'directDomains': directDomains,\n    'enableSmartTunnel': enableSmartTunnel,'''),
+    ('''    String? vkAuthMode, bool? allowHashRedistribution, bool? validateVkHashes,\n    bool? enableSmartTunnel,''', '''    String? vkAuthMode, bool? allowHashRedistribution, bool? validateVkHashes,\n    String? directDomains,\n    bool? enableSmartTunnel,'''),
+    ('''    validateVkHashes: validateVkHashes ?? this.validateVkHashes,\n    enableSmartTunnel:''', '''    validateVkHashes: validateVkHashes ?? this.validateVkHashes,\n    directDomains: directDomains ?? this.directDomains,\n    enableSmartTunnel:'''),
 ]
 for old, new in replacements:
     if s.count(old) != 1:
@@ -716,17 +683,17 @@ API_DART.write_text(s)
 # Add editable domain and IPv4/CIDR lists to Settings.
 s = SETTINGS_PAGE.read_text()
 replacements = [
-    ('''  final _deviceIdCtl = TextEditingController();''', '''  final _deviceIdCtl = TextEditingController();\n  final _directDomainsCtl = TextEditingController();\n  final _directIPsCtl = TextEditingController();'''),
-    ('''    _deviceIdCtl.dispose();''', '''    _deviceIdCtl.dispose();\n    _directDomainsCtl.dispose();\n    _directIPsCtl.dispose();'''),
-    ('''    _deviceIdCtl.text = s.deviceId;\n    _authMode''', '''    _deviceIdCtl.text = s.deviceId;\n    _directDomainsCtl.text = s.directDomains;\n    _directIPsCtl.text = s.directIPs;\n    _authMode'''),
-    ('''      authMode: _authMode,\n      enableSmartTunnel: _enableSmartTunnel,''', '''      authMode: _authMode,\n      directDomains: _directDomainsCtl.text.trim(),\n      directIPs: _directIPsCtl.text.trim(),\n      enableSmartTunnel: _enableSmartTunnel,'''),
+    ('''  final _deviceIdCtl = TextEditingController();''', '''  final _deviceIdCtl = TextEditingController();\n  final _directDomainsCtl = TextEditingController();'''),
+    ('''    _deviceIdCtl.dispose();''', '''    _deviceIdCtl.dispose();\n    _directDomainsCtl.dispose();'''),
+    ('''    _deviceIdCtl.text = s.deviceId;\n    _authMode''', '''    _deviceIdCtl.text = s.deviceId;\n    _directDomainsCtl.text = s.directDomains;\n    _authMode'''),
+    ('''      authMode: _authMode,\n      enableSmartTunnel: _enableSmartTunnel,''', '''      authMode: _authMode,\n      directDomains: _directDomainsCtl.text.trim(),\n      enableSmartTunnel: _enableSmartTunnel,'''),
 ]
 for old, new in replacements:
     if s.count(old) != 1:
         raise SystemExit(f'Settings marker missing or ambiguous: {old[:80]!r}')
     s = s.replace(old, new, 1)
 ui_marker = '''              const SizedBox(height: 18),\n\n              _sectionTitle('Device ID'),'''
-ui_insert = '''              const SizedBox(height: 18),\n\n              _sectionTitle('Direct — обход CSQTT'),\n              GlassCard(\n                child: Column(\n                  crossAxisAlignment: CrossAxisAlignment.start,\n                  children: [\n                    Text('Только указанные назначения идут напрямую через LTE. Всё остальное остаётся через CSQTT.',\n                      style: TextStyle(fontSize: 11.5, height: 1.45, color: Colors.white.withOpacity(0.55))),\n                    const SizedBox(height: 12),\n                    Text('Домены', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),\n                    const SizedBox(height: 5),\n                    TextField(\n                      controller: _directDomainsCtl,\n                      minLines: 3,\n                      maxLines: 8,\n                      style: const TextStyle(fontSize: 13),\n                      decoration: const InputDecoration(hintText: 'example.com\\ncdn.example.com'),\n                      onChanged: (_) => _markDirty(),\n                    ),\n                    const SizedBox(height: 12),\n                    Text('IP / CIDR', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),\n                    const SizedBox(height: 5),\n                    TextField(\n                      controller: _directIPsCtl,\n                      minLines: 3,\n                      maxLines: 8,\n                      style: const TextStyle(fontSize: 13),\n                      decoration: const InputDecoration(hintText: '1.2.3.4\\n1.2.3.0/24'),\n                      onChanged: (_) => _markDirty(),\n                    ),\n                    const SizedBox(height: 7),\n                    Text('По одному значению в строке; также принимаются запятые. Сейчас IPv4.',\n                      style: TextStyle(fontSize: 10.5, color: Colors.white.withOpacity(0.45))),\n                  ],\n                ),\n              ),\n              const SizedBox(height: 18),\n\n              _sectionTitle('Device ID'),'''
+ui_insert = '''              const SizedBox(height: 18),\n\n              _sectionTitle('Direct — обход CSQTT'),\n              GlassCard(\n                child: Column(\n                  crossAxisAlignment: CrossAxisAlignment.start,\n                  children: [\n                    Text('Только указанные назначения идут напрямую через LTE. Всё остальное остаётся через CSQTT.',\n                      style: TextStyle(fontSize: 11.5, height: 1.45, color: Colors.white.withOpacity(0.55))),\n                    const SizedBox(height: 12),\n                    Text('Домены', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),\n                    const SizedBox(height: 5),\n                    TextField(\n                      controller: _directDomainsCtl,\n                      minLines: 3,\n                      maxLines: 8,\n                      style: const TextStyle(fontSize: 13),\n                      decoration: const InputDecoration(hintText: 'example.com\\ncdn.example.com'),\n                      onChanged: (_) => _markDirty(),\n                    ),\n                    const SizedBox(height: 12),\n                  ],\n                ),\n              ),\n              const SizedBox(height: 18),\n\n              _sectionTitle('Device ID'),'''
 if s.count(ui_marker) != 1:
     raise SystemExit('Settings UI insertion marker missing or ambiguous')
 SETTINGS_PAGE.write_text(s.replace(ui_marker, ui_insert, 1))
