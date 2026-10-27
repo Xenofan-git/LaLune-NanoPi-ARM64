@@ -232,26 +232,6 @@ func TestDirectDomainValidation(t *testing.T) {
 	}
 }
 
-func TestNormalizeDirectIPs(t *testing.T) {
-	got, err := normalizeDirectIPs("192.0.2.1\n192.0.2.0/24")
-	if err != nil {
-		t.Fatalf("normalizeDirectIPs(valid values): %v", err)
-	}
-	if len(got) != 2 || got[0] != "192.0.2.1" || got[1] != "192.0.2.0/24" {
-		t.Fatalf("unexpected normalized IPs: %#v", got)
-	}
-	if _, err := normalizeDirectIPs("2001:db8::1"); err == nil {
-		t.Fatal("expected IPv6 to be rejected while Direct supports IPv4 only")
-	}
-	if _, err := normalizeDirectIPs("192.0.2.999"); err == nil {
-		t.Fatal("expected malformed IPv4 to be rejected")
-	}
-	if _, err := normalizeDirectIPs("0.0.0.0/0"); err == nil {
-		t.Fatal("expected default route CIDR to be rejected for Direct")
-	}
-}
-
-
 func TestVersionEndpointReportsBuildProvenance(t *testing.T) {
 	old := []string{buildCommit, buildRunID, buildRunNumber, buildDate, buildBranch, buildUpstreamCommit}
 	buildCommit, buildRunID, buildRunNumber, buildDate = "commit-test", "run-test", "42", "2026-10-09T00:00:00Z"
@@ -278,32 +258,29 @@ func TestVersionEndpointReportsBuildProvenance(t *testing.T) {
 }
 
 func TestDirectPlanTransitions(t *testing.T) {
-	tests := []struct {
-		name, domains, ips string
-		wantDomains, wantIPs []string
-		wantDNS, wantEnabled bool
-		wantErr bool
-	}{
-		{name: "domains and IPs", domains: "example.com, api.example.com", ips: "192.0.2.1,192.0.2.0/24", wantDomains: []string{"example.com", "api.example.com"}, wantIPs: []string{"192.0.2.1", "192.0.2.0/24"}, wantDNS: true, wantEnabled: true},
-		{name: "IP only after domains", ips: "192.0.2.1", wantIPs: []string{"192.0.2.1"}, wantEnabled: true},
-		{name: "domains only after IPs", domains: "example.com", wantDomains: []string{"example.com"}, wantDNS: true, wantEnabled: true},
-		{name: "empty after domains and IPs", wantEnabled: false},
-		{name: "reject bad domain without plan", domains: "https://example.com", wantErr: true},
-		{name: "reject bad IP without plan", ips: "192.0.2.999", wantErr: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			domains, ips, needsDNS, err := prepareDirectPlan(tt.domains, tt.ips)
-			if (err != nil) != tt.wantErr { t.Fatalf("prepareDirectPlan error = %v, wantErr %v", err, tt.wantErr) }
-			if tt.wantErr { return }
-			if !slices.Equal(domains, tt.wantDomains) { t.Errorf("domains = %#v, want %#v", domains, tt.wantDomains) }
-			if !slices.Equal(ips, tt.wantIPs) { t.Errorf("ips = %#v, want %#v", ips, tt.wantIPs) }
-			if needsDNS != tt.wantDNS { t.Errorf("needsDNS = %v, want %v", needsDNS, tt.wantDNS) }
-			if (len(domains)+len(ips) > 0) != tt.wantEnabled { t.Errorf("enabled = %v, want %v", len(domains)+len(ips)>0, tt.wantEnabled) }
-		})
-	}
+\ttests := []struct {
+\t\tname, domains string
+\t\twantDomains []string
+\t\twantDNS, wantEnabled bool
+\t\twantErr bool
+\t}{
+\t\t{name: "multiple domains", domains: "example.com, api.example.com", wantDomains: []string{"example.com", "api.example.com"}, wantDNS: true, wantEnabled: true},
+\t\t{name: "empty list", wantEnabled: false},
+\t\t{name: "reject URL", domains: "https://example.com", wantErr: true},
+\t\t{name: "reject IP literal", domains: "192.0.2.1", wantErr: true},
+\t\t{name: "reject CIDR", domains: "192.0.2.0/24", wantErr: true},
+\t}
+\tfor _, tt := range tests {
+\t\tt.Run(tt.name, func(t *testing.T) {
+\t\t\tdomains, needsDNS, err := prepareDirectPlan(tt.domains)
+\t\t\tif (err != nil) != tt.wantErr { t.Fatalf("prepareDirectPlan error = %v, wantErr %v", err, tt.wantErr) }
+\t\t\tif tt.wantErr { return }
+\t\t\tif !slices.Equal(domains, tt.wantDomains) { t.Errorf("domains = %#v, want %#v", domains, tt.wantDomains) }
+\t\t\tif needsDNS != tt.wantDNS { t.Errorf("needsDNS = %v, want %v", needsDNS, tt.wantDNS) }
+\t\t\tif (len(domains) > 0) != tt.wantEnabled { t.Errorf("enabled = %v, want %v", len(domains)>0, tt.wantEnabled) }
+\t\t})
+\t}
 }
-
 
 // setCaptchaTestState installs an isolated pending challenge for endpoint tests.
 func setCaptchaTestState(t *testing.T, session string) {
