@@ -52,10 +52,17 @@ jobs:
         run: |
           set -euxo pipefail
           test -s captcha-bridge/manifest.json
+          test -s captcha-bridge/captcha-bridge-main.js
           test -s captcha-bridge/captcha-bridge.js
+          test -s captcha-bridge/origin-policy.js
+          test -s captcha-bridge/options.html
+          test -s captcha-bridge/options.js
           test -s captcha-bridge/README.md
           python3 -m json.tool captcha-bridge/manifest.json >/dev/null
+          node --check captcha-bridge/captcha-bridge-main.js
           node --check captcha-bridge/captcha-bridge.js
+          node --check captcha-bridge/origin-policy.js
+          node --check captcha-bridge/options.js
       - name: Validate CSQTT panel route UI
         run: |
           set -euxo pipefail
@@ -504,10 +511,14 @@ jobs:
           sha256sum server-assets/LaLuneTokenFetcher_Linux_ARM64.zip | tee -a server-assets/SHA256SUMS
           test -s server-assets/LaLuneTokenFetcher_Linux_ARM64.zip
           mkdir -p /tmp/captcha-bridge-package/captcha-bridge
-          cp captcha-bridge/manifest.json captcha-bridge/captcha-bridge.js captcha-bridge/README.md /tmp/captcha-bridge-package/captcha-bridge/
+          cp captcha-bridge/manifest.json captcha-bridge/captcha-bridge-main.js captcha-bridge/captcha-bridge.js captcha-bridge/origin-policy.js captcha-bridge/options.html captcha-bridge/options.js captcha-bridge/README.md /tmp/captcha-bridge-package/captcha-bridge/
           (cd /tmp/captcha-bridge-package && zip -qr "$GITHUB_WORKSPACE/server-assets/LaLune-CAPTCHA-Bridge.zip" captcha-bridge)
           sha256sum server-assets/LaLune-CAPTCHA-Bridge.zip | tee -a server-assets/SHA256SUMS
+          unzip -l server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/captcha-bridge-main.js'
           unzip -l server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/captcha-bridge.js'
+          unzip -l server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/origin-policy.js'
+          unzip -l server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/options.html'
+          unzip -l server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/options.js'
           cat > server-assets/install-vk-chromium.sh <<'SH'
           #!/bin/sh
           set -eu
@@ -599,7 +610,11 @@ jobs:
           test -s dist/server-assets/LaLuneTokenFetcher_Linux_ARM64.zip
           test -s dist/server-assets/LaLune-CAPTCHA-Bridge.zip
           unzip -l dist/server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/manifest.json'
+          unzip -l dist/server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/captcha-bridge-main.js'
           unzip -l dist/server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/captcha-bridge.js'
+          unzip -l dist/server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/origin-policy.js'
+          unzip -l dist/server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/options.html'
+          unzip -l dist/server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/options.js'
           test -s dist/server-assets/install-vk-chromium.sh
           cp adapt/csqtt-panel-preview.html dist/csqtt-panel-preview.html
           mkdir -p dist/web-dist

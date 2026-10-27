@@ -244,40 +244,62 @@ def main():
             assert page.locator("#startDeploy").is_disabled(), "deploy remained enabled while deploy state was unknown"
             assert not page_errors, f"uncaught browser errors: {page_errors}"
 
-            # Exercise the real CAPTCHA Bridge on a distinct origin. It must
-            # navigate back to the panel and submit via same-origin /api.
-            bridge_source = (ROOT / "captcha-bridge" / "captcha-bridge.js").read_text()
-            bridge_page = browser.new_page()
-            bridge_page.add_init_script(bridge_source)
-            bridge_page.route("**/api/**", api_fixture)
+            # Exercise the split MAIN/ISOLATED CAPTCHA Bridge. Page-controlled
+            # fragments and referrer must never select the redirect destination.
+            bridge_main_source = (ROOT / "captcha-bridge" / "captcha-bridge-main.js").read_text()
+            bridge_isolated_source = (ROOT / "captcha-bridge" / "captcha-bridge.js").read_text()
+            origin_policy_source = (ROOT / "captcha-bridge" / "origin-policy.js").read_text()
             panel_origin = f"http://127.0.0.1:{server.server_port}"
-            vk_origin = f"http://localhost:{server.server_port}"
+            vk_origin = "https://id.vk.com"
+            bridge_page = browser.new_page()
+            bridge_page.add_init_script("""
+              Object.defineProperty(document, 'referrer', { configurable: true, get: () => 'https://attacker.example/' });
+              Object.defineProperty(window, 'browser', { configurable: true, value: { storage: { local: {
+                get: (key) => Promise.resolve({ trustedPanelOrigin: PANEL_ORIGIN })
+              } } } });
+            """.replace("PANEL_ORIGIN", json.dumps(panel_origin)) + "\n" +
+                origin_policy_source + "\n" + bridge_main_source + "\n" + bridge_isolated_source)
+            bridge_page.route("**/api/**", api_fixture)
             bridge_page.route(
                 panel_origin + "/",
                 lambda route: route.fulfill(
                     status=200, content_type="text/html", body=HTML.read_text()
                 ),
             )
-            bridge_page.route(
-                "**/captchaNotRobot.check",
-                lambda route: route.fulfill(
-                    status=200,
-                    content_type="application/json",
-                    body=json.dumps({"response": {"success_token": "fixture-bridge-success-token"}}),
-                ),
-            )
-            encoded_panel_origin = panel_origin.replace(":", "%3A").replace("/", "%2F")
+            def vk_bridge_fixture(token):
+                def handle(route):
+                    if "captchaNotRobot.check" in route.request.url:
+                        route.fulfill(
+                            status=200,
+                            content_type="application/json",
+                            body=json.dumps({"response": {"success_token": token}}),
+                        )
+                    else:
+                        route.fulfill(
+                            status=200,
+                            content_type="text/html",
+                            body="<html><body>VK fixture</body></html>",
+                        )
+                return handle
+
+            bridge_page.route(vk_origin + "/**", vk_bridge_fixture("fixture-bridge-success-token"))
             bridge_page.goto(
-                vk_origin + "/adapt/csqtt-panel-preview.html#"
-                + "lalune_panel=" + encoded_panel_origin
+                vk_origin + "/captcha-fixture#"
+                + "lalune_panel=https%3A%2F%2Fattacker.example"
                 + "&lalune_session=fixture-bridge-session",
                 wait_until="domcontentloaded",
             )
             bridge_page.evaluate("() => { void fetch('/captchaNotRobot.check'); }")
-            bridge_page.wait_for_url(panel_origin + "/", timeout=10000)
-            bridge_page.wait_for_function(
-                "() => document.querySelector('#toast').textContent.includes('CAPTCHA автоматически передана')",
-                timeout=10000,
+            try:
+                bridge_page.wait_for_function("() => location.origin === " + json.dumps(panel_origin) + " && location.pathname === '/'", timeout=10000)
+                bridge_page.wait_for_function(
+                    "() => document.querySelector('#toast').textContent.includes('CAPTCHA автоматически передана')",
+                    timeout=10000,
+                )
+            except Exception as error:
+                raise AssertionError(f"bridge failed to return to configured panel: {bridge_page.url}") from error
+            assert bridge_page.url.startswith(panel_origin + "/"), (
+                f"bridge did not return to the configured trusted panel origin: {bridge_page.url}"
             )
             bridge_posts = [
                 json.loads(raw) for method, path, raw in calls
@@ -288,12 +310,38 @@ def main():
                 "result": "fixture-bridge-success-token",
             }, f"CAPTCHA bridge did not reach panel same-origin API: {bridge_posts!r}"
             bridge_page.close()
+
+            # Missing or malformed trusted configuration must fail closed even
+            # when an attacker supplies both a destination fragment and referrer.
+            for configured_origin in ("", "https://panel.example.com/untrusted/path"):
+                blocked_page = browser.new_page()
+                blocked_page.add_init_script("""
+                  Object.defineProperty(document, 'referrer', { configurable: true, get: () => 'https://attacker.example/' });
+                  Object.defineProperty(window, 'browser', { configurable: true, value: { storage: { local: {
+                    get: (key) => Promise.resolve({ trustedPanelOrigin: CONFIGURED_ORIGIN })
+                  } } } });
+                """.replace("CONFIGURED_ORIGIN", json.dumps(configured_origin)) + "\n" +
+                    origin_policy_source + "\n" + bridge_main_source + "\n" + bridge_isolated_source)
+                blocked_page.route(vk_origin + "/**", vk_bridge_fixture("must-not-redirect"))
+                blocked_page.goto(
+                    vk_origin + "/captcha-fixture#"
+                    + "lalune_panel=https%3A%2F%2Fattacker.example"
+                    + "&lalune_session=fixture-blocked-session",
+                    wait_until="domcontentloaded",
+                )
+                blocked_page.evaluate("() => { void fetch('/captchaNotRobot.check'); }")
+                blocked_page.wait_for_timeout(300)
+                assert blocked_page.url.startswith(vk_origin + "/"), (
+                    f"bridge redirected without a valid configured origin: {blocked_page.url}"
+                )
+                blocked_page.close()
+
             browser.close()
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
-    print("CSQTT_CHROMIUM_UI_SMOKE_PASS widths=320,360,390,768,1280 tabs=5 profile-api=PASS connect-disconnect=PASS tunnel-settings=PASS direct-settings-api=PASS deploy-api=PASS logs=PASS captcha-bridge-same-origin=PASS")
+    print("CSQTT_CHROMIUM_UI_SMOKE_PASS widths=320,360,390,768,1280 tabs=5 profile-api=PASS connect-disconnect=PASS tunnel-settings=PASS direct-settings-api=PASS deploy-api=PASS logs=PASS captcha-bridge-trusted-origin=PASS captcha-bridge-fail-closed=PASS")
 
 
 if __name__ == "__main__":

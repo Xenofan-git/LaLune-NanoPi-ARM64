@@ -1,81 +1,67 @@
 (function () {
   'use strict';
-  if (window.__laluneCaptchaBridgeInstalled) return;
-  window.__laluneCaptchaBridgeInstalled = true;
+  if (globalThis.__laluneCaptchaBridgeIsolatedInstalled) return;
+  globalThis.__laluneCaptchaBridgeIsolatedInstalled = true;
 
-  function panelOrigin() {
+  const VK_ORIGINS = new Set(['https://id.vk.com', 'https://id.vk.ru']);
+  const policy = globalThis.LaluneCaptchaOriginPolicy;
+  if (!policy || typeof policy.normalizeTrustedPanelOrigin !== 'function') return;
+
+  function getTrustedPanelOrigin(callback) {
+    const storage = (globalThis.browser && globalThis.browser.storage &&
+      globalThis.browser.storage.local) || (globalThis.chrome && globalThis.chrome.storage &&
+      globalThis.chrome.storage.local);
+    if (!storage || typeof storage.get !== 'function') { callback(''); return; }
+    let completed = false;
+    const done = value => {
+      if (completed) return;
+      completed = true;
+      const configured = value && value.trustedPanelOrigin;
+      callback(policy.normalizeTrustedPanelOrigin(configured));
+    };
     try {
-      const hash = location.hash || '';
-      const m = hash.match(/(?:^|[#&])lalune_panel=([^&]+)/);
-      if (m) return decodeURIComponent(m[1]);
-    } catch (_) {}
+      if (globalThis.browser && globalThis.browser.storage && globalThis.browser.storage.local === storage) {
+        storage.get('trustedPanelOrigin').then(done).catch(() => done(null));
+      } else {
+        storage.get('trustedPanelOrigin', done);
+      }
+    } catch (_) { done(null); }
+  }
+
+  function getSessionToken() {
     try {
-      if (document.referrer) return new URL(document.referrer).origin;
-    } catch (_) {}
-    return '';
+      const hash = new URLSearchParams(location.hash.slice(1));
+      const fromHash = hash.get('lalune_session');
+      const fromQuery = new URL(location.href).searchParams.get('session_token');
+      const value = (fromHash || fromQuery || '').trim();
+      return value && value.length <= 1024 && !/[\r\n]/.test(value) ? value : '';
+    } catch (_) { return ''; }
   }
 
   let sent = false;
-  function sendToken(token) {
-    if (!token || sent) return;
-    const origin = panelOrigin();
-    if (!origin) return;
-    const sessionToken = (function () {
-      try {
-        const hash = location.hash || '';
-        const match = hash.match(/(?:^|[#&])lalune_session=([^&]+)/);
-        return match ? decodeURIComponent(match[1]) :
-          (new URL(location.href).searchParams.get('session_token') || '');
-      } catch (_) { return ''; }
-    })();
+  window.addEventListener('message', function (event) {
+    if (event.source !== window || event.origin !== location.origin ||
+        !VK_ORIGINS.has(location.origin)) return;
+    const data = event.data;
+    if (!data || data.channel !== 'lalune-captcha-bridge' ||
+        data.type !== 'captcha-success' || typeof data.token !== 'string') return;
+    const token = data.token.trim();
+    if (!token || token.length > 16384 || /[\r\n]/.test(token) || sent) return;
+
+    const sessionToken = getSessionToken();
     if (!sessionToken) return;
-    // Return to the panel instead of making a cross-origin POST from VK.
-    // The fragment is never sent in the HTTP request; the authenticated panel
-    // consumes it and submits the result through its own same-origin API.
-    const target = new URL('/', origin);
-    target.hash = new URLSearchParams({
-      lalune_captcha_session: sessionToken,
-      lalune_captcha_result: String(token)
-    }).toString();
-    sent = true;
-    location.replace(target.toString());
-  }
-
-  function inspect(data) {
-    try {
-      if (data && data.response && data.response.success_token) {
-        sendToken(data.response.success_token);
-      }
-    } catch (_) {}
-  }
-
-  const originalFetch = window.fetch;
-  if (originalFetch) {
-    window.fetch = function () {
-      return originalFetch.apply(this, arguments).then(function (response) {
-        try {
-          const url = typeof arguments[0] === 'string' ? arguments[0] : (arguments[0] && arguments[0].url) || '';
-          if (String(url).includes('captchaNotRobot.check')) {
-            response.clone().json().then(inspect).catch(function () {});
-          }
-        } catch (_) {}
-        return response;
-      });
-    };
-  }
-
-  const originalOpen = XMLHttpRequest.prototype.open;
-  const originalSend = XMLHttpRequest.prototype.send;
-  XMLHttpRequest.prototype.open = function (method, url) {
-    this.__laluneCaptchaUrl = String(url || '');
-    return originalOpen.apply(this, arguments);
-  };
-  XMLHttpRequest.prototype.send = function () {
-    if (this.__laluneCaptchaUrl.includes('captchaNotRobot.check')) {
-      this.addEventListener('load', function () {
-        try { inspect(JSON.parse(this.responseText)); } catch (_) {}
-      });
-    }
-    return originalSend.apply(this, arguments);
-  };
+    getTrustedPanelOrigin(function (trustedOrigin) {
+      if (!trustedOrigin || sent) return;
+      // Ignore lalune_panel fragments and document.referrer entirely. The only
+      // redirect target is the exact origin explicitly configured in extension
+      // options and normalized by the shared origin policy.
+      const target = new URL('/', trustedOrigin);
+      target.hash = new URLSearchParams({
+        lalune_captcha_session: sessionToken,
+        lalune_captcha_result: token
+      }).toString();
+      sent = true;
+      location.replace(target.toString());
+    });
+  });
 })();
