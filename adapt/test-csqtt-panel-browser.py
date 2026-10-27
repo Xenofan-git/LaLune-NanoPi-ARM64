@@ -235,6 +235,7 @@ def main():
 
             assert page.locator("#page-route").is_visible()
             assert not page.locator("#deploySecretsOverlay").is_visible()
+            page.locator("#routeClose").click()
 
             # Tunnel settings: changing the worker count must persist through /settings.
             page.locator('button[data-page="settings"]').click()
