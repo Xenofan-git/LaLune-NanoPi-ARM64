@@ -170,8 +170,9 @@ def main():
 
             # Direct rules are validated and persisted through the settings API.
             page.locator('button[data-page="route"]').click()
+            assert page.locator("#directDomains").count() == 1
+            assert page.locator("#directIPs").count() == 0, "Route tab must contain domains only"
             page.locator("#directDomains").fill("example.com\ncdn.example.com")
-            page.locator("#directIPs").fill("192.0.2.10\n192.0.2.0/24")
             page.locator("#saveDirectRules").click()
             page.wait_for_function("document.querySelector('#routeMessage').textContent.includes('Правила сохранены')")
             saved = [json.loads(raw) for method, path, raw in calls
@@ -179,9 +180,7 @@ def main():
             assert saved and saved[-1]["directDomains"] == "example.com\ncdn.example.com", (
                 "Direct domains were not persisted by the settings API"
             )
-            assert saved[-1]["directIPs"] == "192.0.2.10\n192.0.2.0/24", (
-                "Direct IP rules were not persisted by the settings API"
-            )
+            assert "directIPs" not in saved[-1], "Direct IP rules must not be sent to the settings API"
 
             assert page.locator("#page-route").is_visible()
             assert not page.locator("#deploySecretsOverlay").is_visible()
