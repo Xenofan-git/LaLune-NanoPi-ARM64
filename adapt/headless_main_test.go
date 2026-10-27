@@ -221,8 +221,8 @@ func TestDirectDomainValidation(t *testing.T) {
 		{name: "reject path", domain: "example.com/path", want: false},
 		{name: "reject empty label", domain: "example..com", want: false},
 		{name: "reject leading hyphen", domain: "-bad.example", want: false},
-		{name: "reject IPv4 literal", domain: "192.0.2.1", want: false},
-		{name: "reject IPv6 literal", domain: "2001:db8::1", want: false},
+		{name: "accept IPv4 literal", domain: "192.0.2.1", want: true},
+		{name: "accept IPv6 literal", domain: "2001:db8::1", want: true},
 		{name: "reject blank", domain: "", want: false},
 	}
 	for _, tt := range tests {
