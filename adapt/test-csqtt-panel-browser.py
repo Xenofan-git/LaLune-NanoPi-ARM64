@@ -240,7 +240,7 @@ def main():
             }""")
             page.locator("#serverPeer").fill("192.0.2.55")
             page.locator("#serverPeer").press("Tab")
-            page.wait_for_function("""() => document.querySelector("#serverPeerHint").textContent.includes("сохраняется") """)
+            page.wait_for_function("""() => document.querySelector("#toast").textContent.includes("Адрес сервера сохранён") """)
             assert selected["profile"]["peer"] == "192.0.2.55", "server peer did not persist through selected-profile API"
             page.locator("#vkAuthMode").select_option("auto_js")
             page.locator("#turnTransport").select_option("tcp_tls")
