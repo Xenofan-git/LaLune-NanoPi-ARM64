@@ -84,8 +84,9 @@ for token in (
     "border-radius:32px",
     "border:2px solid #92949b",
     "width:min(900px,calc(100% - 34px))",
-    "v2.5.0 by amurcanov",
+    "v2.1.9",
     "CSQTT · NanoPi ARM64",
+    "Механизм LaLune используется только для автоматического получения VK-токена.",
     "width:390px;min-width:390px;max-width:390px",
 ):
     if token not in html:
