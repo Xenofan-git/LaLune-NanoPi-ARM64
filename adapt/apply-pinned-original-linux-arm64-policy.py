@@ -507,8 +507,11 @@ func splitDirectList(raw string) []string {
 }
 
 func validDirectDomain(s string) bool {
-\tif s == "" || net.ParseIP(s) != nil || strings.ContainsAny(s, "/#:=<>\\"'\\\\") {
+\tif s == "" || strings.ContainsAny(s, "/#:=<>\"'\\\\") {
 \t\treturn false
+\t}
+\tif net.ParseIP(s) != nil {
+\t\treturn true
 \t}
 \treturn regexp.MustCompile("(?i)^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[.])+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$").MatchString(s)
 }
@@ -577,14 +580,25 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \t\treturn nil
 \t}
 
+\tvar domainsOnly, ipv4s, ipv6s []string
+\tfor _, entry := range domains {
+\t\tif ip := net.ParseIP(entry); ip != nil {
+\t\t\tif v4 := ip.To4(); v4 != nil { ipv4s = append(ipv4s, v4.String()) } else { ipv6s = append(ipv6s, ip.String()) }
+\t\t} else { domainsOnly = append(domainsOnly, entry) }
+\t}
 \tvar nft strings.Builder
-\tnft.WriteString("table inet lalune_direct {\n")
+\tnft.WriteString("table inet lalune_direct {\\n")
 \tnft.WriteString("  set direct4 { type ipv4_addr; flags interval;")
-\tnft.WriteString(" }\n")
-\tnft.WriteString("  chain prerouting { type filter hook prerouting priority -150; policy accept;\n")
-\tnft.WriteString("    ip saddr 192.168.5.0/24 ip daddr @direct4 meta mark set " + directMark + "\n")
-\tnft.WriteString("  }\n")
-\tnft.WriteString("}\n")
+\tif len(ipv4s) > 0 { nft.WriteString(" elements = { " + strings.Join(ipv4s, ", ") + " };") }
+\tnft.WriteString(" }\\n")
+\tnft.WriteString("  set direct6 { type ipv6_addr; flags interval;")
+\tif len(ipv6s) > 0 { nft.WriteString(" elements = { " + strings.Join(ipv6s, ", ") + " };") }
+\tnft.WriteString(" }\\n")
+\tnft.WriteString("  chain prerouting { type filter hook prerouting priority -150; policy accept;\\n")
+\tnft.WriteString("    ip saddr 192.168.5.0/24 ip daddr @direct4 meta mark set " + directMark + "\\n")
+\tnft.WriteString("    ip6 saddr 192.168.5.0/24 ip6 daddr @direct6 meta mark set " + directMark + "\\n")
+\tnft.WriteString("  }\\n")
+\tnft.WriteString("}\\n")
 
 \tif err := writeDirectFileAtomic(directNftPath, []byte(nft.String()), 0600); err != nil {
 \t\treturn fmt.Errorf("атомарная запись nft-конфига: %w", err)
@@ -596,24 +610,16 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \t\treturn fmt.Errorf("nft direct policy: %w", err)
 \t}
 
-\tif needsDnsmasq {
-\t\tline := "nftset=/"
-\t\tfor i, d := range domains {
-\t\t\tif i > 0 {
-\t\t\t\tline += "/"
-\t\t\t}
-\t\t\tline += d
+\tif len(domainsOnly) > 0 {
+\t\tvar dnsmasq strings.Builder
+\t\tfor _, family := range []string{"4", "6"} {
+\t\t\tdnsmasq.WriteString("nftset=/")
+\t\t\tdnsmasq.WriteString(strings.Join(domainsOnly, "/"))
+\t\t\tdnsmasq.WriteString("/" + family + "#inet#lalune_direct#direct" + family + "\\n")
 \t\t}
-\t\tline += "/4#inet#lalune_direct#direct4\n"
-\t\tif err := writeDirectFileAtomic(directDnsmasqPath, []byte(line), 0644); err != nil {
+\t\tif err := writeDirectFileAtomic(directDnsmasqPath, []byte(dnsmasq.String()), 0644); err != nil {
 \t\t\treturn fmt.Errorf("атомарная запись dnsmasq direct-конфига: %w", err)
 \t\t}
-\t\tif err := ensureDirectDnsmasqInclude(); err != nil {
-\t\t\t_ = os.Remove(directDnsmasqPath)
-\t\t\treturn err
-\t\t}
-\t\tdnsmasqChanged = true
-\t}
 \tif dnsmasqChanged {
 \t\tif err := t.app.runSudo("systemctl restart dnsmasq"); err != nil {
 \t\t\treturn fmt.Errorf("перезапуск dnsmasq после изменения Direct: %w", err)
