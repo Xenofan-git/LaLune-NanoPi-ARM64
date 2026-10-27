@@ -76,6 +76,27 @@ for token in (
 if "background:linear-gradient(145deg,#ddfff0,#fff)" in html:
     raise SystemExit("connected power button uses a light-only hardcoded gradient")
 
+# CSQTT 2.5.0 visual adaptation: retain the native five-tab navigation while
+# using the newer Material-style surfaces and outlined controls.
+for token in (
+    "CSQTT 2.5.0 visual adaptation",
+    "--blue:#1e73e8",
+    "border-radius:32px",
+    "border:2px solid #92949b",
+    "width:min(900px,calc(100% - 34px))",
+    "v2.5.0 · NanoPi ARM64",
+):
+    if token not in html:
+        raise SystemExit("CSQTT 2.5.0 visual token missing: " + token)
+
+# The Route tab is intentionally Direct-domain-only; old IP/CIDR controls and
+# payload serialization must not return.
+route_html = html.split('id="page-route"', 1)[1].split("</section>", 1)[0]
+if 'id="directIPs"' in html or "s.directIPs=" in js or "Маршрутизация IP-адресов" in route_html:
+    raise SystemExit("Route tab must contain Direct domains only, without IP/CIDR rules")
+if 'id="directDomains"' not in route_html:
+    raise SystemExit("Route tab is missing the Direct domain list")
+
 # Accessibility contract: navigation state is exposed to assistive technology,
 # focus is visible, live updates are announced, and mobile safe areas are respected.
 for token in (
