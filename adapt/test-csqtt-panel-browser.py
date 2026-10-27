@@ -261,13 +261,19 @@ def main():
                 "VK credential mode, transport, or CAPTCHA mode did not persist"
             )
 
-            # Logs: refresh reads the log endpoint and clear sends the explicit POST.
+            # Logs follow the original CSQTT LogsTab: opening the tab loads the
+            # live log stream; the terminal exposes copy and clear actions only.
+            # There is intentionally no manual refresh control in the original UI.
             page.locator('button[data-page="logs"]').click()
-            page.locator("#refreshLogs").click()
             page.wait_for_function("""() => document.querySelector("#logs").textContent.includes("Записей пока нет")""")
             assert any(method == "GET" and path == "/logs" for method, path, _ in calls), (
-                "Logs tab did not load /logs"
+                "Opening Logs did not automatically load /logs"
             )
+            assert page.locator("#refreshLogs").count() == 0, (
+                "Logs must match the original copy/clear-only terminal controls"
+            )
+            page.locator("#copyLogs").click()
+            page.wait_for_function("""() => document.querySelector("#toast").textContent.includes("Журнал выделен") || document.querySelector("#toast").textContent.includes("Журнал скопирован")""")
             page.locator("#clearLogs").click()
             page.wait_for_function("""() => document.querySelector("#toast").textContent.includes("Журнал очищен")""")
             assert any(method == "POST" and path == "/logs/clear" for method, path, _ in calls), (
