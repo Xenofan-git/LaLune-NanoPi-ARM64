@@ -923,3 +923,30 @@ for required in (
     if required not in final_linux:
         raise SystemExit(f"final generated app_linux.go missing TUN lifecycle marker: {required}")
 print("Verified final app_linux.go contains TUN lifecycle fields and methods")
+
+# CSQTT 2.1.9 tunnel authentication: bind the saved tunnel password to the
+# stable LaLune device ID and pass both to the pinned native client.
+linux_auth_marker = """func (r *LinuxRunner) StartCore(cmdArgs []string, listenPort int, bridge *libs.Bridge) {
+	r.startCoreWithSudo(cmdArgs, listenPort, bridge)
+}"""
+linux_auth_replacement = """func (r *LinuxRunner) StartCore(cmdArgs []string, listenPort int, bridge *libs.Bridge) {
+	password, err := loadTunnelAuthPassword()
+	if err != nil {
+		bridge.Core.AddLog("[AUTH] Пароль туннеля не задан; запуск отменён")
+		bridge.Core.SetConnected(false)
+		return
+	}
+	deviceID := csqttDeviceID(bridge.Core)
+	if deviceID == "" {
+		bridge.Core.AddLog("[AUTH] ID устройства LaLune не задан; запуск отменён")
+		bridge.Core.SetConnected(false)
+		return
+	}
+	cmdArgs = append(cmdArgs, "-device-id", deviceID, "-password", password)
+	r.startCoreWithSudo(cmdArgs, listenPort, bridge)
+}"""
+if final_linux.count(linux_auth_marker) != 1:
+    raise SystemExit("LinuxRunner.StartCore auth insertion marker missing or ambiguous")
+final_linux = final_linux.replace(linux_auth_marker, linux_auth_replacement, 1)
+LINUX.write_text(final_linux)
+
