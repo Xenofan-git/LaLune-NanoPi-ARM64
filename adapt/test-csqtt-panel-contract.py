@@ -109,7 +109,7 @@ for token in (
 # The Route tab is intentionally Direct-domain-only; old IP/CIDR controls and
 # payload serialization must not return.
 route_html = html.split('id="page-route"', 1)[1].split("</section>", 1)[0]
-if 'id="directIPs"' in html or "s.directIPs=" in js or "Маршрутизация IP-адресов" in route_html:
+if 'id="directIPs"' in html or "directIPs" in js or "Маршрутизация IP-адресов" in route_html:
     raise SystemExit("Route tab must contain Direct domains only, without IP/CIDR rules")
 if 'id="directDomains"' not in route_html:
     raise SystemExit("Route tab is missing the Direct domain list")
