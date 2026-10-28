@@ -236,6 +236,8 @@ def main():
             # Manual mode is usable without a VK token; both automatic modes
             # must refuse persistence until token state confirms authorization.
             vk_token["hasToken"] = False
+            page.evaluate("() => refreshAll(true)")
+            page.wait_for_function("document.querySelector('#vkBadge').textContent.includes('Нет токена')")
             page.locator("#authMode").select_option("manual")
             page.locator("#saveSettings").click()
             page.wait_for_function("document.querySelector('#toast').textContent.includes('Настройки сохранены')")
@@ -247,6 +249,8 @@ def main():
                 saved_now = len([1 for method, path, raw in calls if method == "POST" and path == "/settings" and raw])
                 assert saved_now == saved_before_token, f"{mode} was persisted without a VK token"
             vk_token["hasToken"] = True
+            page.evaluate("() => refreshAll(true)")
+            page.wait_for_function("document.querySelector('#vkBadge').textContent.includes('Токен есть')")
             for mode in ("manual", "autoApi", "autoVk"):
                 page.locator("#authMode").select_option(mode)
                 page.locator("#saveSettings").click()
