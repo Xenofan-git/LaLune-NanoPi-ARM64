@@ -502,7 +502,7 @@ jobs:
               text=True,
           ).strip()
           elf = subprocess.check_output(["aarch64-linux-gnu-readelf", "-h", str(binary)], text=True)
-          if not re.search(r"^\\s*Class:\\s+ELF64\\s*$", elf, re.M) or not re.search(r"^\\s*Machine:\\s+AArch64\\s*$", elf, re.M):
+          if not re.search(r"^\s*Class:\s+ELF64\s*$", elf, re.M) or not re.search(r"^\s*Machine:\s+AArch64\s*$", elf, re.M):
               raise SystemExit("provenance generation refused: binary is not ELF64 AArch64")
           if subprocess.check_output(["qemu-aarch64", "-L", "/usr/aarch64-linux-gnu", str(binary), "--protocol-revision"], text=True).strip() != "CSQTT-WIRE-4":
               raise SystemExit("provenance generation refused: protocol is not CSQTT-WIRE-4")
@@ -524,12 +524,12 @@ jobs:
               "buildRunId": os.environ["GITHUB_RUN_ID"],
           }
           out = binary.parent / "csqtt.server-provenance.json"
-          out.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\\n")
+          out.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
           print(json.dumps(metadata, indent=2, sort_keys=True))
           PY
           # Drop the checksum captured for the legacy WIRE-3 JSON before
           # recording the freshly generated WIRE-4 provenance document.
-          sed -i '\\|  csqtt.server-provenance.json$|d' "$GITHUB_WORKSPACE/server-assets/SHA256SUMS"
+          sed -i '\|  csqtt.server-provenance.json$|d' "$GITHUB_WORKSPACE/server-assets/SHA256SUMS"
           sha256sum "$GITHUB_WORKSPACE/server-assets/csqtt.server-provenance.json" | tee -a "$GITHUB_WORKSPACE/server-assets/SHA256SUMS"
       - name: Build isolated CSQTT server for Linux x86_64
         working-directory: server-source/rust-server
