@@ -34,6 +34,7 @@ def main():
     hold_connecting = {"value": False}
     captcha_state = {"pending": False}
     captcha_results = []
+    vk_token = {"hasToken": True}
     # A fresh device has no tunnel password; the success path provisions one below.
     tunnel_auth = {"configured": False}
     settings = {
@@ -92,7 +93,7 @@ def main():
             vpn_connected["value"] = False
             body = {"ok": True}
         elif path == "/vk/state":
-            body = {"hasToken": True, "fetching": False}
+            body = {**vk_token, "fetching": False}
         elif path == "/captcha/state":
             body = dict(captcha_state)
         elif path == "/captcha/result" and method == "POST":
@@ -232,6 +233,20 @@ def main():
             # Hash acquisition mode contract: all three original CSQTT modes
             # remain selectable and persist independently of VK credential mode.
             page.locator('button[data-page="settings"]').click()
+            # Manual mode is usable without a VK token; both automatic modes
+            # must refuse persistence until token state confirms authorization.
+            vk_token["hasToken"] = False
+            page.locator("#authMode").select_option("manual")
+            page.locator("#saveSettings").click()
+            page.wait_for_function("document.querySelector('#toast').textContent.includes('Настройки сохранены')")
+            saved_before_token = len([1 for method, path, raw in calls if method == "POST" and path == "/settings" and raw])
+            for mode in ("autoApi", "autoVk"):
+                page.locator("#authMode").select_option(mode)
+                page.locator("#saveSettings").click()
+                page.wait_for_function("document.querySelector('#toast').textContent.includes('сначала авторизуйтесь в VK')")
+                saved_now = len([1 for method, path, raw in calls if method == "POST" and path == "/settings" and raw])
+                assert saved_now == saved_before_token, f"{mode} was persisted without a VK token"
+            vk_token["hasToken"] = True
             for mode in ("manual", "autoApi", "autoVk"):
                 page.locator("#authMode").select_option(mode)
                 page.locator("#saveSettings").click()
@@ -239,6 +254,7 @@ def main():
                     "(mode) => document.querySelector('#authMode').value === mode",
                     arg=mode,
                 )
+                page.wait_for_function("document.querySelector('#toast').textContent.includes('Настройки сохранены')")
                 stored_modes = [json.loads(raw) for method, path, raw in calls
                                 if method == "POST" and path == "/settings" and raw]
                 assert stored_modes[-1]["authMode"] == mode, f"hash mode {mode} did not persist"
