@@ -106,6 +106,18 @@ func csqttDeviceID(core *libs.AppCore) string {
     return strings.TrimSpace(id)
 }
 
+// validateTunnelAuth is shared by connect and reconnect so neither API path
+// can bypass the same fail-closed credential and stable-device-ID checks.
+func validateTunnelAuth(app *App) error {
+    if _, err := loadTunnelAuthPassword(); err != nil {
+        return fmt.Errorf("пароль туннеля не задан")
+    }
+    if app == nil || csqttDeviceID(app.core) == "" {
+        return fmt.Errorf("ID устройства LaLune не задан")
+    }
+    return nil
+}
+
 func writeRaw(w http.ResponseWriter, value string) {
     w.Header().Set("Content-Type", "application/json; charset=utf-8")
     w.WriteHeader(http.StatusOK)
@@ -382,8 +394,7 @@ func apiHandler(app *App) http.Handler {
             http.Error(w, "bad json", http.StatusBadRequest)
             return
         }
-        if _, err := loadTunnelAuthPassword(); err != nil { http.Error(w, "пароль туннеля не задан", http.StatusPreconditionRequired); return }
-        if csqttDeviceID(app.core) == "" { http.Error(w, "ID устройства LaLune не задан", http.StatusPreconditionRequired); return }
+        if err := validateTunnelAuth(app); err != nil { http.Error(w, err.Error(), http.StatusPreconditionRequired); return }
         writeJSON(w, map[string]bool{"ok": app.Connect(body.ID)})
     })
 
@@ -399,6 +410,7 @@ func apiHandler(app *App) http.Handler {
             http.Error(w, "bad json", http.StatusBadRequest)
             return
         }
+        if err := validateTunnelAuth(app); err != nil { http.Error(w, err.Error(), http.StatusPreconditionRequired); return }
         _ = app.Disconnect()
         writeJSON(w, map[string]bool{"ok": app.Connect(body.ID)})
     })
