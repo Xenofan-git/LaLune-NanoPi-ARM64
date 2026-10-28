@@ -167,6 +167,8 @@ jobs:
         run: |
           set -euxo pipefail
           cp ../../../adapt/nanopi.js web/api.js
+          # Pinned upstream pubspec declares assets/; ensure the directory exists in the clean checkout.
+          mkdir -p assets
           flutter pub get
           flutter build web --release
           # The CSQTT-native panel is standalone HTML backed by the existing /api contract.
