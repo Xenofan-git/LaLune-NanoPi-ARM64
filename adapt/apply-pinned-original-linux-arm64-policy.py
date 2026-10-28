@@ -571,7 +571,9 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \tif err != nil { return err }
 
 \tmutating = true
-\tt.app.runSudo("ip rule del pref " + directRulePref + " 2>/dev/null || true")
+\t// Reconcile only CSQTT-owned Direct rules; never delete by priority alone.
+\tt.app.runSudo("ip rule del pref " + directRulePref + " fwmark " + directMark + "/0xffff lookup main 2>/dev/null || true")
+\tt.app.runSudo("ip -6 rule del pref " + directRulePref + " fwmark " + directMark + "/0xffff lookup main 2>/dev/null || true")
 \tt.app.runSudo("nft delete table inet lalune_direct 2>/dev/null || true")
 \tincludeRemoved, includeErr := removeDirectDnsmasqInclude()
 \tif includeErr != nil { return includeErr }
