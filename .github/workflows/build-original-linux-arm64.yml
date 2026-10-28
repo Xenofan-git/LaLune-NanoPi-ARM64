@@ -527,6 +527,9 @@ jobs:
           out.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\\n")
           print(json.dumps(metadata, indent=2, sort_keys=True))
           PY
+          # Drop the checksum captured for the legacy WIRE-3 JSON before
+          # recording the freshly generated WIRE-4 provenance document.
+          sed -i '\\|  csqtt.server-provenance.json$|d' "$GITHUB_WORKSPACE/server-assets/SHA256SUMS"
           sha256sum "$GITHUB_WORKSPACE/server-assets/csqtt.server-provenance.json" | tee -a "$GITHUB_WORKSPACE/server-assets/SHA256SUMS"
       - name: Build isolated CSQTT server for Linux x86_64
         working-directory: server-source/rust-server
