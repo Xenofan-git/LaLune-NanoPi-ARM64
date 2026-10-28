@@ -502,9 +502,9 @@ jobs:
               text=True,
           ).strip()
           elf = subprocess.check_output(["aarch64-linux-gnu-readelf", "-h", str(binary)], text=True)
-          if "Class:                             ELF64" not in elf or "Machine:                           AArch64" not in elf:
+          if not any(line.strip() == "Class: ELF64" for line in elf.splitlines()) or not any(line.strip() == "Machine: AArch64" for line in elf.splitlines()):
               raise SystemExit("provenance generation refused: binary is not ELF64 AArch64")
-          if subprocess.check_output([str(binary), "--protocol-revision"], text=True).strip() != "CSQTT-WIRE-4":
+          if subprocess.check_output(["qemu-aarch64", "-L", "/usr/aarch64-linux-gnu", str(binary), "--protocol-revision"], text=True).strip() != "CSQTT-WIRE-4":
               raise SystemExit("provenance generation refused: protocol is not CSQTT-WIRE-4")
           metadata = {
               "schemaVersion": 1,
