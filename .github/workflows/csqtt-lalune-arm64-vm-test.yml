@@ -271,7 +271,7 @@ jobs:
           ip addr add 192.168.5.1/24 dev eth1
           ip -6 addr add fd00:5::1/64 dev eth1
           ip route add default dev direct-test0
-          ip -6 route add default dev direct-test0
+          ip -6 route add default dev direct-test0 metric 1
           ip route add default dev eth1 table 202
           ip -6 route add default dev eth1 table 202
           ip rule add pref 22020 from 192.168.5.0/24 lookup 202
