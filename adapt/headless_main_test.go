@@ -540,3 +540,81 @@ func TestPanelListenAddressUsesInstallerPort(t *testing.T) {
     _ = os.Setenv("CSQTT_LALUNE_WEB_PORT", "70000")
     if _, err := panelListenAddress(); err == nil { t.Fatal("invalid panel port was accepted") }
 }
+
+
+func TestTunnelAuthPasswordPersistenceAndPermissions(t *testing.T) {
+    t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+    const password = "fixture-tunnel-secret-42"
+    if err := saveTunnelAuthPassword(password); err != nil { t.Fatalf("save password: %v", err) }
+    got, err := loadTunnelAuthPassword()
+    if err != nil { t.Fatalf("load password: %v", err) }
+    if got != password { t.Fatalf("loaded password = %q, want exact saved value", got) }
+    path, err := tunnelAuthFile()
+    if err != nil { t.Fatal(err) }
+    info, err := os.Stat(path)
+    if err != nil { t.Fatal(err) }
+    if info.Mode().Perm() != 0600 { t.Fatalf("password file mode = %04o, want 0600", info.Mode().Perm()) }
+    if err := saveTunnelAuthPassword(""); err != nil { t.Fatalf("clear password: %v", err) }
+    if _, err := loadTunnelAuthPassword(); err == nil { t.Fatal("empty password remained configured") }
+}
+
+func TestTunnelAuthRejectsInvalidPassword(t *testing.T) {
+    t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+    for _, password := range []string{"contains space", "line\\nbreak", strings.Repeat("x", 257)} {
+        if err := saveTunnelAuthPassword(password); err == nil {
+            t.Errorf("invalid password %q was accepted", password)
+        }
+    }
+}
+
+func TestTunnelAuthAPIReportsOnlyConfiguredState(t *testing.T) {
+    t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+    const password = "api-secret-must-never-be-returned"
+    handler := apiHandler(&App{core: libs.NewAppCore()})
+    put := httptest.NewRequest(http.MethodPut, "/tunnel/auth", strings.NewReader(`{"password":"`+password+`"}`))
+    putRec := httptest.NewRecorder()
+    handler.ServeHTTP(putRec, put)
+    if putRec.Code != http.StatusOK { t.Fatalf("PUT /tunnel/auth status = %d: %s", putRec.Code, putRec.Body.String()) }
+    if strings.Contains(putRec.Body.String(), password) { t.Fatal("PUT response leaked tunnel password") }
+    get := httptest.NewRequest(http.MethodGet, "/tunnel/auth", nil)
+    getRec := httptest.NewRecorder()
+    handler.ServeHTTP(getRec, get)
+    if getRec.Code != http.StatusOK { t.Fatalf("GET /tunnel/auth status = %d", getRec.Code) }
+    var state map[string]bool
+    if err := json.Unmarshal(getRec.Body.Bytes(), &state); err != nil { t.Fatal(err) }
+    if !state["configured"] { t.Fatal("GET /tunnel/auth did not report configured=true") }
+    if strings.Contains(getRec.Body.String(), password) { t.Fatal("GET response leaked tunnel password") }
+}
+
+func TestVPNConnectAndReconnectRequireTunnelAuth(t *testing.T) {
+    t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+    app := &App{core: libs.NewAppCore()}
+    for _, path := range []string{"/vpn/connect", "/vpn/reconnect"} {
+        req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"id":1}`))
+        rec := httptest.NewRecorder()
+        apiHandler(app).ServeHTTP(rec, req)
+        if rec.Code != http.StatusPreconditionRequired {
+            t.Errorf("POST %s without password status = %d, want 428: %s", path, rec.Code, rec.Body.String())
+        }
+        if !strings.Contains(rec.Body.String(), "пароль туннеля не задан") {
+            t.Errorf("POST %s did not explain missing password: %s", path, rec.Body.String())
+        }
+    }
+}
+
+func TestVPNConnectAndReconnectRequireStableDeviceID(t *testing.T) {
+    t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+    if err := saveTunnelAuthPassword("fixture-valid-password"); err != nil { t.Fatal(err) }
+    app := &App{core: &libs.AppCore{}}
+    for _, path := range []string{"/vpn/connect", "/vpn/reconnect"} {
+        req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"id":1}`))
+        rec := httptest.NewRecorder()
+        apiHandler(app).ServeHTTP(rec, req)
+        if rec.Code != http.StatusPreconditionRequired {
+            t.Errorf("POST %s without device ID status = %d, want 428: %s", path, rec.Code, rec.Body.String())
+        }
+        if !strings.Contains(rec.Body.String(), "ID устройства LaLune не задан") {
+            t.Errorf("POST %s did not explain missing device ID: %s", path, rec.Body.String())
+        }
+    }
+}
