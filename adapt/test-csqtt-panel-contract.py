@@ -128,6 +128,8 @@ if "s.authMode=$('authMode').value||'manual'" not in js:
     raise SystemExit("hash acquisition mode is not serialized")
 if "s.authMode==='autoApi'||s.authMode==='autoVk'" not in js:
     raise SystemExit("automatic hash modes are not gated on VK token state")
+if "if(await saveSettings(false,true))" not in js or "saveSettings(false,false)" in js:
+    raise SystemExit("Direct settings save bypasses automatic-mode VK token validation")
 if adapt_script.count("ensureDirectDnsmasqInclude()") < 2:
     raise SystemExit("Direct domain nftset config is written but not included by dnsmasq")
 if 'settings.DirectDomains + "," + settings.DirectIPs' not in adapt_script:
