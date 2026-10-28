@@ -494,7 +494,7 @@ jobs:
           # extracted from the v2.1.9 APK describes WIRE-3 assets and must never
           # be reused as metadata for this WIRE-4 server.
           python3 - <<'PY'
-          import hashlib, json, os, pathlib, subprocess
+          import hashlib, json, os, pathlib, re, subprocess
           binary = pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "server-assets/csqtt-lalune-linux-arm64"
           digest = hashlib.sha256(binary.read_bytes()).hexdigest()
           source_commit = subprocess.check_output(
