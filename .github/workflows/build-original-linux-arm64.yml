@@ -14,6 +14,7 @@ on:
       - feature/csqtt-original-app-panel
       - fix/socks5-dynamic-address
       - fix/production-recovery-single-artifact
+      - fix/direct-ip-hashmode-captcha-e2e
   workflow_dispatch:
 
 permissions:
