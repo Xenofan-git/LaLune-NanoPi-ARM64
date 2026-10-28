@@ -21,6 +21,7 @@ src = raw_source.decode("utf-8")
 replacements = [
     ('readonly PEER_PORT="${CSQTT_PEER_PORT:-46000}"', 'readonly PEER_PORT="${CSQTT_PEER_PORT:-47000}"'),
     ('readonly WEB_PORT="${CSQTT_WEB_PORT:-46002}"', 'readonly WEB_PORT="${CSQTT_WEB_PORT:-47002}"'),
+    ('readonly CSQTT_WIRE_PROTOCOL_REVISION="CSQTT-WIRE-3"', 'readonly CSQTT_WIRE_PROTOCOL_REVISION="CSQTT-WIRE-4"'),
     ('readonly LOG_FILE="/var/log/csqtt-install.log"', 'readonly LOG_FILE="/var/log/csqtt-lalune-install.log"'),
     ('readonly CSQTT_IFACE="csqtt1"', 'readonly CSQTT_IFACE="csqtt-lalune0"'),
     ('readonly CSQTT_CONFIG_DIR="/etc/csqtt"', 'readonly CSQTT_CONFIG_DIR="/etc/csqtt-lalune"'),
@@ -282,6 +283,7 @@ for forbidden in [
         raise SystemExit(f"shared runtime identifier remains: {forbidden}")
 for required in [
     'CSQTT_PEER_PORT:-47000', 'CSQTT_WEB_PORT:-47002',
+    'readonly CSQTT_WIRE_PROTOCOL_REVISION="CSQTT-WIRE-4"',
     'csqtt-lalune.service', 'csqtt-lalune0', '10.67.68.0/24',
     'CSQTT_LALUNE_MANAGED', 'CSQTT_SYSTEMD_UNIT=csqtt-lalune.service',
     'CSQTT_DEPLOY_STAGE:-/tmp', 'CSQTT_LALUNE_SKIP_LETSENCRYPT',

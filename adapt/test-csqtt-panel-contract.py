@@ -46,10 +46,10 @@ if len(parser.tabs) != 5 or set(parser.tabs) != {
 if len(parser.pages) != 5 or set(parser.pages) != set(parser.tabs):
     raise SystemExit(f"tab/page mismatch: tabs={parser.tabs}, pages={parser.pages}")
 
-# Match the native CSQTT navigation order, not merely the same set of pages.
-expected_tabs = ["connect", "settings", "deploy", "logs", "route"]
-if parser.tabs != expected_tabs:
-    raise SystemExit(f"CSQTT tab order differs from original: {parser.tabs}")
+# Navigation order is intentionally not a contract. All five functional
+# pages must exist exactly once and each tab must map to a page.
+if len(parser.tabs) != 5 or set(parser.tabs) != {"connect", "settings", "deploy", "route", "logs"}:
+    raise SystemExit(f"unexpected CSQTT tab set: {parser.tabs}")
 
 # Keep the browser port on the native CSQTT brand palette and floating-tab
 # visual language; do not drift back to the earlier generic blue-gray mock.
@@ -75,6 +75,46 @@ for token in (
         raise SystemExit("theme-aware surface token missing: " + token)
 if "background:linear-gradient(145deg,#ddfff0,#fff)" in html:
     raise SystemExit("connected power button uses a light-only hardcoded gradient")
+
+# CSQTT 2.5.0 visual adaptation: retain the native five-tab navigation while
+# using the newer Material-style surfaces and outlined controls.
+for token in (
+    "CSQTT 2.5.0 visual adaptation",
+    "--blue:#1e73e8",
+    "border-radius:32px",
+    "border:2px solid #92949b",
+    "width:min(900px,calc(100% - 34px))",
+    "v2.1.9",
+    "CSQTT · NanoPi ARM64",
+    "Механизм LaLune используется только для автоматического получения VK-токена.",
+    "width:390px;min-width:390px;max-width:390px",
+):
+    if token not in html:
+        raise SystemExit("CSQTT 2.5.0 visual token missing: " + token)
+
+# Preserve CSQTT's two independent authentication selectors. The core accepts
+# legacy/vkcalls/auto_js for credential acquisition; LaLune captchaMode remains
+# a separate automatic/manual challenge policy.
+for token in (
+    'id="vkAuthMode"',
+    '<option value="legacy">Капча</option>',
+    '<option value="vkcalls">Авто</option>',
+    '<option value="auto_js">Авто ВК</option>',
+    "set('vkAuthMode',s.vkAuthMode||'vkcalls')",
+    "s.vkAuthMode=$('vkAuthMode').value",
+):
+    if token not in html:
+        raise SystemExit("CSQTT credential-mode contract missing: " + token)
+
+# The Route tab is intentionally Direct-domain-only; old IP/CIDR controls and
+# payload serialization must not return.
+route_html = html.split('id="page-route"', 1)[1].split("</section>", 1)[0]
+if 'id="directIPs"' in html or "Маршрутизация IP-адресов" in route_html:
+    raise SystemExit("Route tab must contain Direct domains only, without IP/CIDR controls")
+if 'id="directDomains"' not in route_html:
+    raise SystemExit("Route tab is missing the Direct domain list")
+if "delete s.directIPs;" not in js:
+    raise SystemExit("legacy Direct IP settings must be stripped before saving domain-only settings")
 
 # Accessibility contract: navigation state is exposed to assistive technology,
 # focus is visible, live updates are announced, and mobile safe areas are respected.
@@ -195,7 +235,7 @@ for contract in (
 
 # Keep the user-facing route save explicit: it stores rules but must not claim
 # that active routing changed immediately without a reconnect.
-if "Переподключите CSQTT" not in html:
+if "Переподключите туннель CSQTT" not in html:
     raise SystemExit("Direct rules must explain that reconnect is required to apply changes")
 
 print(

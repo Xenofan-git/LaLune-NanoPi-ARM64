@@ -221,6 +221,8 @@ func TestDirectDomainValidation(t *testing.T) {
 		{name: "reject path", domain: "example.com/path", want: false},
 		{name: "reject empty label", domain: "example..com", want: false},
 		{name: "reject leading hyphen", domain: "-bad.example", want: false},
+		{name: "accept IPv4 literal", domain: "192.0.2.1", want: true},
+		{name: "accept IPv6 literal", domain: "2001:db8::1", want: true},
 		{name: "reject blank", domain: "", want: false},
 	}
 	for _, tt := range tests {
@@ -231,26 +233,6 @@ func TestDirectDomainValidation(t *testing.T) {
 		})
 	}
 }
-
-func TestNormalizeDirectIPs(t *testing.T) {
-	got, err := normalizeDirectIPs("192.0.2.1\n192.0.2.0/24")
-	if err != nil {
-		t.Fatalf("normalizeDirectIPs(valid values): %v", err)
-	}
-	if len(got) != 2 || got[0] != "192.0.2.1" || got[1] != "192.0.2.0/24" {
-		t.Fatalf("unexpected normalized IPs: %#v", got)
-	}
-	if _, err := normalizeDirectIPs("2001:db8::1"); err == nil {
-		t.Fatal("expected IPv6 to be rejected while Direct supports IPv4 only")
-	}
-	if _, err := normalizeDirectIPs("192.0.2.999"); err == nil {
-		t.Fatal("expected malformed IPv4 to be rejected")
-	}
-	if _, err := normalizeDirectIPs("0.0.0.0/0"); err == nil {
-		t.Fatal("expected default route CIDR to be rejected for Direct")
-	}
-}
-
 
 func TestVersionEndpointReportsBuildProvenance(t *testing.T) {
 	old := []string{buildCommit, buildRunID, buildRunNumber, buildDate, buildBranch, buildUpstreamCommit}
@@ -279,31 +261,30 @@ func TestVersionEndpointReportsBuildProvenance(t *testing.T) {
 
 func TestDirectPlanTransitions(t *testing.T) {
 	tests := []struct {
-		name, domains, ips string
-		wantDomains, wantIPs []string
+		name, domains string
+		wantDomains []string
 		wantDNS, wantEnabled bool
 		wantErr bool
 	}{
-		{name: "domains and IPs", domains: "example.com, api.example.com", ips: "192.0.2.1,192.0.2.0/24", wantDomains: []string{"example.com", "api.example.com"}, wantIPs: []string{"192.0.2.1", "192.0.2.0/24"}, wantDNS: true, wantEnabled: true},
-		{name: "IP only after domains", ips: "192.0.2.1", wantIPs: []string{"192.0.2.1"}, wantEnabled: true},
-		{name: "domains only after IPs", domains: "example.com", wantDomains: []string{"example.com"}, wantDNS: true, wantEnabled: true},
-		{name: "empty after domains and IPs", wantEnabled: false},
-		{name: "reject bad domain without plan", domains: "https://example.com", wantErr: true},
-		{name: "reject bad IP without plan", ips: "192.0.2.999", wantErr: true},
+		{name: "multiple domains", domains: "example.com, api.example.com", wantDomains: []string{"example.com", "api.example.com"}, wantDNS: true, wantEnabled: true},
+		{name: "mixed domains and IPv4 IPv6", domains: "example.com, 192.0.2.1, 2001:db8::1", wantDomains: []string{"example.com", "192.0.2.1", "2001:db8::1"}, wantDNS: true, wantEnabled: true},
+		{name: "IPv4 only", domains: "192.0.2.1", wantDomains: []string{"192.0.2.1"}, wantDNS: false, wantEnabled: true},
+		{name: "IPv6 only", domains: "2001:db8::1", wantDomains: []string{"2001:db8::1"}, wantDNS: false, wantEnabled: true},
+		{name: "empty list", wantEnabled: false},
+		{name: "reject URL", domains: "https://example.com", wantErr: true},
+		{name: "reject CIDR", domains: "192.0.2.0/24", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			domains, ips, needsDNS, err := prepareDirectPlan(tt.domains, tt.ips)
+			domains, needsDNS, err := prepareDirectPlan(tt.domains)
 			if (err != nil) != tt.wantErr { t.Fatalf("prepareDirectPlan error = %v, wantErr %v", err, tt.wantErr) }
 			if tt.wantErr { return }
 			if !slices.Equal(domains, tt.wantDomains) { t.Errorf("domains = %#v, want %#v", domains, tt.wantDomains) }
-			if !slices.Equal(ips, tt.wantIPs) { t.Errorf("ips = %#v, want %#v", ips, tt.wantIPs) }
 			if needsDNS != tt.wantDNS { t.Errorf("needsDNS = %v, want %v", needsDNS, tt.wantDNS) }
-			if (len(domains)+len(ips) > 0) != tt.wantEnabled { t.Errorf("enabled = %v, want %v", len(domains)+len(ips)>0, tt.wantEnabled) }
+			if (len(domains) > 0) != tt.wantEnabled { t.Errorf("enabled = %v, want %v", len(domains)>0, tt.wantEnabled) }
 		})
 	}
 }
-
 
 // setCaptchaTestState installs an isolated pending challenge for endpoint tests.
 func setCaptchaTestState(t *testing.T, session string) {
@@ -375,6 +356,52 @@ func TestCaptchaResultEndpointForwardsToCoreStdin(t *testing.T) {
 		t.Fatalf("reading core stdin fixture: %v", err)
 	case <-time.After(time.Second):
 		t.Fatal("CAPTCHA_RESULT was not forwarded to core stdin")
+	}
+}
+
+func TestCaptchaBridgeRoundTripThroughProtectedPanelAPI(t *testing.T) {
+	const session = "ci-captcha-bridge-session"
+	const result = "fixture-bridge-success-token"
+	setCaptchaTestState(t, session)
+	t.Setenv("LALUNE_PANEL_USER", "fixture-admin")
+	t.Setenv("LALUNE_PANEL_PASSWORD", "fixture-panel-password")
+
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	app := &App{runner: &LinuxRunner{}}
+	linuxRunnerInputs.Store(app.runner, writer)
+	defer linuxRunnerInputs.Delete(app.runner)
+
+	expected := "CAPTCHA_RESULT|" + result + "\n"
+	readResult := make(chan string, 1)
+	readErr := make(chan error, 1)
+	go func() {
+		buf := make([]byte, len(expected))
+		_, err := io.ReadFull(reader, buf)
+		if err != nil { readErr <- err; return }
+		readResult <- string(buf)
+	}()
+
+	body := strings.NewReader(`{"sessionToken":"ci-captcha-bridge-session","result":"fixture-bridge-success-token"}`)
+	req := httptest.NewRequest(http.MethodPost, "http://panel.test/api/captcha/result", body)
+	req.SetBasicAuth("fixture-admin", "fixture-panel-password")
+	req.Header.Set("Origin", "http://panel.test")
+	rec := httptest.NewRecorder()
+	panelSecurity(panelAPIHandler(apiHandler(app))).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("protected same-origin CAPTCHA bridge POST status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var response map[string]bool
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil { t.Fatalf("invalid CAPTCHA response JSON: %v", err) }
+	if !response["ok"] { t.Fatalf("protected panel rejected valid bridge result: %s", rec.Body.String()) }
+	select {
+	case got := <-readResult:
+		if got != expected { t.Fatalf("core stdin = %q, want %q", got, expected) }
+	case err := <-readErr:
+		t.Fatalf("reading core stdin fixture: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("same-origin protected panel did not forward CAPTCHA result to core stdin")
 	}
 }
 

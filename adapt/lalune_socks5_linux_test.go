@@ -312,6 +312,16 @@ func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 	if _, err := net.InterfaceByName("csqtt0"); err != nil {
 		t.Fatalf("test TUN/egress interface csqtt0 missing: %v", err)
 	}
+	downstream, err := net.InterfaceByName("eth1")
+	if err != nil { t.Fatalf("production downstream interface eth1 missing: %v", err) }
+	addrs, err := downstream.Addrs()
+	if err != nil { t.Fatalf("read eth1 addresses: %v", err) }
+	foundDownstreamIP := false
+	for _, addr := range addrs {
+		ip, _, parseErr := net.ParseCIDR(addr.String())
+		if parseErr == nil && ip.Equal(net.ParseIP("10.67.68.1")) { foundDownstreamIP = true }
+	}
+	if !foundDownstreamIP { t.Fatalf("eth1 must own 10.67.68.1 for production listener test; addresses=%v", addrs) }
 	// The VM provides echo servers in a separate network namespace. Traffic to
 	// that namespace must use the marked policy table; the main table deliberately
 	// blackholes the test subnet, so an unmarked socket cannot accidentally pass.
@@ -322,10 +332,10 @@ func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 	tcpPort, udpPort := 18080, 18081
 
 	t.Run("TCP", func(t *testing.T) {
-		s := NewSocks5Server("127.0.0.1:0")
+		s := NewSocks5Server("eth1:12500")
 		if err := s.Start(); err != nil { t.Fatal(err) }
 		defer s.Stop()
-		client, err := net.DialTimeout("tcp", s.ln.Addr().String(), 2*time.Second)
+		client, err := net.DialTimeout("tcp", "10.67.68.1:12500", 2*time.Second)
 		if err != nil { t.Fatal(err) }
 		defer client.Close()
 		_ = client.SetDeadline(time.Now().Add(5*time.Second))
@@ -345,10 +355,10 @@ func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 	})
 
 	t.Run("UDP", func(t *testing.T) {
-		s := NewSocks5Server("127.0.0.1:0")
+		s := NewSocks5Server("eth1:12500")
 		if err := s.Start(); err != nil { t.Fatal(err) }
 		defer s.Stop()
-		control, err := net.DialTimeout("tcp", s.ln.Addr().String(), 2*time.Second)
+		control, err := net.DialTimeout("tcp", "10.67.68.1:12500", 2*time.Second)
 		if err != nil { t.Fatal(err) }
 		defer control.Close()
 		_ = control.SetDeadline(time.Now().Add(6*time.Second))
@@ -358,7 +368,7 @@ func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 		if _, err := io.ReadFull(control, reply); err != nil { t.Fatal(err) }
 		if reply[1] != 0 { t.Fatalf("UDP ASSOCIATE failed: %v", reply) }
 		relayIP := net.IP(reply[4:8])
-		if relayIP.IsUnspecified() { relayIP = net.IPv4(127,0,0,1) }
+		if relayIP.IsUnspecified() { relayIP = net.ParseIP("10.67.68.1").To4() }
 		relay, err := net.DialUDP("udp", nil, &net.UDPAddr{IP:relayIP, Port:int(binary.BigEndian.Uint16(reply[8:10]))})
 		if err != nil { t.Fatal(err) }
 		defer relay.Close()

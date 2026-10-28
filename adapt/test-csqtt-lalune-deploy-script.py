@@ -21,8 +21,15 @@ def forbid(fragment: str) -> None:
 
 if 'readonly SCRIPT_VERSION="2.1.9"' not in upstream:
     raise SystemExit("source is not the pinned CSQTT v2.1.9 deploy.sh")
+if 'readonly CSQTT_WIRE_PROTOCOL_REVISION="CSQTT-WIRE-3"' not in upstream:
+    raise SystemExit("pinned upstream deploy.sh protocol baseline changed unexpectedly")
 if 'readonly SCRIPT_VERSION="2.1.9"' not in script:
     raise SystemExit("derived deploy script lost the upstream version marker")
+need('readonly CSQTT_WIRE_PROTOCOL_REVISION="CSQTT-WIRE-4"')
+if 'readonly CSQTT_WIRE_PROTOCOL_REVISION="CSQTT-WIRE-3"' in script:
+    raise SystemExit("derived deploy script still rejects the production WIRE-4 server")
+need('uploaded_wire_protocol="$(timeout 5 "$UPLOAD_BINARY" --protocol-revision 2>/dev/null || true)"')
+need('[ "$uploaded_wire_protocol" = "$CSQTT_WIRE_PROTOCOL_REVISION" ]')
 
 # Keep the original deployment pipeline rather than replacing it with a second installer.
 for function in [

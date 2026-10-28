@@ -446,7 +446,7 @@ SETTINGS_PAGE = UPSTREAM / "Frontend/Core/lib/pages/settings_page.dart"
 replace_once(
     COMMON,
     '''\tValidateVkHashes        bool   `json:"validateVkHashes"`\n\n\t// Экспериментальные функции.''',
-    '''\tValidateVkHashes        bool   `json:"validateVkHashes"`\n\tDirectDomains           string `json:"directDomains"`\n\tDirectIPs               string `json:"directIPs"`\n\n\t// Экспериментальные функции.''',
+    '''\tValidateVkHashes        bool   `json:"validateVkHashes"`\n\tDirectDomains           string `json:"directDomains"`\n\n\t// Экспериментальные функции.''',
 )
 
 linux_direct = r'''
@@ -507,51 +507,38 @@ func splitDirectList(raw string) []string {
 }
 
 func validDirectDomain(s string) bool {
-\tif s == "" || strings.ContainsAny(s, "/#:=<>\\"'\\\\") {
+\tif s == "" {
+\t\treturn false
+\t}
+\t// Parse IP literals before rejecting domain delimiters: IPv6 uses colons.
+\t// CIDR and URL forms remain rejected by the delimiter filter below.
+\tif net.ParseIP(s) != nil {
+\t\treturn true
+\t}
+\tif strings.ContainsAny(s, "/#:=<>\\"'\\\\") {
 \t\treturn false
 \t}
 \treturn regexp.MustCompile("(?i)^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[.])+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$").MatchString(s)
 }
-func normalizeDirectIPs(raw string) ([]string, error) {
-\tvar out []string
-\tfor _, token := range splitDirectList(raw) {
-\t\tif token == "" {
-\t\t\tcontinue
-\t\t}
-\t\tif ip := net.ParseIP(token); ip != nil {
-\t\t\tif ip.To4() == nil {
-\t\t\t\treturn nil, fmt.Errorf("IPv6 пока не поддерживается: %s", token)
-\t\t\t}
-\t\t\tout = append(out, ip.To4().String())
-\t\t\tcontinue
-\t\t}
-\t\t_, n, err := net.ParseCIDR(token)
-\t\tif err != nil || n.IP.To4() == nil {
-\t\t\treturn nil, fmt.Errorf("некорректный IPv4/CIDR: %s", token)
-\t\t}
-\t\tones, _ := n.Mask.Size()
-\t\tif ones == 0 {
-\t\t\treturn nil, fmt.Errorf("CIDR по умолчанию запрещён для Direct: %s", token)
-\t\t}
-\t\tout = append(out, n.String())
-\t}
-\treturn out, nil
-}
-
-func prepareDirectPlan(domainsRaw, ipsRaw string) ([]string, []string, bool, error) {
+func prepareDirectPlan(domainsRaw string) ([]string, bool, error) {
 \tdomains := splitDirectList(domainsRaw)
-\tips, err := normalizeDirectIPs(ipsRaw)
-\tif err != nil { return nil, nil, false, err }
 \tfor _, domain := range domains {
 \t\tif !validDirectDomain(domain) {
-\t\t\treturn nil, nil, false, fmt.Errorf("некорректный домен Direct: %s", domain)
+\t\t\treturn nil, false, fmt.Errorf("некорректный домен Direct: %s", domain)
 \t\t}
 \t}
-\treturn domains, ips, len(domains) > 0, nil
+\tneedsDNS := false
+\tfor _, entry := range domains {
+\t\tif net.ParseIP(entry) == nil { needsDNS = true; break }
+\t}
+\treturn domains, needsDNS, nil
 }
 
 func (t *LinuxTun) cleanupDirectRoutingLocked() {
-\tt.app.runSudo("ip rule del pref " + directRulePref + " 2>/dev/null || true")
+\t// Remove only rules carrying our exact mark/table signature; never delete
+\t// an unrelated rule merely because it shares the preference number.
+\tt.app.runSudo("ip rule del pref " + directRulePref + " fwmark " + directMark + "/0xffff lookup main 2>/dev/null || true")
+\tt.app.runSudo("ip -6 rule del pref " + directRulePref + " fwmark " + directMark + "/0xffff lookup main 2>/dev/null || true")
 \tt.app.runSudo("nft delete table inet lalune_direct 2>/dev/null || true")
 \tincludeRemoved, includeErr := removeDirectDnsmasqInclude()
 \tconfigRemoved := false
@@ -580,11 +567,13 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \t\t}
 \t}()
 \tsettings := t.app.core.GetSettings()
-\tdomains, ips, needsDnsmasq, err := prepareDirectPlan(settings.DirectDomains, settings.DirectIPs)
+\tdomains, _, err := prepareDirectPlan(settings.DirectDomains)
 \tif err != nil { return err }
 
 \tmutating = true
-\tt.app.runSudo("ip rule del pref " + directRulePref + " 2>/dev/null || true")
+\t// Reconcile only CSQTT-owned Direct rules; never delete by priority alone.
+\tt.app.runSudo("ip rule del pref " + directRulePref + " fwmark " + directMark + "/0xffff lookup main 2>/dev/null || true")
+\tt.app.runSudo("ip -6 rule del pref " + directRulePref + " fwmark " + directMark + "/0xffff lookup main 2>/dev/null || true")
 \tt.app.runSudo("nft delete table inet lalune_direct 2>/dev/null || true")
 \tincludeRemoved, includeErr := removeDirectDnsmasqInclude()
 \tif includeErr != nil { return includeErr }
@@ -598,26 +587,32 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \tdnsmasqChanged := includeRemoved || hadDnsmasq
 \t_ = os.Remove(directNftPath)
 
-\tif len(domains) == 0 && len(ips) == 0 {
+\tif len(domains) == 0 {
 \t\tif dnsmasqChanged {
 \t\t\tif err := t.app.runSudo("systemctl restart dnsmasq"); err != nil { return fmt.Errorf("перезапуск dnsmasq после очистки Direct: %w", err) }
 \t\t}
 \t\treturn nil
 \t}
 
-\tvar nft strings.Builder
-\tnft.WriteString("table inet lalune_direct {\n")
-\tnft.WriteString("  set direct4 { type ipv4_addr; flags interval;")
-\tif len(ips) > 0 {
-\t\tnft.WriteString(" elements = { ")
-\t\tnft.WriteString(strings.Join(ips, ", "))
-\t\tnft.WriteString(" }")
+\tvar domainsOnly, ipv4s, ipv6s []string
+\tfor _, entry := range domains {
+\t\tif ip := net.ParseIP(entry); ip != nil {
+\t\t\tif v4 := ip.To4(); v4 != nil { ipv4s = append(ipv4s, v4.String()) } else { ipv6s = append(ipv6s, ip.String()) }
+\t\t} else { domainsOnly = append(domainsOnly, entry) }
 \t}
-\tnft.WriteString(" }\n")
-\tnft.WriteString("  chain prerouting { type filter hook prerouting priority -150; policy accept;\n")
-\tnft.WriteString("    ip saddr 192.168.5.0/24 ip daddr @direct4 meta mark set " + directMark + "\n")
-\tnft.WriteString("  }\n")
-\tnft.WriteString("}\n")
+\tvar nft strings.Builder
+\tnft.WriteString("table inet lalune_direct {\\n")
+\tnft.WriteString("  set direct4 { type ipv4_addr; flags interval;")
+\tif len(ipv4s) > 0 { nft.WriteString(" elements = { " + strings.Join(ipv4s, ", ") + " };") }
+\tnft.WriteString(" }\\n")
+\tnft.WriteString("  set direct6 { type ipv6_addr; flags interval;")
+\tif len(ipv6s) > 0 { nft.WriteString(" elements = { " + strings.Join(ipv6s, ", ") + " };") }
+\tnft.WriteString(" }\\n")
+\tnft.WriteString("  chain prerouting { type filter hook prerouting priority -150; policy accept;\\n")
+\tnft.WriteString("    ip saddr 192.168.5.0/24 ip daddr @direct4 meta mark set " + directMark + "\\n")
+\tnft.WriteString("    iifname \\"eth1\\" ip6 daddr @direct6 meta mark set " + directMark + "\\n")
+\tnft.WriteString("  }\\n")
+\tnft.WriteString("}\\n")
 
 \tif err := writeDirectFileAtomic(directNftPath, []byte(nft.String()), 0600); err != nil {
 \t\treturn fmt.Errorf("атомарная запись nft-конфига: %w", err)
@@ -629,21 +624,15 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \t\treturn fmt.Errorf("nft direct policy: %w", err)
 \t}
 
-\tif needsDnsmasq {
-\t\tline := "nftset=/"
-\t\tfor i, d := range domains {
-\t\t\tif i > 0 {
-\t\t\t\tline += "/"
-\t\t\t}
-\t\t\tline += d
+\tif len(domainsOnly) > 0 {
+\t\tvar dnsmasq strings.Builder
+\t\tfor _, family := range []string{"4", "6"} {
+\t\t\tdnsmasq.WriteString("nftset=/")
+\t\t\tdnsmasq.WriteString(strings.Join(domainsOnly, "/"))
+\t\t\tdnsmasq.WriteString("/" + family + "#inet#lalune_direct#direct" + family + "\\n")
 \t\t}
-\t\tline += "/4#inet#lalune_direct#direct4\n"
-\t\tif err := writeDirectFileAtomic(directDnsmasqPath, []byte(line), 0644); err != nil {
+\t\tif err := writeDirectFileAtomic(directDnsmasqPath, []byte(dnsmasq.String()), 0644); err != nil {
 \t\t\treturn fmt.Errorf("атомарная запись dnsmasq direct-конфига: %w", err)
-\t\t}
-\t\tif err := ensureDirectDnsmasqInclude(); err != nil {
-\t\t\t_ = os.Remove(directDnsmasqPath)
-\t\t\treturn err
 \t\t}
 \t\tdnsmasqChanged = true
 \t}
@@ -654,10 +643,13 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \t}
 
 \tif err := t.app.runSudo("ip rule add pref " + directRulePref + " fwmark " + directMark + "/0xffff lookup main"); err != nil {
-\t\treturn fmt.Errorf("ip rule Direct: %w", err)
+\t\treturn fmt.Errorf("IPv4 ip rule Direct: %w", err)
+\t}
+\tif err := t.app.runSudo("ip -6 rule add pref " + directRulePref + " fwmark " + directMark + "/0xffff lookup main"); err != nil {
+\t\treturn fmt.Errorf("IPv6 ip rule Direct: %w", err)
 \t}
 
-\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Активно: доменов=%d, IP/CIDR=%d; mark=%s; LTE=main", len(domains), len(ips), directMark))
+\tt.app.core.AddLog(fmt.Sprintf("[DIRECT] Активно: доменов=%d; mark=%s; LTE=main", len(domains), directMark))
 \treturn nil
 }
 
@@ -686,7 +678,7 @@ for _line in linux_direct.splitlines():
     _normalized_lines.append(_indent + _line)
 linux_direct = "\n".join(_normalized_lines) + "\n"
 
-# Integrate direct-domain/IP bypass into the Linux adapter and settings UI.
+# Integrate Direct-domain-only bypass into the Linux adapter and settings UI.
 s = LINUX.read_text()
 marker = 'func (t *LinuxTun) SetupRoutes(tunIP, tunDNS string) error {'
 if s.count(marker) != 1:
@@ -700,12 +692,12 @@ LINUX.write_text(s)
 # Add direct routing preferences to the persisted settings model.
 s = API_DART.read_text()
 replacements = [
-    ('''  final bool validateVkHashes;\n\n  /// Экспериментальные функции.''', '''  final bool validateVkHashes;\n  final String directDomains;\n  final String directIPs;\n\n  /// Экспериментальные функции.'''),
-    ('''    this.validateVkHashes = false,\n    this.enableSmartTunnel = false,''', '''    this.validateVkHashes = false,\n    this.directDomains = '',\n    this.directIPs = '',\n    this.enableSmartTunnel = false,'''),
-    ('''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      enableSmartTunnel:''', '''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      directDomains: (j['directDomains'] ?? '') as String,\n      directIPs: (j['directIPs'] ?? '') as String,\n      enableSmartTunnel:'''),
-    ('''    'validateVkHashes': validateVkHashes,\n    'enableSmartTunnel': enableSmartTunnel,''', '''    'validateVkHashes': validateVkHashes,\n    'directDomains': directDomains,\n    'directIPs': directIPs,\n    'enableSmartTunnel': enableSmartTunnel,'''),
-    ('''    String? vkAuthMode, bool? allowHashRedistribution, bool? validateVkHashes,\n    bool? enableSmartTunnel,''', '''    String? vkAuthMode, bool? allowHashRedistribution, bool? validateVkHashes,\n    String? directDomains, String? directIPs,\n    bool? enableSmartTunnel,'''),
-    ('''    validateVkHashes: validateVkHashes ?? this.validateVkHashes,\n    enableSmartTunnel:''', '''    validateVkHashes: validateVkHashes ?? this.validateVkHashes,\n    directDomains: directDomains ?? this.directDomains,\n    directIPs: directIPs ?? this.directIPs,\n    enableSmartTunnel:'''),
+    ('''  final bool validateVkHashes;\n\n  /// Экспериментальные функции.''', '''  final bool validateVkHashes;\n  final String directDomains;\n\n  /// Экспериментальные функции.'''),
+    ('''    this.validateVkHashes = false,\n    this.enableSmartTunnel = false,''', '''    this.validateVkHashes = false,\n    this.directDomains = '',\n    this.enableSmartTunnel = false,'''),
+    ('''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      enableSmartTunnel:''', '''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      directDomains: (j['directDomains'] ?? '') as String,\n      enableSmartTunnel:'''),
+    ('''    'validateVkHashes': validateVkHashes,\n    'enableSmartTunnel': enableSmartTunnel,''', '''    'validateVkHashes': validateVkHashes,\n    'directDomains': directDomains,\n    'enableSmartTunnel': enableSmartTunnel,'''),
+    ('''    String? vkAuthMode, bool? allowHashRedistribution, bool? validateVkHashes,\n    bool? enableSmartTunnel,''', '''    String? vkAuthMode, bool? allowHashRedistribution, bool? validateVkHashes,\n    String? directDomains,\n    bool? enableSmartTunnel,'''),
+    ('''    validateVkHashes: validateVkHashes ?? this.validateVkHashes,\n    enableSmartTunnel:''', '''    validateVkHashes: validateVkHashes ?? this.validateVkHashes,\n    directDomains: directDomains ?? this.directDomains,\n    enableSmartTunnel:'''),
 ]
 for old, new in replacements:
     if s.count(old) != 1:
@@ -713,20 +705,20 @@ for old, new in replacements:
     s = s.replace(old, new, 1)
 API_DART.write_text(s)
 
-# Add editable domain and IPv4/CIDR lists to Settings.
+# Add the Direct-domain-only list to Settings.
 s = SETTINGS_PAGE.read_text()
 replacements = [
-    ('''  final _deviceIdCtl = TextEditingController();''', '''  final _deviceIdCtl = TextEditingController();\n  final _directDomainsCtl = TextEditingController();\n  final _directIPsCtl = TextEditingController();'''),
-    ('''    _deviceIdCtl.dispose();''', '''    _deviceIdCtl.dispose();\n    _directDomainsCtl.dispose();\n    _directIPsCtl.dispose();'''),
-    ('''    _deviceIdCtl.text = s.deviceId;\n    _authMode''', '''    _deviceIdCtl.text = s.deviceId;\n    _directDomainsCtl.text = s.directDomains;\n    _directIPsCtl.text = s.directIPs;\n    _authMode'''),
-    ('''      authMode: _authMode,\n      enableSmartTunnel: _enableSmartTunnel,''', '''      authMode: _authMode,\n      directDomains: _directDomainsCtl.text.trim(),\n      directIPs: _directIPsCtl.text.trim(),\n      enableSmartTunnel: _enableSmartTunnel,'''),
+    ('''  final _deviceIdCtl = TextEditingController();''', '''  final _deviceIdCtl = TextEditingController();\n  final _directDomainsCtl = TextEditingController();'''),
+    ('''    _deviceIdCtl.dispose();''', '''    _deviceIdCtl.dispose();\n    _directDomainsCtl.dispose();'''),
+    ('''    _deviceIdCtl.text = s.deviceId;\n    _authMode''', '''    _deviceIdCtl.text = s.deviceId;\n    _directDomainsCtl.text = s.directDomains;\n    _authMode'''),
+    ('''      authMode: _authMode,\n      enableSmartTunnel: _enableSmartTunnel,''', '''      authMode: _authMode,\n      directDomains: _directDomainsCtl.text.trim(),\n      enableSmartTunnel: _enableSmartTunnel,'''),
 ]
 for old, new in replacements:
     if s.count(old) != 1:
         raise SystemExit(f'Settings marker missing or ambiguous: {old[:80]!r}')
     s = s.replace(old, new, 1)
 ui_marker = '''              const SizedBox(height: 18),\n\n              _sectionTitle('Device ID'),'''
-ui_insert = '''              const SizedBox(height: 18),\n\n              _sectionTitle('Direct — обход CSQTT'),\n              GlassCard(\n                child: Column(\n                  crossAxisAlignment: CrossAxisAlignment.start,\n                  children: [\n                    Text('Только указанные назначения идут напрямую через LTE. Всё остальное остаётся через CSQTT.',\n                      style: TextStyle(fontSize: 11.5, height: 1.45, color: Colors.white.withOpacity(0.55))),\n                    const SizedBox(height: 12),\n                    Text('Домены', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),\n                    const SizedBox(height: 5),\n                    TextField(\n                      controller: _directDomainsCtl,\n                      minLines: 3,\n                      maxLines: 8,\n                      style: const TextStyle(fontSize: 13),\n                      decoration: const InputDecoration(hintText: 'example.com\\ncdn.example.com'),\n                      onChanged: (_) => _markDirty(),\n                    ),\n                    const SizedBox(height: 12),\n                    Text('IP / CIDR', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),\n                    const SizedBox(height: 5),\n                    TextField(\n                      controller: _directIPsCtl,\n                      minLines: 3,\n                      maxLines: 8,\n                      style: const TextStyle(fontSize: 13),\n                      decoration: const InputDecoration(hintText: '1.2.3.4\\n1.2.3.0/24'),\n                      onChanged: (_) => _markDirty(),\n                    ),\n                    const SizedBox(height: 7),\n                    Text('По одному значению в строке; также принимаются запятые. Сейчас IPv4.',\n                      style: TextStyle(fontSize: 10.5, color: Colors.white.withOpacity(0.45))),\n                  ],\n                ),\n              ),\n              const SizedBox(height: 18),\n\n              _sectionTitle('Device ID'),'''
+ui_insert = '''              const SizedBox(height: 18),\n\n              _sectionTitle('Direct — обход CSQTT'),\n              GlassCard(\n                child: Column(\n                  crossAxisAlignment: CrossAxisAlignment.start,\n                  children: [\n                    Text('Только указанные назначения идут напрямую через LTE. Всё остальное остаётся через CSQTT.',\n                      style: TextStyle(fontSize: 11.5, height: 1.45, color: Colors.white.withOpacity(0.55))),\n                    const SizedBox(height: 12),\n                    Text('Домены', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7))),\n                    const SizedBox(height: 5),\n                    TextField(\n                      controller: _directDomainsCtl,\n                      minLines: 3,\n                      maxLines: 8,\n                      style: const TextStyle(fontSize: 13),\n                      decoration: const InputDecoration(hintText: 'example.com\\ncdn.example.com'),\n                      onChanged: (_) => _markDirty(),\n                    ),\n                    const SizedBox(height: 12),\n                  ],\n                ),\n              ),\n              const SizedBox(height: 18),\n\n              _sectionTitle('Device ID'),'''
 if s.count(ui_marker) != 1:
     raise SystemExit('Settings UI insertion marker missing or ambiguous')
 SETTINGS_PAGE.write_text(s.replace(ui_marker, ui_insert, 1))
@@ -923,3 +915,63 @@ for required in (
     if required not in final_linux:
         raise SystemExit(f"final generated app_linux.go missing TUN lifecycle marker: {required}")
 print("Verified final app_linux.go contains TUN lifecycle fields and methods")
+
+# Extract the exact production argv quoting path for an executable regression test.
+core_argv_old = """\tcorePath := cmdArgs[0]
+\tquotedArgs := make([]string, len(cmdArgs)-1)
+\tfor i, arg := range cmdArgs[1:] {
+\t\tescaped := strings.ReplaceAll(arg, "'", "'\\\\''")
+\t\tquotedArgs[i] = "'" + escaped + "'"
+\t}
+
+\tcmdLine := fmt.Sprintf("'%s' %s > '%s' 2>&1",
+\t\tstrings.ReplaceAll(corePath, "'", "'\\\\''"),
+\t\tstrings.Join(quotedArgs, " "),
+\t\tlogFile,
+\t)
+"""
+core_argv_new = """\tcmdLine := buildCoreCommandLine(cmdArgs, logFile)
+"""
+if final_linux.count(core_argv_old) != 1:
+    raise SystemExit("production core argv construction marker missing or ambiguous")
+final_linux = final_linux.replace(core_argv_old, core_argv_new, 1)
+core_argv_helper = """func appendCSQTTAuthArgs(cmdArgs []string, password, deviceID string) []string {\n\treturn append(cmdArgs, "-device-id", deviceID, "-password", password)\n}\n\nfunc buildCoreCommandLine(cmdArgs []string, logFile string) string {
+\tif len(cmdArgs) == 0 { return "" }
+\tquote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\\\''") + "'" }
+\tquotedArgs := make([]string, 0, len(cmdArgs)-1)
+\tfor _, arg := range cmdArgs[1:] { quotedArgs = append(quotedArgs, quote(arg)) }
+\treturn fmt.Sprintf("%s %s > %s 2>&1", quote(cmdArgs[0]), strings.Join(quotedArgs, " "), quote(logFile))
+}
+
+"""
+core_argv_anchor = "func (r *LinuxRunner) startCoreWithSudo(cmdArgs []string, listenPort int, bridge *libs.Bridge) {"
+if final_linux.count(core_argv_anchor) != 1:
+    raise SystemExit("startCoreWithSudo marker missing or ambiguous")
+final_linux = final_linux.replace(core_argv_anchor, core_argv_helper + core_argv_anchor, 1)
+
+# CSQTT 2.1.9 tunnel authentication: bind the saved tunnel password to the
+# stable LaLune device ID and pass both to the pinned native client.
+linux_auth_marker = """func (r *LinuxRunner) StartCore(cmdArgs []string, listenPort int, bridge *libs.Bridge) {
+	r.startCoreWithSudo(cmdArgs, listenPort, bridge)
+}"""
+linux_auth_replacement = """func (r *LinuxRunner) StartCore(cmdArgs []string, listenPort int, bridge *libs.Bridge) {
+	password, err := loadTunnelAuthPassword()
+	if err != nil {
+		bridge.Core.AddLog("[AUTH] Пароль туннеля не задан; запуск отменён")
+		bridge.Core.SetConnected(false)
+		return
+	}
+	deviceID := csqttDeviceID(bridge.Core)
+	if deviceID == "" {
+		bridge.Core.AddLog("[AUTH] ID устройства LaLune не задан; запуск отменён")
+		bridge.Core.SetConnected(false)
+		return
+	}
+	cmdArgs = appendCSQTTAuthArgs(cmdArgs, password, deviceID)
+	r.startCoreWithSudo(cmdArgs, listenPort, bridge)
+}"""
+if final_linux.count(linux_auth_marker) != 1:
+    raise SystemExit("LinuxRunner.StartCore auth insertion marker missing or ambiguous")
+final_linux = final_linux.replace(linux_auth_marker, linux_auth_replacement, 1)
+LINUX.write_text(final_linux)
+

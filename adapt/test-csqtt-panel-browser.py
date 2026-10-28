@@ -15,8 +15,8 @@ from playwright.sync_api import sync_playwright
 
 ROOT = Path(".").resolve()
 HTML = ROOT / "adapt" / "csqtt-panel-preview.html"
-EXPECTED = ["connect", "settings", "deploy", "logs", "route"]
-WIDTHS = [320, 360, 390, 768, 1280]
+EXPECTED = {"connect", "settings", "deploy", "logs", "route"}
+WIDTHS = [390, 768, 1280]
 
 
 class QuietHandler(SimpleHTTPRequestHandler):
@@ -30,6 +30,9 @@ def main():
         {"id": 2, "name": "Profile two", "protocol": "CSQTT", "hashes": "hash-two"},
     ]
     selected = {"profile": profiles[0]}
+    vpn_connected = {"value": False}
+    # A fresh device has no tunnel password; the success path provisions one below.
+    tunnel_auth = {"configured": False}
     settings = {
         "authMode": "manual", "workers": 9, "autoApiWorkers": 9,
         "obfs": "video", "fingerprint": "firefox", "turnTransport": "udp",
@@ -71,12 +74,25 @@ def main():
             settings.clear()
             settings.update(json.loads(request.post_data or "{}"))
             body = {"ok": True}
+        elif path == "/tunnel/auth" and method == "GET":
+            body = dict(tunnel_auth)
+        elif path == "/tunnel/auth" and method == "PUT":
+            tunnel_auth["configured"] = True
+            body = {"ok": True, "configured": True}
         elif path == "/vpn/status":
-            body = {"connected": False}
+            body = {"connected": vpn_connected["value"]}
+        elif path == "/vpn/connect" and method == "POST":
+            vpn_connected["value"] = True
+            body = {"ok": True}
+        elif path == "/vpn/disconnect" and method == "POST":
+            vpn_connected["value"] = False
+            body = {"ok": True}
         elif path == "/vk/state":
             body = {"hasToken": False, "fetching": False}
         elif path == "/captcha/state":
             body = {"pending": False}
+        elif path == "/captcha/result" and method == "POST":
+            body = {"ok": True}
         elif path == "/deploy/status":
             body = {"deploying": False}
         elif path == "/deploy/log":
@@ -85,6 +101,10 @@ def main():
             body = {"backend": "fixture", "ui": "test"}
         elif path == "/logs":
             body = []
+        elif path == "/logs/clear" and method == "POST":
+            body = {"ok": True}
+        elif path == "/deploy" and method == "POST":
+            body = {"ok": True}
         elif path == "/updates/lalune":
             body = {"hasUpdate": False}
         else:
@@ -98,6 +118,7 @@ def main():
             page = browser.new_page()
             page_errors = []
             page.on("pageerror", lambda error: page_errors.append(str(error)))
+            page.on("dialog", lambda dialog: dialog.accept())
             page.route("**/api/**", api_fixture)
             page.goto(base_url, wait_until="domcontentloaded")
             page.wait_for_function("document.querySelector('#profileList .profile') !== null")
@@ -105,7 +126,11 @@ def main():
 
             tabs = page.locator("button[data-page]")
             actual = [tabs.nth(i).get_attribute("data-page") for i in range(tabs.count())]
-            assert actual == EXPECTED, f"tab order mismatch: {actual}"
+            assert len(actual) == 5 and set(actual) == EXPECTED, f"five-tab set mismatch: {actual}"
+            assert page.locator("#page-connect > .connect-hero").count() == 1
+            assert page.locator("#page-connect > .card").count() == 1, "Connect must retain the clean 2.5.0 single-card composition"
+            assert page.locator("#topHeart").count() == 1 and page.locator("#topSwitch").count() == 1 and page.locator("#topSettings").count() == 1
+            assert page.locator("#topQr, #qrImage").count() == 0, "QR controls must remain absent"
 
             for name in EXPECTED:
                 page.locator(f'button[data-page="{name}"]').click()
@@ -116,27 +141,47 @@ def main():
                     f"active tab missing aria-current state: {name}"
                 )
                 assert page.locator(f'button[data-page="{name}"]').get_attribute("aria-pressed") is None
+                if name == "route":
+                    # Route is a full-screen dialog; close it before using bottom navigation again.
+                    page.locator("#routeClose").click()
+                    assert page.locator("#page-connect").evaluate("el => el.classList.contains('active')")
 
+            # The agreed design is a fixed 390px native-phone canvas on every
+            # device. Desktop must center that same canvas; it must not stretch,
+            # reflow, or switch to a desktop layout at wider viewport sizes.
             for width in WIDTHS:
                 page.set_viewport_size({"width": width, "height": 850})
                 page.wait_for_timeout(40)
-                dimensions = page.evaluate("""() => ({
-                  viewport: innerWidth,
-                  document: document.documentElement.scrollWidth,
-                  nav: (() => { const r=document.querySelector('.tabs').getBoundingClientRect();
-                    return {left:r.left,right:r.right,width:r.width}; })()
-                })""")
-                assert dimensions["document"] <= width, (
-                    f"horizontal overflow at {width}px: {dimensions}"
+                dimensions = page.evaluate("""() => {
+                  const body = document.body.getBoundingClientRect();
+                  const nav = document.querySelector('.tabs').getBoundingClientRect();
+                  return {
+                    viewport: innerWidth,
+                    body: {left: body.left, width: body.width, right: body.right},
+                    nav: {left: nav.left, width: nav.width, right: nav.right}
+                  };
+                }""")
+                expected_left = (width - 390) / 2
+                assert abs(dimensions["body"]["width"] - 390) <= 1, (
+                    f"phone canvas changed width at {width}px: {dimensions}"
                 )
-                assert dimensions["nav"]["left"] >= -1 and dimensions["nav"]["right"] <= width + 1, (
-                    f"bottom navigation escapes viewport at {width}px: {dimensions}"
+                assert abs(dimensions["body"]["left"] - expected_left) <= 1, (
+                    f"phone canvas is not centered at {width}px: {dimensions}"
+                )
+                assert abs(dimensions["nav"]["width"] - 370) <= 1, (
+                    f"bottom navigation changed width at {width}px: {dimensions}"
+                )
+                assert abs(dimensions["nav"]["left"] - (width - 370) / 2) <= 1, (
+                    f"bottom navigation is not centered at {width}px: {dimensions}"
                 )
 
             # Selecting another profile must round-trip through the API and refresh
             # the profile-specific hash shown on the Tunnel page.
             page.locator('button[data-page="connect"]').click()
+            page.locator("#topSwitch").click()
+            page.wait_for_function("!document.querySelector('#profileManagerOverlay').classList.contains('hidden')")
             page.locator('.profile[data-id="2"]').click()
+            page.wait_for_function("document.querySelector('#profileManagerOverlay').classList.contains('hidden')")
             page.wait_for_function("document.querySelector('#vkHashes').value === 'hash-two'")
             assert any(m == "POST" and path == "/configs/selected" for m, path, _ in calls), (
                 "profile selection did not reach backend API"
@@ -144,23 +189,116 @@ def main():
             assert page.locator("#vkHashes").is_disabled() is False
             assert page.locator("#vkHashes").evaluate("el => el.readOnly")
 
+            # Match the real panel guard: without a configured tunnel password,
+            # Connect must not call /vpn/connect. Provision the fixture only after
+            # proving the guarded path, then exercise connect/disconnect.
+            page.locator("#power").click()
+            page.wait_for_function('''() => document.querySelector("#toast").textContent.includes("Сначала задайте пароль туннеля")''')
+            assert not any(method == "POST" and path == "/vpn/connect" for method, path, _ in calls), (
+                "Connect bypassed the required tunnel-password guard"
+            )
+            assert page.locator("#page-settings").evaluate("el => el.classList.contains('active')"), (
+                "missing tunnel password did not direct the user to Tunnel settings"
+            )
+            page.locator('button[data-page="settings"]').click()
+            page.locator("#editTunnelAuth").click()
+            page.locator("#tunnelPassword").fill("fixture-tunnel-pass_123")
+            page.locator("#saveTunnelAuth").click()
+            page.wait_for_function('''() => document.querySelector("#tunnelAuthOverlay").classList.contains("hidden")''')
+            assert any(method == "PUT" and path == "/tunnel/auth" for method, path, _ in calls), "Tunnel password dialog did not persist to API"
+            page.wait_for_function('''() => document.querySelector("#tunnelAuthSummary").textContent.includes("сохранён")''')
+            page.locator('button[data-page="connect"]').click()
+
+            # With tunnel auth configured, power button must send connect/disconnect.
+            page.locator("#power").click()
+            page.wait_for_function("""() => document.querySelector("#toast").textContent.includes("Подключение запрошено")""")
+            page.wait_for_function("""() => document.querySelector("#power").getAttribute("aria-pressed") === "true" """)
+            page.locator("#power").click()
+            page.wait_for_function("""() => document.querySelector("#toast").textContent.includes("Отключение запрошено")""")
+            page.wait_for_function("""() => document.querySelector("#power").getAttribute("aria-pressed") === "false" """)
+            assert any(method == "POST" and path == "/vpn/connect" for method, path, _ in calls)
+            assert any(method == "POST" and path == "/vpn/disconnect" for method, path, _ in calls)
+
             # Direct rules are validated and persisted through the settings API.
             page.locator('button[data-page="route"]').click()
-            page.locator("#directDomains").fill("example.com\ncdn.example.com")
-            page.locator("#directIPs").fill("192.0.2.10\n192.0.2.0/24")
+            assert page.locator("#directDomains").count() == 1
+            assert page.locator("#directIPs").count() == 0, "Route tab must use one combined Direct list"
+            page.locator("#directDomains").fill("example.com\n192.0.2.1\n2001:db8::1")
             page.locator("#saveDirectRules").click()
             page.wait_for_function("document.querySelector('#routeMessage').textContent.includes('Правила сохранены')")
             saved = [json.loads(raw) for method, path, raw in calls
                      if method == "POST" and path == "/settings" and raw]
-            assert saved and saved[-1]["directDomains"] == "example.com\ncdn.example.com", (
+            assert saved and saved[-1]["directDomains"] == "example.com\n192.0.2.1\n2001:db8::1", (
                 "Direct domains were not persisted by the settings API"
             )
-            assert saved[-1]["directIPs"] == "192.0.2.10\n192.0.2.0/24", (
-                "Direct IP rules were not persisted by the settings API"
-            )
+            assert "directIPs" not in saved[-1], "Direct IP rules must not be sent to the settings API"
 
             assert page.locator("#page-route").is_visible()
             assert not page.locator("#deploySecretsOverlay").is_visible()
+            page.locator("#routeClose").click()
+
+            # Tunnel settings: changing the worker count must persist through /settings.
+            page.locator('button[data-page="settings"]').click()
+            page.locator("#workers").evaluate("""el => {
+              el.value = "11";
+              el.dispatchEvent(new Event("input", {bubbles:true}));
+            }""")
+            page.locator("#serverPeer").fill("192.0.2.55")
+            page.locator("#serverPeer").press("Tab")
+            page.wait_for_function("""() => document.querySelector("#toast").textContent.includes("Адрес сервера сохранён") """)
+            assert selected["profile"]["peer"] == "192.0.2.55", "server peer did not persist through selected-profile API"
+            page.locator("#vkAuthMode").select_option("auto_js")
+            page.locator("#turnTransport").select_option("tcp_tls")
+            page.locator("#captchaMode").select_option("manual")
+            page.locator("#saveSettings").click()
+            page.wait_for_function("""() => document.querySelector("#workersValue").textContent === "11" """)
+            saved_settings = [json.loads(raw) for method, path, raw in calls
+                              if method == "POST" and path == "/settings" and raw]
+            assert saved_settings and saved_settings[-1]["workers"] == 11, (
+                "Tunnel settings were not persisted"
+            )
+            assert saved_settings[-1]["vkAuthMode"] == "auto_js" and saved_settings[-1]["turnTransport"] == "tcp_tls" and saved_settings[-1]["captchaMode"] == "manual", (
+                "VK credential mode, transport, or CAPTCHA mode did not persist"
+            )
+
+            # Logs follow the original CSQTT LogsTab: opening the tab loads the
+            # live log stream; the terminal exposes copy and clear actions only.
+            # There is intentionally no manual refresh control in the original UI.
+            page.locator('button[data-page="logs"]').click()
+            page.wait_for_function("""() => document.querySelector("#logs").textContent.includes("Записей пока нет")""")
+            assert any(method == "GET" and path == "/logs" for method, path, _ in calls), (
+                "Opening Logs did not automatically load /logs"
+            )
+            assert page.locator("#refreshLogs").count() == 0, (
+                "Logs must match the original copy/clear-only terminal controls"
+            )
+            page.locator("#copyLogs").click()
+            page.wait_for_function("""() => document.querySelector("#toast").textContent.includes("Журнал выделен") || document.querySelector("#toast").textContent.includes("Журнал скопирован")""")
+            page.locator("#clearLogs").click()
+            page.wait_for_function("""() => document.querySelector("#toast").textContent.includes("Журнал очищен")""")
+            assert any(method == "POST" and path == "/logs/clear" for method, path, _ in calls), (
+                "Logs clear action did not reach backend"
+            )
+
+            # Deploy: validate the one-button flow against a deterministic API fixture.
+            # This proves the page constructs the expected request without SSHing anywhere.
+            page.locator('button[data-page="deploy"]').click()
+            page.locator("#deployHost").fill("192.0.2.50")
+            page.locator("#deployPassword").fill("fixture-ssh-password")
+            page.locator("#editDeployAuth").click()
+            page.locator("#mainPassword").fill("fixturetunnelpassword")
+            page.locator("#webLogin").fill("fixtureadmin")
+            page.locator("#webPassword").fill("fixturewebpassword")
+            page.locator("#saveDeployAuth").click()
+            page.wait_for_function("""() => document.querySelector("#deploySecretsOverlay").classList.contains("hidden")""")
+            page.locator("#startDeploy").click()
+            page.wait_for_function("""() => document.querySelector("#toast").textContent.includes("Деплой запущен")""")
+            deploy_requests = [json.loads(raw) for method, path, raw in calls
+                               if method == "POST" and path == "/deploy" and raw]
+            assert deploy_requests, "Deploy button did not call /deploy"
+            assert deploy_requests[-1]["host"] == "192.0.2.50"
+            assert deploy_requests[-1]["deviceId"] == "fixture-device"
+            assert deploy_requests[-1]["corePort"] == 47000 and deploy_requests[-1]["warpPort"] == 47002
 
             # A failed status endpoint must not be misreported as a real disconnect,
             # and deployment actions must remain blocked when operation state is unknown.
@@ -172,12 +310,105 @@ def main():
             assert "Не удалось получить состояние деплоя" in page.locator("#deployState").inner_text(), "unknown deploy state was presented as a completed/idle operation"
             assert page.locator("#startDeploy").is_disabled(), "deploy remained enabled while deploy state was unknown"
             assert not page_errors, f"uncaught browser errors: {page_errors}"
+
+            # Exercise the split MAIN/ISOLATED CAPTCHA Bridge. Page-controlled
+            # fragments and referrer must never select the redirect destination.
+            bridge_main_source = (ROOT / "captcha-bridge" / "captcha-bridge-main.js").read_text()
+            bridge_isolated_source = (ROOT / "captcha-bridge" / "captcha-bridge.js").read_text()
+            origin_policy_source = (ROOT / "captcha-bridge" / "origin-policy.js").read_text()
+            panel_origin = f"http://127.0.0.1:{server.server_port}"
+            vk_origin = "https://id.vk.com"
+            bridge_page = browser.new_page()
+            bridge_page.add_init_script("""
+              Object.defineProperty(document, 'referrer', { configurable: true, get: () => 'https://attacker.example/' });
+              Object.defineProperty(window, 'browser', { configurable: true, value: { storage: { local: {
+                get: (key) => Promise.resolve({ trustedPanelOrigin: PANEL_ORIGIN })
+              } } } });
+            """.replace("PANEL_ORIGIN", json.dumps(panel_origin)) + "\n" +
+                origin_policy_source + "\n" + bridge_main_source + "\n" + bridge_isolated_source)
+            bridge_page.route("**/api/**", api_fixture)
+            bridge_page.route(
+                panel_origin + "/",
+                lambda route: route.fulfill(
+                    status=200, content_type="text/html", body=HTML.read_text()
+                ),
+            )
+            def vk_bridge_fixture(token):
+                def handle(route):
+                    if "captchaNotRobot.check" in route.request.url:
+                        route.fulfill(
+                            status=200,
+                            content_type="application/json",
+                            body=json.dumps({"response": {"success_token": token}}),
+                        )
+                    else:
+                        route.fulfill(
+                            status=200,
+                            content_type="text/html",
+                            body="<html><body>VK fixture</body></html>",
+                        )
+                return handle
+
+            bridge_page.route(vk_origin + "/**", vk_bridge_fixture("fixture-bridge-success-token"))
+            bridge_page.goto(
+                vk_origin + "/captcha-fixture#"
+                + "lalune_panel=https%3A%2F%2Fattacker.example"
+                + "&lalune_session=fixture-bridge-session",
+                wait_until="domcontentloaded",
+            )
+            bridge_page.evaluate("() => { void fetch('/captchaNotRobot.check'); }")
+            try:
+                bridge_page.wait_for_function("() => location.origin === " + json.dumps(panel_origin) + " && location.pathname === '/'", timeout=10000)
+                bridge_page.wait_for_function(
+                    "() => document.querySelector('#toast').textContent.includes('CAPTCHA автоматически передана')",
+                    timeout=10000,
+                )
+            except Exception as error:
+                raise AssertionError(f"bridge failed to return to configured panel: {bridge_page.url}") from error
+            assert bridge_page.url.startswith(panel_origin + "/"), (
+                f"bridge did not return to the configured trusted panel origin: {bridge_page.url}"
+            )
+            bridge_posts = [
+                json.loads(raw) for method, path, raw in calls
+                if method == "POST" and path == "/captcha/result" and raw
+            ]
+            assert bridge_posts and bridge_posts[-1] == {
+                "sessionToken": "fixture-bridge-session",
+                "result": "fixture-bridge-success-token",
+            }, f"CAPTCHA bridge did not reach panel same-origin API: {bridge_posts!r}"
+            bridge_page.close()
+
+            # Missing or malformed trusted configuration must fail closed even
+            # when an attacker supplies both a destination fragment and referrer.
+            for configured_origin in ("", "https://panel.example.com/untrusted/path"):
+                blocked_page = browser.new_page()
+                blocked_page.add_init_script("""
+                  Object.defineProperty(document, 'referrer', { configurable: true, get: () => 'https://attacker.example/' });
+                  Object.defineProperty(window, 'browser', { configurable: true, value: { storage: { local: {
+                    get: (key) => Promise.resolve({ trustedPanelOrigin: CONFIGURED_ORIGIN })
+                  } } } });
+                """.replace("CONFIGURED_ORIGIN", json.dumps(configured_origin)) + "\n" +
+                    origin_policy_source + "\n" + bridge_main_source + "\n" + bridge_isolated_source)
+                blocked_page.route(vk_origin + "/**", vk_bridge_fixture("must-not-redirect"))
+                blocked_page.goto(
+                    vk_origin + "/captcha-fixture#"
+                    + "lalune_panel=https%3A%2F%2Fattacker.example"
+                    + "&lalune_session=fixture-blocked-session",
+                    wait_until="domcontentloaded",
+                )
+                blocked_page.evaluate("() => { void fetch('/captchaNotRobot.check'); }")
+                blocked_page.wait_for_timeout(300)
+                assert blocked_page.url.startswith(vk_origin + "/"), (
+                    f"bridge redirected without a valid configured origin: {blocked_page.url}"
+                )
+                blocked_page.close()
+
             browser.close()
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
-    print("CSQTT_CHROMIUM_UI_SMOKE_PASS widths=320,360,390,768,1280 tabs=5 profile-api=PASS direct-settings-api=PASS")
+    print("CSQTT_CHROMIUM_UI_SMOKE_PASS widths=320,360,390,768,1280 tabs=5 profile-api=PASS connect-disconnect=PASS tunnel-settings=PASS direct-settings-api=PASS deploy-api=PASS logs=PASS captcha-bridge-trusted-origin=PASS captcha-bridge-fail-closed=PASS")
 
 
 if __name__ == "__main__":

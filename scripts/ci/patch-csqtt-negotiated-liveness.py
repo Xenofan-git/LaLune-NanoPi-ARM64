@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Patch only disposable pinned CSQTT client/server clones for negotiated liveness E2E.
+"""Apply the negotiated WIRE-4 liveness patch to pinned CSQTT source checkouts.
 
-This is a CI fixture, not a production artifact patch. It implements an authenticated
-PING/PONG control exchange gated by WIRE-4/TUNCONF capability confirmation.
+The release workflow builds its production ARM64 client/server binaries from these
+patched checkouts. The recovery E2E workflow applies the same patch plus separate
+CI-only TURN/test instrumentation to disposable clones. No upstream repository is
+modified. The authenticated PING/PONG exchange is gated by WIRE-4/TUNCONF capability.
 """
 from pathlib import Path
 
@@ -13,6 +15,17 @@ def replace_once(path: str, old: str, new: str, label: str) -> None:
     if count != 1:
         raise SystemExit(f"{label}: expected exactly one match in {path}, found {count}")
     p.write_text(source.replace(old, new, 1), encoding="utf-8")
+
+def replace_if_present(path: str, old: str, new: str, label: str) -> None:
+    p = Path(path)
+    source = p.read_text(encoding="utf-8")
+    count = source.count(old)
+    if count == 0:
+        return
+    if count != 1:
+        raise SystemExit(f"{label}: expected at most one match in {path}, found {count}")
+    p.write_text(source.replace(old, new, 1), encoding="utf-8")
+
 
 # Negotiate a new revision only in the disposable clones. Preserve WIRE-3 server
 # compatibility for old clients; only WIRE-4 clients get the liveness capability.
@@ -35,6 +48,23 @@ replace_once("client-source/rust-client/session.rs",
              'b"GETCONF:9000|device|password|7|generation-id|1|9|CSQTT-WIRE-3"',
              'b"GETCONF:9000|device|password|7|generation-id|1|9|CSQTT-WIRE-4"',
              "update WIRE-4 first registration fixture")
+
+# The pinned upstream server repository also vendors a client crate used by
+# the release protocol regression suite. Its fixtures share server-source/shared
+# and must expect WIRE-4 after the negotiated revision is updated.
+replace_once("server-source/rust-client/protocol.rs",
+             '"GETCONF:9000|device|password|7|salt|4||CSQTT-WIRE-3"',
+             '"GETCONF:9000|device|password|7|salt|4||CSQTT-WIRE-4"',
+             "update vendored client WIRE-4 request fixture")
+replace_once("server-source/rust-client/protocol.rs",
+             '"GETCONF:9000|device|password|7|salt|4|36|CSQTT-WIRE-3"',
+             '"GETCONF:9000|device|password|7|salt|4|36|CSQTT-WIRE-4"',
+             "update vendored client WIRE-4 optional capability fixture")
+replace_once("server-source/rust-client/session.rs",
+             'b"GETCONF:9000|device|password|7|generation-id|1|9|CSQTT-WIRE-3"',
+             'b"GETCONF:9000|device|password|7|generation-id|1|9|CSQTT-WIRE-4"',
+             "update vendored client WIRE-4 registration fixture")
+
 
 replace_once("server-source/rust-server/protocol.rs",
 '''fn is_supported_wire_protocol(value: &str) -> bool {
@@ -134,6 +164,23 @@ replace_once("server-source/rust-server/protocol.rs",
                                 device.ip, dns, client_port
                             )
                         }''', "server confirms negotiated liveness")
+
+# The LaLune adaptation injects a server/client round-trip test before this
+# patch runs. Keep that test aligned with the negotiated WIRE-4 request and
+# the WIRE-4 TUNCONF capability marker; otherwise the release server test
+# fails against its own intentionally upgraded protocol fixture.
+replace_if_present("server-source/rust-server/protocol.rs",
+             '"GETCONF:9000|wire-device|wire-password|7|ci-salt|1|1|CSQTT-WIRE-3"',
+             '"GETCONF:9000|wire-device|wire-password|7|ci-salt|1|1|CSQTT-WIRE-4"',
+             "update injected server WIRE-4 request fixture")
+replace_if_present("server-source/rust-server/protocol.rs",
+             'b"TUNCONF:10.67.68.42:1.1.1.1,8.8.8.8:0:stream-v2"',
+             'b"TUNCONF:10.67.68.42:1.1.1.1,8.8.8.8:0:stream-v2:liveness-v1"',
+             "update injected WIRE-4 TUNCONF fixture")
+replace_if_present("server-source/rust-server/protocol.rs",
+             '["10.67.68.42", "1.1.1.1,8.8.8.8", "0", "stream-v2"]',
+             '["10.67.68.42", "1.1.1.1,8.8.8.8", "0", "stream-v2", "liveness-v1"]',
+             "update injected WIRE-4 TUNCONF parser assertion")
 
 # Client-side codec and runtime. PINGs use the existing authenticated packet envelope.
 replace_once("client-source/rust-client/session.rs",
@@ -349,4 +396,4 @@ replace_once("client-source/rust-client/protocol.rs",
     ]''', "classify liveness as control")
 
 # Server advertises liveness only to WIRE-4 clients; WIRE-3 clients retain legacy behavior.
-print("PASS: installed disposable WIRE-4 negotiated authenticated liveness PING/PONG in pinned client/server clones.")
+print("PASS: installed WIRE-4 negotiated authenticated liveness PING/PONG in pinned client/server source clones.")

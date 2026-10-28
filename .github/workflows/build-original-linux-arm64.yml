@@ -13,6 +13,7 @@ on:
       - test/csqtt-process-recovery-e2e
       - feature/csqtt-original-app-panel
       - fix/socks5-dynamic-address
+      - fix/production-recovery-single-artifact
   workflow_dispatch:
 
 permissions:
@@ -51,17 +52,24 @@ jobs:
         run: |
           set -euxo pipefail
           test -s captcha-bridge/manifest.json
+          test -s captcha-bridge/captcha-bridge-main.js
           test -s captcha-bridge/captcha-bridge.js
+          test -s captcha-bridge/origin-policy.js
+          test -s captcha-bridge/options.html
+          test -s captcha-bridge/options.js
           test -s captcha-bridge/README.md
           python3 -m json.tool captcha-bridge/manifest.json >/dev/null
+          node --check captcha-bridge/captcha-bridge-main.js
           node --check captcha-bridge/captcha-bridge.js
+          node --check captcha-bridge/origin-policy.js
+          node --check captcha-bridge/options.js
       - name: Validate CSQTT panel route UI
         run: |
           set -euxo pipefail
           test -f adapt/csqtt-panel-preview.html
           grep -q 'id="page-route"' adapt/csqtt-panel-preview.html
           grep -q 'id="directDomains"' adapt/csqtt-panel-preview.html
-          grep -q 'id="directIPs"' adapt/csqtt-panel-preview.html
+          ! grep -q 'id="directIPs"' adapt/csqtt-panel-preview.html
           grep -q 'id="saveDirectRules"' adapt/csqtt-panel-preview.html
           test "$(grep -o 'data-page="' adapt/csqtt-panel-preview.html | wc -l)" -eq 5
           grep -q 'function directRuleErrors()' adapt/csqtt-panel-preview.html
@@ -69,9 +77,9 @@ jobs:
           grep -q 't.applyDirectRoutingLocked()' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -q 't.cleanupDirectRoutingLocked()' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -q 'func TestDirectDomainValidation' adapt/headless_main_test.go
-          grep -q 'func TestNormalizeDirectIPs' adapt/headless_main_test.go
+          grep -q 'func TestDirectDomainValidation' adapt/headless_main_test.go
           grep -Fq 'func TestDirectPlanTransitions' adapt/headless_main_test.go
-          grep -Fq 'func prepareDirectPlan(domainsRaw, ipsRaw string)' adapt/apply-pinned-original-linux-arm64-policy.py
+          grep -Fq 'func prepareDirectPlan(domainsRaw string)' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -Fq 'func writeDirectFileAtomic(path string, data []byte, mode os.FileMode) error' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -Fq 'writeDirectFileAtomic(directDnsmasqMain' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -Fq 'strings.Split(string(data),' adapt/apply-pinned-original-linux-arm64-policy.py
@@ -159,6 +167,8 @@ jobs:
         run: |
           set -euxo pipefail
           cp ../../../adapt/nanopi.js web/api.js
+          # Pinned upstream pubspec declares assets/; ensure the directory exists in the clean checkout.
+          mkdir -p assets
           flutter pub get
           flutter build web --release
           # The CSQTT-native panel is standalone HTML backed by the existing /api contract.
@@ -246,6 +256,7 @@ jobs:
           cp adapt/headless_api_contract_test.go upstream-lalune/Desktop/Linux/headless_api_contract_test.go
           cp adapt/vktoken_input_test.go upstream-lalune/Desktop/Libs/vktoken_input_test.go
           cp adapt/linux_tun_vm_test.go upstream-lalune/Desktop/Linux/linux_tun_vm_test.go
+          cp adapt/linux_core_argv_test.go upstream-lalune/Desktop/Linux/linux_core_argv_test.go
           mkdir -p upstream-lalune/Desktop/Linux/frontend
           cp -a upstream-lalune/Frontend/Core/build/web/. upstream-lalune/Desktop/Linux/frontend/
           # The binary's embedded fallback UI uses the CSQTT-style panel preview.
@@ -358,54 +369,58 @@ jobs:
           file client-assets/client-linux-arm64-upstream
           readelf -h client-assets/client-linux-arm64-upstream | grep -Fq 'AArch64'
           echo PINNED_UPSTREAM_RUNTIME_CSQTT_CLIENT_BASELINE_PASS
-      - name: Build isolated patched CSQTT client with RJS manual CAPTCHA fallback
+      - name: Build production-patched CSQTT client and server with negotiated recovery
         run: |
           set -euxo pipefail
+          mkdir -p client-assets
           git clone https://github.com/Endlad2/csqtt-core.git client-source
           git -C client-source checkout --detach 3eafb7ee868f5f2690edf3b0326153813f88eb5f
           test "$(git -C client-source rev-parse HEAD)" = "3eafb7ee868f5f2690edf3b0326153813f88eb5f"
+          git clone --depth 1 --branch v2.1.9 https://github.com/amurcanov/csqtt.git server-source
+          test "$(git -C server-source describe --tags --exact-match)" = "v2.1.9"
+          cmp client-source/shared/wire_protocol.rs server-source/shared/wire_protocol.rs
           rustup toolchain install 1.97.1 --profile minimal
           rustup target add aarch64-unknown-linux-gnu --toolchain 1.97.1
           python3 scripts/ci/patch-csqtt-rjs-manual-fallback.py
           grep -F 'RJS: ошибка, fallback на ручную CAPTCHA' client-source/rust-client/captcha.rs
           grep -F 'self.webview(stream_id, captcha, "manual", Duration::from_secs(60))' client-source/rust-client/captcha.rs
+          # Run the isolation audit against pristine upstream v2.1.9 before adaptation.
+          python3 adapt/audit-csqtt-isolation.py
+          python3 adapt/patch-csqtt-lalune-source.py
+          # This is now part of the release build, not only an experimental fixture.
+          # The same negotiated WIRE-4 liveness implementation is applied to the
+          # pinned production client and its matching isolated server source.
+          python3 scripts/ci/patch-csqtt-negotiated-liveness.py
+          grep -Fq 'CSQTT_LIVENESS_V1' client-source/rust-client/session.rs
+          grep -Fq 'CSQTT_LIVENESS_V1' server-source/rust-server/protocol.rs
+          grep -Fq 'CSQTT-WIRE-4' client-source/shared/wire_protocol.rs
+          grep -Fq 'CSQTT-WIRE-4' server-source/shared/wire_protocol.rs
           CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
             cargo +1.97.1 build --locked --release --target aarch64-unknown-linux-gnu --manifest-path client-source/rust-client/Cargo.toml --bin client
           install -m 0755 client-source/rust-client/target/aarch64-unknown-linux-gnu/release/client client-assets/client-linux-arm64
-          printf '%s\n' 'source=Endlad2/csqtt-core@3eafb7ee868f5f2690edf3b0326153813f88eb5f' 'patch=rjs-manual-captcha-fallback-v1' > client-assets/VERSION
+          printf '%s\n' 'source=Endlad2/csqtt-core@3eafb7ee868f5f2690edf3b0326153813f88eb5f' 'patch=rjs-manual-captcha-fallback-v1' 'recovery=negotiated-wire-4-liveness-v1' > client-assets/VERSION
           file client-assets/client-linux-arm64
           readelf -h client-assets/client-linux-arm64 | grep -Fq 'AArch64'
           strings -a client-assets/client-linux-arm64 | grep -Fq 'fallback'
+          strings -a client-assets/client-linux-arm64 | grep -Fq 'CSQTT_LIVENESS_V1'
           sha256sum client-assets/client-linux-arm64 | tee client-assets/SHA256SUMS
-          echo PATCHED_RJS_MANUAL_FALLBACK_ARM64_CLIENT_BUILD_PASS
-      - name: Audit whether built runtime ARM64 client contains negotiated liveness
+          echo PRODUCTION_WIRE4_LIVENESS_ARM64_CLIENT_BUILD_PASS
+      - name: Audit production ARM64 client liveness marker
         run: |
-          set -euo pipefail
-          if strings -a client-assets/client-linux-arm64 | grep -Fq 'CSQTT_LIVENESS_V1'; then
-            echo "PASS: runtime ARM64 client contains CSQTT_LIVENESS_V1."
-            echo "- Runtime ARM64 client binary contains the negotiated liveness protocol marker." >> "$GITHUB_STEP_SUMMARY"
-            echo "CSQTT_RUNTIME_ARM64_LIVENESS_MARKER_PRESENT"
-          else
-            echo "NOT INCLUDED: runtime ARM64 client does not contain CSQTT_LIVENESS_V1."
-            echo "- LIMITATION: runtime ARM64 client does not contain CSQTT_LIVENESS_V1; negotiated-liveness E2E patches disposable source clones only and is not included in this release binary." >> "$GITHUB_STEP_SUMMARY"
-            echo "CSQTT_RUNTIME_ARM64_LIVENESS_MARKER_ABSENT"
-          fi
+          set -euxo pipefail
+          strings -a client-assets/client-linux-arm64 | grep -Fq 'CSQTT_LIVENESS_V1'
+          echo "PASS: release ARM64 client includes negotiated liveness; the matching WIRE-4 server is built from the same patched source tree."
+          echo "CSQTT_RUNTIME_ARM64_LIVENESS_MARKER_PRESENT"
       - name: Exercise LaLune installer lifecycle in disposable root
         run: |
           set -euxo pipefail
           chmod 0755 adapt/test-csqtt-lalune-installer.sh
           bash -n adapt/test-csqtt-lalune-installer.sh
           bash adapt/test-csqtt-lalune-installer.sh
-      - name: Audit upstream CSQTT isolation hazards
-        run: |
-          set -euxo pipefail
-          git clone --depth 1 --branch v2.1.9 https://github.com/amurcanov/csqtt.git server-source
-          python3 adapt/audit-csqtt-isolation.py
       - name: Patch isolated LaLune CSQTT dataplane
         run: |
           set -euxo pipefail
-          python3 adapt/patch-csqtt-lalune-source.py
           grep -Fq 'server_encrypted_tunconf_roundtrips_through_real_client_parser' server-source/rust-server/protocol.rs
           grep -Fq 'include!("../rust-client/protocol.rs");' server-source/rust-server/protocol.rs
           ! grep -R -nE 'csqtt1|10\\.66\\.67' server-source/rust-server --include='*.rs'
@@ -465,6 +480,7 @@ jobs:
           aarch64-linux-gnu-readelf -d "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64" > "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-needed.txt"
           grep -Fq 'NEEDED' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-needed.txt"
           qemu-aarch64 -L /usr/aarch64-linux-gnu "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64" --help > "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
+          test "$(qemu-aarch64 -L /usr/aarch64-linux-gnu "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-linux-arm64" --protocol-revision)" = "CSQTT-WIRE-4"
           # Run the upstream Rust unit tests under ARM64 emulation, not only --help.
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER="qemu-aarch64 -L /usr/aarch64-linux-gnu" \
             CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
@@ -474,6 +490,47 @@ jobs:
           grep -Fq -- '--web-port' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
           grep -Fq -- '--config-dir' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
           (cd "$GITHUB_WORKSPACE" && sha256sum server-assets/csqtt-lalune-linux-arm64 | tee -a server-assets/SHA256SUMS)
+          # Generate provenance for the exact newly-built binary. The legacy JSON
+          # extracted from the v2.1.9 APK describes WIRE-3 assets and must never
+          # be reused as metadata for this WIRE-4 server.
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re, subprocess
+          binary = pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "server-assets/csqtt-lalune-linux-arm64"
+          digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+          source_commit = subprocess.check_output(
+              ["git", "-C", str(pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "server-source"), "rev-parse", "HEAD"],
+              text=True,
+          ).strip()
+          elf = subprocess.check_output(["aarch64-linux-gnu-readelf", "-h", str(binary)], text=True)
+          if not re.search(r"^\s*Class:\s+ELF64\s*$", elf, re.M) or not re.search(r"^\s*Machine:\s+AArch64\s*$", elf, re.M):
+              raise SystemExit("provenance generation refused: binary is not ELF64 AArch64")
+          if subprocess.check_output(["qemu-aarch64", "-L", "/usr/aarch64-linux-gnu", str(binary), "--protocol-revision"], text=True).strip() != "CSQTT-WIRE-4":
+              raise SystemExit("provenance generation refused: protocol is not CSQTT-WIRE-4")
+          metadata = {
+              "schemaVersion": 1,
+              "artifact": "csqtt-lalune-linux-arm64",
+              "producer": "Xenofan-git/LaLune-NanoPi-ARM64",
+              "sourceRepository": "amurcanov/csqtt",
+              "sourceCommit": source_commit,
+              "sourceTag": "v2.1.9",
+              "adaptation": "LaLune NanoPi isolated server with negotiated WIRE-4 liveness",
+              "wireProtocolRevision": "CSQTT-WIRE-4",
+              "target": "aarch64-unknown-linux-gnu",
+              "elfClass": "ELF64",
+              "elfMachine": "AArch64",
+              "sizeBytes": binary.stat().st_size,
+              "sha256": digest,
+              "buildCommit": os.environ["GITHUB_SHA"],
+              "buildRunId": os.environ["GITHUB_RUN_ID"],
+          }
+          out = binary.parent / "csqtt.server-provenance.json"
+          out.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+          print(json.dumps(metadata, indent=2, sort_keys=True))
+          PY
+          # Drop the checksum captured for the legacy WIRE-3 JSON before
+          # recording the freshly generated WIRE-4 provenance document.
+          sed -i '\|  .*csqtt.server-provenance.json$|d' "$GITHUB_WORKSPACE/server-assets/SHA256SUMS"
+          sha256sum "$GITHUB_WORKSPACE/server-assets/csqtt.server-provenance.json" | tee -a "$GITHUB_WORKSPACE/server-assets/SHA256SUMS"
       - name: Build isolated CSQTT server for Linux x86_64
         working-directory: server-source/rust-server
         run: |
@@ -498,10 +555,14 @@ jobs:
           sha256sum server-assets/LaLuneTokenFetcher_Linux_ARM64.zip | tee -a server-assets/SHA256SUMS
           test -s server-assets/LaLuneTokenFetcher_Linux_ARM64.zip
           mkdir -p /tmp/captcha-bridge-package/captcha-bridge
-          cp captcha-bridge/manifest.json captcha-bridge/captcha-bridge.js captcha-bridge/README.md /tmp/captcha-bridge-package/captcha-bridge/
+          cp captcha-bridge/manifest.json captcha-bridge/captcha-bridge-main.js captcha-bridge/captcha-bridge.js captcha-bridge/origin-policy.js captcha-bridge/options.html captcha-bridge/options.js captcha-bridge/README.md /tmp/captcha-bridge-package/captcha-bridge/
           (cd /tmp/captcha-bridge-package && zip -qr "$GITHUB_WORKSPACE/server-assets/LaLune-CAPTCHA-Bridge.zip" captcha-bridge)
           sha256sum server-assets/LaLune-CAPTCHA-Bridge.zip | tee -a server-assets/SHA256SUMS
+          unzip -l server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/captcha-bridge-main.js'
           unzip -l server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/captcha-bridge.js'
+          unzip -l server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/origin-policy.js'
+          unzip -l server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/options.html'
+          unzip -l server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/options.js'
           cat > server-assets/install-vk-chromium.sh <<'SH'
           #!/bin/sh
           set -eu
@@ -523,6 +584,7 @@ jobs:
           rm -rf dist && mkdir -p dist
           install -m 0755 client-assets/client-linux-arm64 dist/client-linux-arm64
           install -m 0644 client-assets/VERSION dist/CSQTT_CLIENT_VERSION
+          printf '%s\n' 'CSQTT-WIRE-4' > dist/CSQTT_SERVER_PROTOCOL
           cp upstream-lalune/Desktop/Linux/lalune-original-linux-arm64 dist/
           install -m 0755 client-tun-tests-arm64 dist/client-tun-tests-arm64
           cp upstream-lalune/Core/DeployManager/target/aarch64-unknown-linux-gnu/release/deploy-manager dist/
@@ -569,6 +631,22 @@ jobs:
           ! grep -Fq 'uninstall-csqtt-lalune.sh' adapt/install-original-linux-backend.sh
           test -s dist/server-assets/csqtt-lalune-linux-arm64
           test -s dist/server-assets/csqtt-lalune-linux-amd64
+          test -s dist/server-assets/csqtt.server-provenance.json
+          python3 - <<'PY'
+          import hashlib, json, pathlib
+          root = pathlib.Path("dist/server-assets")
+          binary = root / "csqtt-lalune-linux-arm64"
+          metadata = json.loads((root / "csqtt.server-provenance.json").read_text())
+          assert metadata["artifact"] == binary.name
+          assert metadata["wireProtocolRevision"] == "CSQTT-WIRE-4"
+          assert metadata["target"] == "aarch64-unknown-linux-gnu"
+          assert metadata["elfClass"] == "ELF64"
+          assert metadata["elfMachine"] == "AArch64"
+          assert metadata["sizeBytes"] == binary.stat().st_size
+          assert metadata["sha256"] == hashlib.sha256(binary.read_bytes()).hexdigest()
+          assert metadata["sourceCommit"] and metadata["buildCommit"] and metadata["buildRunId"]
+          assert "WIRE-3" not in json.dumps(metadata)
+          PY
           test -s dist/server-assets/csqtt-lalune-help.txt
           test -s dist/server-assets/csqtt-lalune-amd64-help.txt
           test -x dist/server-assets/deploy-csqtt-lalune.sh
@@ -592,7 +670,11 @@ jobs:
           test -s dist/server-assets/LaLuneTokenFetcher_Linux_ARM64.zip
           test -s dist/server-assets/LaLune-CAPTCHA-Bridge.zip
           unzip -l dist/server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/manifest.json'
+          unzip -l dist/server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/captcha-bridge-main.js'
           unzip -l dist/server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/captcha-bridge.js'
+          unzip -l dist/server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/origin-policy.js'
+          unzip -l dist/server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/options.html'
+          unzip -l dist/server-assets/LaLune-CAPTCHA-Bridge.zip | grep -Fq 'captcha-bridge/options.js'
           test -s dist/server-assets/install-vk-chromium.sh
           cp adapt/csqtt-panel-preview.html dist/csqtt-panel-preview.html
           mkdir -p dist/web-dist
@@ -610,51 +692,6 @@ jobs:
         with:
           name: lalune-original-linux-arm64
           path: lalune-original-linux-arm64.tar.gz
-          if-no-files-found: error
-
-      - name: Build minimal isolated NanoPi deployment package
-        run: |
-          set -euxo pipefail
-          rm -rf dist-csqtt-lalune
-          mkdir -p dist-csqtt-lalune
-          install -m 0755 server-assets/csqtt-lalune-linux-arm64 dist-csqtt-lalune/
-          install -m 0755 server-assets/deploy-csqtt-lalune.sh dist-csqtt-lalune/
-          cat > dist-csqtt-lalune/README.txt <<'EOF'
-          CSQTT LaLune isolated ARM64 deployment package, derived from the original CSQTT v2.1.9 deployment flow.
-          
-          CONTENTS
-          - csqtt-lalune-linux-arm64: isolated ARM64 server binary
-          - deploy-csqtt-lalune.sh: namespaced original deploy.sh with the upstream install, health-check and uninstall sequence
-          
-          SAFETY
-          - Run only on a disposable or explicitly authorized Linux ARM64 host with systemd, iproute2 and iptables.
-          - Dedicated resources: csqtt-lalune.service, UDP 47000, TCP 47002, TUN csqtt-lalune0,
-            subnet 10.67.68.0/24, policy tables 47001/47066, marks 0x6741/0x6742.
-          - Config, binary, service, helper/timer names, firewall markers and sysctl filenames are namespaced.
-          - An unrelated process already using UDP/47000 is never killed; deployment fails closed.
-          - Uninstall preserves /etc/csqtt-lalune persistent database/configuration, as the original CSQTT flow does.
-          
-          VALIDATION STATUS
-          The API-to-SSH install/uninstall E2E must pass in the disposable ARM64 system VM before production use.
-          This package does not authorize deployment to NanoPi.
-          EOF
-          (
-            cd dist-csqtt-lalune
-            sha256sum csqtt-lalune-linux-arm64 deploy-csqtt-lalune.sh README.txt > SHA256SUMS
-            sha256sum -c SHA256SUMS
-            test -x deploy-csqtt-lalune.sh
-             test ! -e deploy.sh
-             test ! -e install-csqtt-lalune.sh
-             test ! -e uninstall-csqtt-lalune.sh
-            ! find . -maxdepth 1 -iname '*deploy-manager*' | grep -q .
-          )
-          tar -C dist-csqtt-lalune -czf csqtt-lalune-nanopi-arm64-isolated.tar.gz .
-          tar -tzf csqtt-lalune-nanopi-arm64-isolated.tar.gz | sort
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: csqtt-lalune-nanopi-arm64-isolated
-          path: csqtt-lalune-nanopi-arm64-isolated.tar.gz
           if-no-files-found: error
 
   arm64-system-vm:

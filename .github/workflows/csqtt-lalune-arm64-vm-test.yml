@@ -31,8 +31,11 @@ jobs:
           test -s vm/real/server-assets/csqtt-lalune-linux-arm64
           test -x vm/real/server-assets/deploy-csqtt-lalune.sh
           test -s vm/real/client-linux-arm64
+          grep -Fxq 'CSQTT-WIRE-4' vm/real/CSQTT_SERVER_PROTOCOL
           grep -Fq 'source=Endlad2/csqtt-core@3eafb7ee868f5f2690edf3b0326153813f88eb5f' vm/real/CSQTT_CLIENT_VERSION
           grep -Fq 'patch=rjs-manual-captcha-fallback-v1' vm/real/CSQTT_CLIENT_VERSION
+          grep -Fq 'recovery=negotiated-wire-4-liveness-v1' vm/real/CSQTT_CLIENT_VERSION
+          strings -a vm/real/client-linux-arm64 | grep -Fq 'CSQTT_LIVENESS_V1'
           sha256sum vm/real/client-linux-arm64
           file vm/real/client-linux-arm64
           test -x vm/real/client-tun-tests-arm64
@@ -74,6 +77,7 @@ jobs:
             - iptables
             - iptables-persistent
             - nftables
+            - dnsmasq-base
             - systemd
             - openssh-server
             - python3-cryptography
@@ -235,63 +239,77 @@ jobs:
             echo REAL_ARM64_CLIENT_VK_HASH_VALIDATION_PASS
           '
 
-      - name: Test Direct routing policy with real Linux kernel routes
+      - name: Test generated-shape Direct IPv4 and IPv6 policy with real nftables and Linux routes
         run: |
           set -euo pipefail
           ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo bash -se' <<'DIRECT_TEST'
           set -euo pipefail
-          # SSH can come up while cloud-init is still installing packages.
-          # Wait for cloud-init and then poll for nftables; do not race apt locks.
           cloud-init status --wait || true
-          for attempt in $(seq 1 60); do
-            command -v nft >/dev/null 2>&1 && break
-            sleep 2
-          done
           command -v nft >/dev/null
+          command -v dnsmasq >/dev/null
           cleanup() {
-            ip rule del pref 22010 2>/dev/null || true
-            ip rule del pref 22020 2>/dev/null || true
+            ip rule del pref 22010 fwmark 0x4d53/0xffff lookup main 2>/dev/null || true
+            ip -6 rule del pref 22010 fwmark 0x4d53/0xffff lookup main 2>/dev/null || true
+            ip rule del pref 22020 from 192.168.5.0/24 lookup 202 2>/dev/null || true
+            ip -6 rule del pref 22020 from fd00:5::/64 lookup 202 2>/dev/null || true
+            ip route del default dev eth1 table 202 2>/dev/null || true
+            ip -6 route del default dev eth1 table 202 2>/dev/null || true
             ip route del default dev direct-test0 2>/dev/null || true
-            ip route del default dev csqtt-test0 table 202 2>/dev/null || true
+            ip -6 route del default dev direct-test0 2>/dev/null || true
             ip link del direct-test0 2>/dev/null || true
-            ip link del csqtt-test0 2>/dev/null || true
-            nft delete table inet lalune_direct_test 2>/dev/null || true
+            ip link del eth1 2>/dev/null || true
+            nft delete table inet lalune_direct 2>/dev/null || true
           }
           cleanup
           trap cleanup EXIT
           ip link add direct-test0 type dummy
-          ip link add csqtt-test0 type dummy
+          ip link add eth1 type dummy
           ip link set direct-test0 up
-          ip link set csqtt-test0 up
-          # Route lookups with iif model forwarded traffic, which requires IPv4 forwarding.
+          ip link set eth1 up
           sysctl -w net.ipv4.ip_forward=1
-          # Give the simulated client subnet a connected route so Linux accepts
-          # route lookups sourced from a client address in that subnet.
-          ip addr add 192.168.5.1/24 dev csqtt-test0
+          sysctl -w net.ipv6.conf.all.forwarding=1
+          ip addr add 192.168.5.1/24 dev eth1
+          ip -6 addr add fd00:5::1/64 dev eth1
           ip route add default dev direct-test0
-          ip route add default dev csqtt-test0 table 202
-          ip rule add pref 22010 fwmark 0x4c4c/0xffff lookup main
+          ip -6 route add default dev direct-test0 metric 1
+          ip route add default dev eth1 table 202
+          ip -6 route add default dev eth1 table 202
           ip rule add pref 22020 from 192.168.5.0/24 lookup 202
-          nft -f - <<'NFT'
-          table inet lalune_direct_test {
+          ip -6 rule add pref 22020 from fd00:5::/64 lookup 202
+          cat >/tmp/lalune-direct-generated.nft <<'NFT'
+          table inet lalune_direct {
             set direct4 { type ipv4_addr; flags interval; elements = { 203.0.113.10 } }
+            set direct6 { type ipv6_addr; flags interval; elements = { 2001:db8::10 } }
             chain prerouting {
               type filter hook prerouting priority -150; policy accept;
-              ip saddr 192.168.5.0/24 ip daddr @direct4 meta mark set 0x4c4c
+              ip saddr 192.168.5.0/24 ip daddr @direct4 meta mark set 0x4d53
+              iifname "eth1" ip6 daddr @direct6 meta mark set 0x4d53
             }
           }
           NFT
-          # Model forwarded packets entering from the client-side TUN. Without
-          # iif, Linux treats the supplied source as locally originated and may
-          # reject a source address that is not assigned to this guest.
-          direct="$(ip -4 route get 203.0.113.10 from 192.168.5.2 iif csqtt-test0 mark 0x4c4c)"
-          tunneled="$(ip -4 route get 203.0.113.10 from 192.168.5.2 iif csqtt-test0)"
-          printf 'DIRECT_MARK_ROUTE %s\n' "$direct"
-          printf 'UNMARKED_TUNNEL_ROUTE %s\n' "$tunneled"
-          grep -q 'dev direct-test0' <<<"$direct"
-          grep -q 'dev csqtt-test0 table 202' <<<"$tunneled"
-          nft list table inet lalune_direct_test | grep -q '203.0.113.10'
-          echo DIRECT_KERNEL_POLICY_ROUTE_PASS
+          nft -c -f /tmp/lalune-direct-generated.nft
+          nft -f /tmp/lalune-direct-generated.nft
+          cat >/tmp/lalune-direct-dnsmasq.conf <<'DNS'
+          port=0
+          interface=lo
+          bind-interfaces
+          nftset=/example.com/4#inet#lalune_direct#direct4
+          nftset=/example.com/6#inet#lalune_direct#direct6
+          DNS
+          dnsmasq --test --conf-file=/tmp/lalune-direct-dnsmasq.conf
+          ip rule add pref 22010 fwmark 0x4d53/0xffff lookup main
+          ip -6 rule add pref 22010 fwmark 0x4d53/0xffff lookup main
+          direct4="$(ip -4 route get 203.0.113.10 from 192.168.5.2 iif eth1 mark 0x4d53)"
+          tunnel4="$(ip -4 route get 203.0.113.10 from 192.168.5.2 iif eth1)"
+          direct6="$(ip -6 route get 2001:db8::10 from fd00:5::2 iif eth1 mark 0x4d53)"
+          tunnel6="$(ip -6 route get 2001:db8::10 from fd00:5::2 iif eth1)"
+          printf 'DIRECT_IPV4_ROUTE %s\nTUNNEL_IPV4_ROUTE %s\nDIRECT_IPV6_ROUTE %s\nTUNNEL_IPV6_ROUTE %s\n' "$direct4" "$tunnel4" "$direct6" "$tunnel6"
+          grep -q 'dev direct-test0' <<<"$direct4"
+          grep -q 'dev eth1 table 202' <<<"$tunnel4"
+          grep -q 'dev direct-test0' <<<"$direct6"
+          grep -q 'dev eth1 table 202' <<<"$tunnel6"
+          nft list table inet lalune_direct | grep -q '2001:db8::10'
+          echo DIRECT_GENERATED_NFT_DNSMASQ_IPV4_IPV6_E2E_PASS
           DIRECT_TEST
 
       - name: Prepare standalone CSQTT VM protocol probe
@@ -539,10 +557,10 @@ jobs:
           PY_PROBE_FILE
           python3 -m py_compile vm/csqtt-vm-probe.py
 
-      - name: Prepare persistent-process CSQTT recovery probe
+      - name: Prepare server listener restart smoke probe (not client recovery)
         run: |
           set -euxo pipefail
-          cat > vm/csqtt-same-process-recovery.py <<'PY_RECOVERY'
+          cat > vm/csqtt-server-listener-restart.py <<'PY_RECOVERY'
           import socket, struct, subprocess, time
           from cryptography.hazmat.primitives import hashes
           from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -583,7 +601,7 @@ jobs:
                   if plain.startswith(b"TUNCONF:"):
                       fields = plain.decode().split(":")
                       if len(fields) >= 3:
-                          print("SAME_PROCESS_TUNCONF", phase, fields[1], fields[2], flush=True)
+                          print("SERVER_LISTENER_TUNCONF", phase, fields[1], fields[2], flush=True)
                           return
               raise SystemExit(f"no authenticated TUNCONF after {phase}")
           
@@ -602,13 +620,13 @@ jobs:
                   break
               time.sleep(0.5)
           if sock.getsockname() != local:
-              raise SystemExit("client UDP socket identity changed during server restart")
+              raise SystemExit("smoke-probe UDP socket identity changed during server restart")
           exchange(sock, "after_restart")
-          print("CSQTT_SAME_PROCESS_PROTOCOL_RECOVERY_PASS", "local_udp", local, flush=True)
+          print("CSQTT_SERVER_LISTENER_RESTART_SMOKE_PASS", "local_udp", local, flush=True)
           sock.close()
           PY_RECOVERY
           
-          python3 -m py_compile vm/csqtt-same-process-recovery.py
+          python3 -m py_compile vm/csqtt-server-listener-restart.py
 
       - name: Test original namespaced deploy.sh lifecycle in ARM64 system guest
         run: |
@@ -634,11 +652,12 @@ jobs:
           EOF
           done
           $SCP vm/real/client-linux-arm64 tester@127.0.0.1:/home/tester/
-          $SCP "$DEPLOY_SCRIPT" "$BINARY" vm/real/client-tun-tests-arm64 vm/csqtt.service vm/csqtt-47000.service vm/csqtt-47000-netns.service vm/port-blocker.py vm/csqtt-vm-probe.py vm/csqtt-same-process-recovery.py tester@127.0.0.1:/home/tester/
+          $SCP "$DEPLOY_SCRIPT" "$BINARY" vm/real/client-tun-tests-arm64 vm/csqtt.service vm/csqtt-47000.service vm/csqtt-47000-netns.service vm/port-blocker.py vm/csqtt-vm-probe.py vm/csqtt-server-listener-restart.py tester@127.0.0.1:/home/tester/
           $SSH 'set -eux
             sudo install -d -m 0700 /opt/lalune-package
             sudo install -m 0755 /home/tester/deploy-csqtt-lalune.sh /opt/lalune-package/deploy-csqtt-lalune.sh
             test -s /home/tester/csqtt-lalune-linux-arm64
+            test "$(/home/tester/csqtt-lalune-linux-arm64 --protocol-revision)" = "CSQTT-WIRE-4"
             # Exercise the exact runtime CSQTT core that the pinned LaLune
             # release selector downloads. This is an executable/CLI smoke only.
             sudo install -m 0755 /home/tester/client-linux-arm64 /usr/local/bin/csqtt-client
@@ -663,9 +682,14 @@ jobs:
               sudo ip route del blackhole 198.18.77.0/24 2>/dev/null || true
               sudo ip netns del socks5-echo 2>/dev/null || true
               sudo ip link del csqtt0 2>/dev/null || true
+              sudo ip link del eth1 2>/dev/null || true
             }
             trap cleanup_socks5_marked EXIT
             sudo ip netns add socks5-echo
+            # Provide the exact downstream interface/address used by production SOCKS5.
+            sudo ip link add eth1 type dummy
+            sudo ip addr add 10.67.68.1/24 dev eth1
+            sudo ip link set eth1 up
             sudo ip link add csqtt0 type veth peer name socks5-peer
             sudo ip link set socks5-peer netns socks5-echo
             sudo ip link set csqtt0 up
@@ -921,10 +945,10 @@ jobs:
             sudo systemctl is-active --quiet csqtt-lalune.service
             sudo journalctl -u csqtt-lalune.service --no-pager > /tmp/csqtt-lalune-after-probe.log
             diff -u /tmp/csqtt-lalune-before-probe.log /tmp/csqtt-lalune-after-probe.log > /tmp/csqtt-lalune-probe-diff.log || true
-            python3 /home/tester/csqtt-same-process-recovery.py | tee /tmp/csqtt-same-process-recovery.log
-            grep -q "^SAME_PROCESS_TUNCONF before_restart " /tmp/csqtt-same-process-recovery.log
-            grep -q "^SAME_PROCESS_TUNCONF after_restart " /tmp/csqtt-same-process-recovery.log
-            grep -q "^CSQTT_SAME_PROCESS_PROTOCOL_RECOVERY_PASS " /tmp/csqtt-same-process-recovery.log
+            python3 /home/tester/csqtt-server-listener-restart.py | tee /tmp/csqtt-server-listener-restart-smoke.log
+            grep -q "^SERVER_LISTENER_TUNCONF before_restart " /tmp/csqtt-server-listener-restart-smoke.log
+            grep -q "^SERVER_LISTENER_TUNCONF after_restart " /tmp/csqtt-server-listener-restart-smoke.log
+            grep -q "^CSQTT_SERVER_LISTENER_RESTART_SMOKE_PASS " /tmp/csqtt-server-listener-restart-smoke.log
             python3 /home/tester/csqtt-vm-probe.py | tee /tmp/csqtt-vm-probe-after-restart.log
             grep -q "^LIVE_TUN_BIDIRECTIONAL_IPV4_PASS " /tmp/csqtt-vm-probe-after-restart.log
             sudo systemctl is-active --quiet csqtt-lalune.service
