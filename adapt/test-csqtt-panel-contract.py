@@ -106,15 +106,20 @@ for token in (
     if token not in html:
         raise SystemExit("CSQTT credential-mode contract missing: " + token)
 
-# The Route tab is intentionally Direct-domain-only; old IP/CIDR controls and
-# payload serialization must not return.
+# Direct is represented by two independent lists. Do not regress to the old
+# domain-only contract or merge IP literals into the domain textarea.
 route_html = html.split('id="page-route"', 1)[1].split("</section>", 1)[0]
-if 'id="directIPs"' in html or "Маршрутизация IP-адресов" in route_html:
-    raise SystemExit("Route tab must contain Direct domains only, without IP/CIDR controls")
-if 'id="directDomains"' not in route_html:
-    raise SystemExit("Route tab is missing the Direct domain list")
-if "delete s.directIPs;" not in js:
-    raise SystemExit("legacy Direct IP settings must be stripped before saving domain-only settings")
+for control in ('id="directDomains"', 'id="directIPs"'):
+    if control not in route_html:
+        raise SystemExit("Route tab is missing separate Direct control: " + control)
+if "s.directDomains=$('directDomains').value.trim()" not in js:
+    raise SystemExit("Direct domain list is not serialized")
+if "s.directIPs=$('directIPs').value.trim()" not in js:
+    raise SystemExit("Direct IP list is not serialized")
+if "delete s.directIPs;" in js:
+    raise SystemExit("Direct IP settings must not be deleted before saving")
+if "function directRuleErrors()" not in js or "Некорректный Direct IP:" not in js:
+    raise SystemExit("Direct IP validation is missing")
 
 # Accessibility contract: navigation state is exposed to assistive technology,
 # focus is visible, live updates are announced, and mobile safe areas are respected.
