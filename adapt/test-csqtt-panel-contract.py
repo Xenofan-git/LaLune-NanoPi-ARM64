@@ -11,6 +11,7 @@ from html.parser import HTMLParser
 
 HTML_PATH = Path("adapt/csqtt-panel-preview.html")
 BACKEND_PATH = Path("adapt/headless_main.go")
+ADAPT_SCRIPT_PATH = Path("adapt/apply-pinned-original-linux-arm64-policy.py")
 
 
 class PanelParser(HTMLParser):
@@ -32,6 +33,7 @@ class PanelParser(HTMLParser):
 
 html = HTML_PATH.read_text(encoding="utf-8")
 backend = BACKEND_PATH.read_text(encoding="utf-8")
+adapt_script = ADAPT_SCRIPT_PATH.read_text(encoding="utf-8")
 scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.S)
 if not scripts:
     raise SystemExit("CSQTT panel has no inline JavaScript")
@@ -120,6 +122,16 @@ if "delete s.directIPs;" in js:
     raise SystemExit("Direct IP settings must not be deleted before saving")
 if "function directRuleErrors()" not in js or "Некорректный Direct IP:" not in js:
     raise SystemExit("Direct IP validation is missing")
+if 'Режим получения хешей' not in html:
+    raise SystemExit("hash acquisition mode label is missing")
+if "s.authMode=$('authMode').value||'manual'" not in js:
+    raise SystemExit("hash acquisition mode is not serialized")
+if "s.authMode==='autoApi'||s.authMode==='autoVk'" not in js:
+    raise SystemExit("automatic hash modes are not gated on VK token state")
+if adapt_script.count("ensureDirectDnsmasqInclude()") < 2:
+    raise SystemExit("Direct domain nftset config is written but not included by dnsmasq")
+if 'settings.DirectDomains + "," + settings.DirectIPs' not in adapt_script:
+    raise SystemExit("Direct domains and IPs are not merged into the production planner")
 
 # Accessibility contract: navigation state is exposed to assistive technology,
 # focus is visible, live updates are announced, and mobile safe areas are respected.
