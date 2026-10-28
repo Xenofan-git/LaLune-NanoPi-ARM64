@@ -222,16 +222,25 @@ def main():
             # Direct rules are validated and persisted through the settings API.
             page.locator('button[data-page="route"]').click()
             assert page.locator("#directDomains").count() == 1
-            assert page.locator("#directIPs").count() == 0, "Route tab must use one combined Direct list"
-            page.locator("#directDomains").fill("example.com\n192.0.2.1\n2001:db8::1")
+            assert page.locator("#directIPs").count() == 1, "Route tab must expose a separate IP list"
+            page.locator("#directDomains").fill("example.com\\napi.example.com")
+            page.locator("#directIPs").fill("192.0.2.1\\n2001:db8::1")
             page.locator("#saveDirectRules").click()
             page.wait_for_function("document.querySelector('#routeMessage').textContent.includes('Правила сохранены')")
             saved = [json.loads(raw) for method, path, raw in calls
                      if method == "POST" and path == "/settings" and raw]
-            assert saved and saved[-1]["directDomains"] == "example.com\n192.0.2.1\n2001:db8::1", (
-                "Direct domains were not persisted by the settings API"
+            assert saved and saved[-1]["directDomains"] == "example.com\\napi.example.com", (
+                "Direct domains were not persisted separately by the settings API"
             )
-            assert "directIPs" not in saved[-1], "Direct IP rules must not be sent to the settings API"
+            assert saved[-1]["directIPs"] == "192.0.2.1\\n2001:db8::1", (
+                "Direct IPv4/IPv6 rules were not persisted separately by the settings API"
+            )
+            prior_saves = len(saved)
+            page.locator("#directIPs").fill("192.0.2.999\\nhttps://example.com")
+            page.locator("#saveDirectRules").click()
+            page.wait_for_function("document.querySelector('#routeMessage').textContent.includes('Некорректный Direct IP:')")
+            saved_after_invalid = [raw for method, path, raw in calls if method == "POST" and path == "/settings" and raw]
+            assert len(saved_after_invalid) == prior_saves, "invalid Direct IP input reached the settings API"
 
             assert page.locator("#page-route").is_visible()
             assert not page.locator("#deploySecretsOverlay").is_visible()
