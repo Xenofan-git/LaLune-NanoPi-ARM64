@@ -136,7 +136,7 @@ func TestLinuxTunCleanupStopsSocksEvenWhenTUNOwnershipIsMissing(t *testing.T) {
 	app.socks.mu.Unlock()
 	if !stopped { t.Fatal("SOCKS5 listener remained active after CleanupRoutes") }
 	log := readTunCommandLog(t, logPath)
-	if !strings.Contains(log, "SUDO ip rule del pref 22015 fwmark 0x4c4c/0xffff lookup 202") {
+	if !strings.Contains(log, "SUDO ip rule del pref 22015 fwmark 0x4d53/0xffff lookup 202") {
 		t.Fatalf("owned SOCKS5 fwmark rule was not removed before TUN ownership check:\\n%s", log)
 	}
 	if strings.Contains(log, "SUDO ip tuntap del dev csqtt0 mode tun") {
