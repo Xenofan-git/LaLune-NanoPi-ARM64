@@ -102,8 +102,7 @@ def main():
                 captcha_state["pending"] = False
                 body = {"ok": True}
             else:
-                status = 409
-                body = {"ok": False, "error": "stale fixture session"}
+                body = {"ok": False}
         elif path == "/deploy/status":
             body = {"deploying": False}
         elif path == "/deploy/log":
@@ -280,12 +279,12 @@ def main():
               });
               return {status:r.status, body:await r.json()};
             }""")
-            assert stale["status"] == 409 and stale["body"].get("ok") is False, (
+            assert stale["status"] == 200 and stale["body"].get("ok") is False, (
                 f"stale CAPTCHA session was not rejected: {stale!r}"
             )
             hold_connecting["value"] = False
             vpn_connected["value"] = True
-            page.wait_for_timeout(300)
+            page.evaluate("() => refreshAll(true)")
             page.wait_for_function(
                 "() => document.querySelector('#power').getAttribute('aria-pressed') === 'true'"
             )
