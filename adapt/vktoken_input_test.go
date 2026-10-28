@@ -82,7 +82,7 @@ func TestAutoVkBootstrapIsScopedToAutoVkMode(t *testing.T) {
 	for _, mode := range []string{"manual", "autoApi", "autoVk"} {
 		t.Run(mode, func(t *testing.T) {
 			core := &AppCore{appDir: t.TempDir()}
-			if !core.SaveSettings(\`{"authMode":"\` + mode + \`"}\`) {
+			if !core.SaveSettings(`{"authMode":"` + mode + `"}`) {
 				t.Fatal("could not persist hash acquisition mode")
 			}
 			if err := core.SaveVKTokenInput(token); err != nil {
