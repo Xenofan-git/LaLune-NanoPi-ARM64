@@ -1,6 +1,7 @@
 package libs
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"strings"
@@ -73,4 +74,43 @@ func TestSavedVKTokenIsVisibleToBackendState(t *testing.T) {
 	if err := core.SaveVKTokenInput(fixture); err != nil { t.Fatalf("save fixture token: %v", err) }
 	if got := core.ReadTokenFromFile(); got != fixture { t.Fatalf("ReadTokenFromFile() = %q, want fixture token", got) }
 	if !core.HasVKToken() { t.Fatal("HasVKToken() false after successful save") }
+}
+
+
+func TestAutoVkBootstrapIsScopedToAutoVkMode(t *testing.T) {
+	const token = "vk1.a.fixture-auto-vk-token-value"
+	for _, mode := range []string{"manual", "autoApi", "autoVk"} {
+		t.Run(mode, func(t *testing.T) {
+			core := &AppCore{appDir: t.TempDir()}
+			if !core.SaveSettings(\`{"authMode":"\` + mode + \`"}\`) {
+				t.Fatal("could not persist hash acquisition mode")
+			}
+			if err := core.SaveVKTokenInput(token); err != nil {
+				t.Fatalf("could not write VK token fixture: %v", err)
+			}
+			bridge := &Bridge{Core: core}
+			got := bridge.AutoVkBootstrap()
+			if mode != "autoVk" {
+				if got != "" {
+					t.Fatalf("%s unexpectedly emitted VK JS bootstrap: %q", mode, got)
+				}
+				return
+			}
+			if !strings.HasPrefix(got, "VK_JS_BOOTSTRAP:") || !strings.HasSuffix(got, "\n") {
+				t.Fatalf("Auto VK bootstrap has invalid framing: %q", got)
+			}
+			encoded := strings.TrimSuffix(strings.TrimPrefix(got, "VK_JS_BOOTSTRAP:"), "\n")
+			decoded, err := base64.StdEncoding.DecodeString(encoded)
+			if err != nil {
+				t.Fatalf("decode bootstrap: %v", err)
+			}
+			var payload map[string]string
+			if err := json.Unmarshal(decoded, &payload); err != nil {
+				t.Fatalf("decode payload: %v", err)
+			}
+			if payload["token"] != token {
+				t.Fatalf("bootstrap token = %q, want fixture token", payload["token"])
+			}
+		})
+	}
 }
