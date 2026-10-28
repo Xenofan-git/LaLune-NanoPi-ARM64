@@ -916,6 +916,39 @@ for required in (
         raise SystemExit(f"final generated app_linux.go missing TUN lifecycle marker: {required}")
 print("Verified final app_linux.go contains TUN lifecycle fields and methods")
 
+# Extract the exact production argv quoting path for an executable regression test.
+core_argv_old = """\tcorePath := cmdArgs[0]
+\tquotedArgs := make([]string, len(cmdArgs)-1)
+\tfor i, arg := range cmdArgs[1:] {
+\t\tescaped := strings.ReplaceAll(arg, "'", "'\\\\''")
+\t\tquotedArgs[i] = "'" + escaped + "'"
+\t}
+
+\tcmdLine := fmt.Sprintf("'%s' %s > '%s' 2>&1",
+\t\tstrings.ReplaceAll(corePath, "'", "'\\\\''"),
+\t\tstrings.Join(quotedArgs, " "),
+\t\tlogFile,
+\t)
+"""
+core_argv_new = """\tcmdLine := buildCoreCommandLine(cmdArgs, logFile)
+"""
+if final_linux.count(core_argv_old) != 1:
+    raise SystemExit("production core argv construction marker missing or ambiguous")
+final_linux = final_linux.replace(core_argv_old, core_argv_new, 1)
+core_argv_helper = """func buildCoreCommandLine(cmdArgs []string, logFile string) string {
+\tif len(cmdArgs) == 0 { return "" }
+\tquote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\\\''") + "'" }
+\tquotedArgs := make([]string, 0, len(cmdArgs)-1)
+\tfor _, arg := range cmdArgs[1:] { quotedArgs = append(quotedArgs, quote(arg)) }
+\treturn fmt.Sprintf("%s %s > %s 2>&1", quote(cmdArgs[0]), strings.Join(quotedArgs, " "), quote(logFile))
+}
+
+"""
+core_argv_anchor = "func (r *LinuxRunner) startCoreWithSudo(cmdArgs []string, listenPort int, bridge *libs.Bridge) {"
+if final_linux.count(core_argv_anchor) != 1:
+    raise SystemExit("startCoreWithSudo marker missing or ambiguous")
+final_linux = final_linux.replace(core_argv_anchor, core_argv_helper + core_argv_anchor, 1)
+
 # CSQTT 2.1.9 tunnel authentication: bind the saved tunnel password to the
 # stable LaLune device ID and pass both to the pinned native client.
 linux_auth_marker = """func (r *LinuxRunner) StartCore(cmdArgs []string, listenPort int, bridge *libs.Bridge) {
