@@ -419,3 +419,61 @@ func TestLinuxTunStopJoinsWorkersAndIsIdempotent(t *testing.T) {
 	app.tun.Stop()
 	app.tun.workers.Wait()
 }
+
+
+func TestDirectGeneratesDualStackNftDnsAndPolicyRules(t *testing.T) {
+    logPath := installTunCommandShims(t, "")
+    isolateDirectFilesystem(t)
+    app := tunTestApp()
+    if !app.SaveSettings(`{"directDomains":"example.com\n192.0.2.44\n2001:db8::44"}`) {
+        t.Fatal("could not persist Direct test settings")
+    }
+    if err := app.tun.SetupRoutes("192.0.2.10", "8.8.8.8"); err != nil {
+        t.Fatalf("TUN + Direct setup failed: %v", err)
+    }
+    nftConfig, err := os.ReadFile(directNftPath)
+    if err != nil { t.Fatal(err) }
+    nft := string(nftConfig)
+    for _, required := range []string{
+        "set direct4 { type ipv4_addr; flags interval; elements = { 192.0.2.44 }; }",
+        "set direct6 { type ipv6_addr; flags interval; elements = { 2001:db8::44 }; }",
+        "ip saddr 192.168.5.0/24 ip daddr @direct4 meta mark set 0x4d53",
+        "iifname \"eth1\" ip6 daddr @direct6 meta mark set 0x4d53",
+    } {
+        if !strings.Contains(nft, required) { t.Fatalf("generated nft config missing %q:\n%s", required, nft) }
+    }
+    dns, err := os.ReadFile(directDnsmasqPath)
+    if err != nil { t.Fatal(err) }
+    for _, required := range []string{
+        "nftset=/example.com/4#inet#lalune_direct#direct4",
+        "nftset=/example.com/6#inet#lalune_direct#direct6",
+    } {
+        if !strings.Contains(string(dns), required) { t.Fatalf("dnsmasq config missing %q:\n%s", required, dns) }
+    }
+    log := readTunCommandLog(t, logPath)
+    for _, required := range []string{
+        "SUDO nft -c -f " + directNftPath,
+        "SUDO nft -f " + directNftPath,
+        "SUDO ip rule add pref 22010 fwmark 0x4d53/0xffff lookup main",
+        "SUDO ip -6 rule add pref 22010 fwmark 0x4d53/0xffff lookup main",
+    } {
+        if !strings.Contains(log, required) { t.Fatalf("Direct command trace missing %q:\n%s", required, log) }
+    }
+    if strings.Contains(log, "ip rule del pref 22010 2>/dev/null") {
+        t.Fatalf("Direct reconciliation used unsafe priority-only deletion:\n%s", log)
+    }
+}
+
+func TestDirectCleanupUsesExactIPv4AndIPv6RuleSignature(t *testing.T) {
+    logPath := installTunCommandShims(t, "")
+    isolateDirectFilesystem(t)
+    app := tunTestApp()
+    app.tun.CleanupDirectRouting()
+    log := readTunCommandLog(t, logPath)
+    for _, required := range []string{
+        "SUDO ip rule del pref 22010 fwmark 0x4d53/0xffff lookup main",
+        "SUDO ip -6 rule del pref 22010 fwmark 0x4d53/0xffff lookup main",
+    } {
+        if !strings.Contains(log, required) { t.Fatalf("exact Direct cleanup missing %q:\n%s", required, log) }
+    }
+}
