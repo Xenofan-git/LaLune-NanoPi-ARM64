@@ -284,7 +284,7 @@ def main():
             )
             hold_connecting["value"] = False
             vpn_connected["value"] = True
-            page.evaluate("() => refreshAll(true)")
+            page.wait_for_timeout(2200)
             page.wait_for_function(
                 "() => document.querySelector('#power').getAttribute('aria-pressed') === 'true'"
             )
