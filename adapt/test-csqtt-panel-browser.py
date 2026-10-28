@@ -397,6 +397,15 @@ def main():
             bridge_main_source = (ROOT / "captcha-bridge" / "captcha-bridge-main.js").read_text()
             bridge_isolated_source = (ROOT / "captcha-bridge" / "captcha-bridge.js").read_text()
             origin_policy_source = (ROOT / "captcha-bridge" / "origin-policy.js").read_text()
+            # The extension bridge and the panel share the same fixture
+            # backend. Arm the exact session embedded in the VK fixture so the
+            # panel's authenticated result endpoint accepts this bridge result.
+            captcha_state.update({
+                "pending": True,
+                "mode": "auto",
+                "sessionToken": "fixture-bridge-session",
+                "redirectUri": "",
+            })
             panel_origin = f"http://127.0.0.1:{server.server_port}"
             vk_origin = "https://id.vk.com"
             bridge_page = browser.new_page()
