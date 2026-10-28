@@ -31,6 +31,9 @@ def main():
     ]
     selected = {"profile": profiles[0]}
     vpn_connected = {"value": False}
+    hold_connecting = {"value": False}
+    captcha_state = {"pending": False}
+    captcha_results = []
     # A fresh device has no tunnel password; the success path provisions one below.
     tunnel_auth = {"configured": False}
     settings = {
@@ -82,17 +85,25 @@ def main():
         elif path == "/vpn/status":
             body = {"connected": vpn_connected["value"]}
         elif path == "/vpn/connect" and method == "POST":
-            vpn_connected["value"] = True
+            if not hold_connecting["value"]:
+                vpn_connected["value"] = True
             body = {"ok": True}
         elif path == "/vpn/disconnect" and method == "POST":
             vpn_connected["value"] = False
             body = {"ok": True}
         elif path == "/vk/state":
-            body = {"hasToken": False, "fetching": False}
+            body = {"hasToken": True, "fetching": False}
         elif path == "/captcha/state":
-            body = {"pending": False}
+            body = dict(captcha_state)
         elif path == "/captcha/result" and method == "POST":
-            body = {"ok": True}
+            result = json.loads(request.post_data or "{}")
+            captcha_results.append(result)
+            if result.get("sessionToken") == captcha_state.get("sessionToken") and result.get("result"):
+                captcha_state["pending"] = False
+                body = {"ok": True}
+            else:
+                status = 409
+                body = {"ok": False, "error": "stale fixture session"}
         elif path == "/deploy/status":
             body = {"deploying": False}
         elif path == "/deploy/log":
@@ -218,6 +229,68 @@ def main():
             page.wait_for_function("""() => document.querySelector("#power").getAttribute("aria-pressed") === "false" """)
             assert any(method == "POST" and path == "/vpn/connect" for method, path, _ in calls)
             assert any(method == "POST" and path == "/vpn/disconnect" for method, path, _ in calls)
+
+            # Hash acquisition mode contract: all three original CSQTT modes
+            # remain selectable and persist independently of VK credential mode.
+            page.locator('button[data-page="settings"]').click()
+            for mode in ("manual", "autoApi", "autoVk"):
+                page.locator("#authMode").select_option(mode)
+                page.locator("#saveSettings").click()
+                page.wait_for_function(
+                    "(mode) => document.querySelector('#authMode').value === mode",
+                    arg=mode,
+                )
+                stored_modes = [json.loads(raw) for method, path, raw in calls
+                                if method == "POST" and path == "/settings" and raw]
+                assert stored_modes[-1]["authMode"] == mode, f"hash mode {mode} did not persist"
+
+            # Exhausted automatic CAPTCHA attempts are represented by a pending
+            # manual challenge from the backend. The real modal must appear only
+            # after Connect has armed the current connection attempt.
+            page.locator('button[data-page="connect"]').click()
+            hold_connecting["value"] = True
+            captcha_state.update({
+                "pending": True,
+                "mode": "manual",
+                "sessionToken": "fixture-manual-captcha-session",
+                "redirectUri": "https://id.vk.ru/not_robot_captcha?expired_at=4102444800",
+            })
+            page.locator("#power").click()
+            page.wait_for_function(
+                "() => !document.querySelector('#captchaOverlay').classList.contains('hidden')"
+            )
+            assert "Автоматические попытки завершены" in page.locator("#captchaModalText").inner_text()
+            assert page.locator("#openCaptchaModal").is_visible()
+            page.locator("#captchaModalAnswer").fill("fixture-manual-vk-success-token")
+            page.locator("#submitCaptchaModal").click()
+            page.wait_for_function(
+                "() => document.querySelector('#captchaOverlay').classList.contains('hidden')"
+            )
+            assert captcha_results and captcha_results[-1] == {
+                "sessionToken": "fixture-manual-captcha-session",
+                "result": "fixture-manual-vk-success-token",
+            }, "manual CAPTCHA answer did not reach /captcha/result with the active session"
+            assert captcha_state["pending"] is False, "fixture backend did not complete the pending CAPTCHA"
+
+            # Stale/foreign session tokens must be rejected by the API contract.
+            stale = page.evaluate("""async () => {
+              const r = await fetch('/api/captcha/result', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({sessionToken:'old-or-foreign-session', result:'forged-answer'})
+              });
+              return {status:r.status, body:await r.json()};
+            }""")
+            assert stale["status"] == 409 and stale["body"].get("ok") is False, (
+                f"stale CAPTCHA session was not rejected: {stale!r}"
+            )
+            hold_connecting["value"] = False
+            vpn_connected["value"] = True
+            page.wait_for_timeout(300)
+            page.wait_for_function(
+                "() => document.querySelector('#power').getAttribute('aria-pressed') === 'true'"
+            )
+            vpn_connected["value"] = False
+            captcha_state.update({"pending": False, "mode": "", "sessionToken": "", "redirectUri": ""})
 
             # Direct rules are validated and persisted through the settings API.
             page.locator('button[data-page="route"]').click()
