@@ -935,7 +935,7 @@ core_argv_new = """\tcmdLine := buildCoreCommandLine(cmdArgs, logFile)
 if final_linux.count(core_argv_old) != 1:
     raise SystemExit("production core argv construction marker missing or ambiguous")
 final_linux = final_linux.replace(core_argv_old, core_argv_new, 1)
-core_argv_helper = """func buildCoreCommandLine(cmdArgs []string, logFile string) string {
+core_argv_helper = """func appendCSQTTAuthArgs(cmdArgs []string, password, deviceID string) []string {\n\treturn append(cmdArgs, "-device-id", deviceID, "-password", password)\n}\n\nfunc buildCoreCommandLine(cmdArgs []string, logFile string) string {
 \tif len(cmdArgs) == 0 { return "" }
 \tquote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\\\''") + "'" }
 \tquotedArgs := make([]string, 0, len(cmdArgs)-1)
@@ -967,7 +967,7 @@ linux_auth_replacement = """func (r *LinuxRunner) StartCore(cmdArgs []string, li
 		bridge.Core.SetConnected(false)
 		return
 	}
-	cmdArgs = append(cmdArgs, "-device-id", deviceID, "-password", password)
+	cmdArgs = appendCSQTTAuthArgs(cmdArgs, password, deviceID)
 	r.startCoreWithSudo(cmdArgs, listenPort, bridge)
 }"""
 if final_linux.count(linux_auth_marker) != 1:
