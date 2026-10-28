@@ -127,7 +127,7 @@ main{width:100%;max-width:100%}
   <div class="field"><label for="serverPeer">IP сервера или домен (без порта)</label><input id="serverPeer" autocomplete="off" placeholder="server.example.com"></div>
   <small class="muted" id="serverPeerHint">Адрес сохраняется при выходе из поля.</small>
   <div class="vk-session-row"><div class="vk-session-copy"><div class="statusline"><span id="vkDot" class="dot"></span><span id="vkState">Проверка токена…</span></div><small id="vkDetails" class="muted">Проверка модуля авторизации…</small></div><button id="vkLogin" class="secondary">Войти через VK</button></div>
-  <div class="field"><label for="authMode">Режим хешей</label><select id="authMode"><option value="manual">Ручной</option><option value="autoApi">Авто API</option><option value="autoVk">Авто ВК</option></select></div>
+  <div class="field"><label for="authMode">Режим получения хешей</label><select id="authMode"><option value="manual">Ручной</option><option value="autoApi">Авто API</option><option value="autoVk">Авто ВК</option></select><small class="muted">Ручной — хеш из профиля; Авто API — получение через VK API; Авто ВК — получение через VK JS. Для обоих автоматических режимов требуется токен VK.</small></div>
   <div class="field"><label for="vkAuthMode">Режим кредов</label><select id="vkAuthMode"><option value="legacy">Капча</option><option value="vkcalls">Авто</option><option value="auto_js">Авто ВК</option></select></div>
   <div class="field"><label for="turnTransport">Транспорт</label><select id="turnTransport"><option value="udp">UDP</option><option value="tcp_tls">TCP</option></select></div>
   <div class="field"><label for="workers">Потоки <b id="workersValue">9</b></label><input id="workers" type="range" min="1" max="127" step="1"></div>
