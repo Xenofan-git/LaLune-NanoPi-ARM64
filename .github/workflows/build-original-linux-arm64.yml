@@ -490,6 +490,44 @@ jobs:
           grep -Fq -- '--web-port' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
           grep -Fq -- '--config-dir' "$GITHUB_WORKSPACE/server-assets/csqtt-lalune-help.txt"
           (cd "$GITHUB_WORKSPACE" && sha256sum server-assets/csqtt-lalune-linux-arm64 | tee -a server-assets/SHA256SUMS)
+          # Generate provenance for the exact newly-built binary. The legacy JSON
+          # extracted from the v2.1.9 APK describes WIRE-3 assets and must never
+          # be reused as metadata for this WIRE-4 server.
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, subprocess
+          binary = pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "server-assets/csqtt-lalune-linux-arm64"
+          digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+          source_commit = subprocess.check_output(
+              ["git", "-C", str(pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "server-source"), "rev-parse", "HEAD"],
+              text=True,
+          ).strip()
+          elf = subprocess.check_output(["aarch64-linux-gnu-readelf", "-h", str(binary)], text=True)
+          if "Class:                             ELF64" not in elf or "Machine:                           AArch64" not in elf:
+              raise SystemExit("provenance generation refused: binary is not ELF64 AArch64")
+          if subprocess.check_output([str(binary), "--protocol-revision"], text=True).strip() != "CSQTT-WIRE-4":
+              raise SystemExit("provenance generation refused: protocol is not CSQTT-WIRE-4")
+          metadata = {
+              "schemaVersion": 1,
+              "artifact": "csqtt-lalune-linux-arm64",
+              "producer": "Xenofan-git/LaLune-NanoPi-ARM64",
+              "sourceRepository": "amurcanov/csqtt",
+              "sourceCommit": source_commit,
+              "sourceTag": "v2.1.9",
+              "adaptation": "LaLune NanoPi isolated server with negotiated WIRE-4 liveness",
+              "wireProtocolRevision": "CSQTT-WIRE-4",
+              "target": "aarch64-unknown-linux-gnu",
+              "elfClass": "ELF64",
+              "elfMachine": "AArch64",
+              "sizeBytes": binary.stat().st_size,
+              "sha256": digest,
+              "buildCommit": os.environ["GITHUB_SHA"],
+              "buildRunId": os.environ["GITHUB_RUN_ID"],
+          }
+          out = binary.parent / "csqtt.server-provenance.json"
+          out.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\\n")
+          print(json.dumps(metadata, indent=2, sort_keys=True))
+          PY
+          sha256sum "$GITHUB_WORKSPACE/server-assets/csqtt.server-provenance.json" | tee -a "$GITHUB_WORKSPACE/server-assets/SHA256SUMS"
       - name: Build isolated CSQTT server for Linux x86_64
         working-directory: server-source/rust-server
         run: |
@@ -590,6 +628,22 @@ jobs:
           ! grep -Fq 'uninstall-csqtt-lalune.sh' adapt/install-original-linux-backend.sh
           test -s dist/server-assets/csqtt-lalune-linux-arm64
           test -s dist/server-assets/csqtt-lalune-linux-amd64
+          test -s dist/server-assets/csqtt.server-provenance.json
+          python3 - <<'PY'
+          import hashlib, json, pathlib
+          root = pathlib.Path("dist/server-assets")
+          binary = root / "csqtt-lalune-linux-arm64"
+          metadata = json.loads((root / "csqtt.server-provenance.json").read_text())
+          assert metadata["artifact"] == binary.name
+          assert metadata["wireProtocolRevision"] == "CSQTT-WIRE-4"
+          assert metadata["target"] == "aarch64-unknown-linux-gnu"
+          assert metadata["elfClass"] == "ELF64"
+          assert metadata["elfMachine"] == "AArch64"
+          assert metadata["sizeBytes"] == binary.stat().st_size
+          assert metadata["sha256"] == hashlib.sha256(binary.read_bytes()).hexdigest()
+          assert metadata["sourceCommit"] and metadata["buildCommit"] and metadata["buildRunId"]
+          assert "WIRE-3" not in json.dumps(metadata)
+          PY
           test -s dist/server-assets/csqtt-lalune-help.txt
           test -s dist/server-assets/csqtt-lalune-amd64-help.txt
           test -x dist/server-assets/deploy-csqtt-lalune.sh
