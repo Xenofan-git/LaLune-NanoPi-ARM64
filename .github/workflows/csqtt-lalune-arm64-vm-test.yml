@@ -237,7 +237,7 @@ jobs:
           # is intentionally reachable only through table 202.
           python3 - <<'PYDNS'
           import socket,struct
-          q=b'\\x12\\x34\\x01\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00'+b''.join(bytes([len(x)])+x.encode() for x in 'marked.socks.test'.split('.'))+b'\\x00\\x00\\x01\\x00\\x01'
+          q=bytes.fromhex("123401000001000000000000")+b"".join(bytes([len(x)])+x.encode() for x in "marked.socks.test".split("."))+bytes.fromhex("0000010001")
           s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.setsockopt(socket.SOL_SOCKET,36,0x4d53);s.settimeout(2);s.sendto(q,('198.18.86.2',53));r,_=s.recvfrom(512)
           assert len(r)>len(q) and struct.unpack('!H',r[6:8])[0]==1, r
           PYDNS
