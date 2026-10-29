@@ -206,7 +206,7 @@ jobs:
                       name=".".join(labels)
                       answer=b""
                       if name=="marked.socks.test" and qtype==1 and qclass==1:
-                          answer=b"\\xc0\\x0c"+struct.pack("!HHIH",1,1,60,4)+socket.inet_aton(addr)
+                          answer=b"\xc0\x0c"+struct.pack("!HHIH",1,1,60,4)+socket.inet_aton(addr)
                       header=q[:2]+struct.pack("!HHHHH",0x8180,1,1 if answer else 0,0,0)
                       response=header+question+answer
                       sent=dns.sendto(response,peer)
