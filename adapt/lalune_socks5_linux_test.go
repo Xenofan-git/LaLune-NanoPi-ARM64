@@ -370,9 +370,13 @@ func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 		defer client.Close()
 		_ = client.SetDeadline(time.Now().Add(5*time.Second))
 		socks5Handshake(t, client)
-		ip := net.ParseIP(target).To4()
-		if ip == nil { t.Fatalf("invalid E2E target IPv4 address %q", target) }
-		req := []byte{5, 1, 0, 1, ip[0], ip[1], ip[2], ip[3], byte(tcpPort >> 8), byte(tcpPort)}
+		// The VM resolver points at the isolated DNS fixture. A domain-form
+		// CONNECT proves that DNS itself is resolved through SO_MARK, not just
+		// that the final TCP socket is marked.
+		host := "marked.socks.test"
+		req := []byte{5, 1, 0, 3, byte(len(host))}
+		req = append(req, []byte(host)...)
+		req = append(req, byte(tcpPort >> 8), byte(tcpPort))
 		if _, err := client.Write(req); err != nil { t.Fatal(err) }
 		reply := make([]byte, 10)
 		if _, err := io.ReadFull(client, reply); err != nil { t.Fatal(err) }
@@ -405,13 +409,23 @@ func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 		_ = relay.SetDeadline(time.Now().Add(6*time.Second))
 		ip := net.ParseIP(target).To4()
 		if ip == nil { t.Fatalf("invalid E2E target IPv4 address %q", target) }
-		packet := []byte{0,0,0,1,ip[0],ip[1],ip[2],ip[3],byte(udpPort>>8),byte(udpPort)}
-		packet = append(packet, []byte("marked-udp-via-policy-route")...)
-		if _, err := relay.Write(packet); err != nil { t.Fatal(err) }
+		const count = 32
+		for i := 0; i < count; i++ {
+			packet := []byte{0,0,0,1,ip[0],ip[1],ip[2],ip[3],byte(udpPort>>8),byte(udpPort)}
+			packet = append(packet, []byte(fmt.Sprintf("marked-udp-%02d", i))...)
+			if _, err := relay.Write(packet); err != nil { t.Fatal(err) }
+		}
+		seen := make(map[string]bool, count)
 		got := make([]byte, 1024)
-		n, err := relay.Read(got)
-		if err != nil { t.Fatalf("UDP echo via csqtt0 failed: %v", err) }
-		if n < 10 || string(got[10:n]) != "marked-udp-via-policy-route" { t.Fatalf("unexpected marked UDP response: %v", got[:n]) }
+		for i := 0; i < count; i++ {
+			n, err := relay.Read(got)
+			if err != nil { t.Fatalf("marked UDP reply %d/%d: %v", i+1, count, err) }
+			if n < 10 { t.Fatalf("short marked UDP response: %v", got[:n]) }
+			payload := string(got[10:n])
+			if seen[payload] { t.Fatalf("duplicate marked UDP response %q", payload) }
+			seen[payload] = true
+		}
+		if len(seen) != count { t.Fatalf("received %d/%d marked UDP replies", len(seen), count) }
 	})
 }
 
