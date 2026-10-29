@@ -1,0 +1,30 @@
+name: Diagnose GitHub Actions workflow syntax
+
+on:
+  push:
+    branches:
+      - fix/socks5-dns-udp-health-e2e
+    paths:
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          version="$(curl -fsSL https://api.github.com/repos/rhysd/actionlint/releases/latest | jq -r .tag_name)"
+          curl -fsSL "https://github.com/rhysd/actionlint/releases/download/${version}/actionlint_${version#v}_linux_amd64.tar.gz" -o /tmp/actionlint.tar.gz
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          /tmp/actionlint -version
+      - name: Validate both production workflows
+        run: |
+          set -euo pipefail
+          /tmp/actionlint -color -verbose .github/workflows/build-original-linux-arm64.yml .github/workflows/csqtt-lalune-arm64-vm-test.yml
