@@ -15,6 +15,7 @@ on:
       - fix/socks5-dynamic-address
       - fix/production-recovery-single-artifact
       - fix/direct-ip-hashmode-captcha-e2e
+      - fix/socks5-dns-udp-health-e2e
   workflow_dispatch:
 
 permissions:
