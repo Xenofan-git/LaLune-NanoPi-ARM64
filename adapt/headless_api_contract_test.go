@@ -16,6 +16,7 @@ func TestAPIReadOnlyEndpointsReturnValidJSON(t *testing.T) {
 	for _, path := range []string{"/ping", "/version", "/socks5/status"} {
 		t.Run(path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.RemoteAddr = "192.168.1.2:12345"
 			rec := httptest.NewRecorder()
 			apiHandler(&App{}).ServeHTTP(rec, req)
 			if rec.Code != http.StatusOK {
