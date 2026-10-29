@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -186,6 +187,24 @@ func TestBuildUDPReplyRejectsInvalidAddress(t *testing.T) {
 	if _, err := buildUDPReply(nil, nil); err == nil { t.Fatal("expected invalid address error") }
 }
 
+func TestResolveTCPAddrMarkedLiteralIPv4(t *testing.T) {
+	got, err := resolveTCPAddrMarked(context.Background(), "192.0.2.25:443")
+	if err != nil { t.Fatal(err) }
+	if got != "192.0.2.25:443" { t.Fatalf("resolved target=%q", got) }
+}
+
+func TestResolveTCPAddrMarkedRejectsInvalidPort(t *testing.T) {
+	if _, err := resolveTCPAddrMarked(context.Background(), "example.invalid:70000"); err == nil {
+		t.Fatal("expected invalid TCP target port")
+	}
+}
+
+func TestResolveTCPAddrMarkedRejectsMissingPort(t *testing.T) {
+	if _, err := resolveTCPAddrMarked(context.Background(), "example.invalid"); err == nil {
+		t.Fatal("expected missing TCP target port")
+	}
+}
+
 func TestResolveUDPAddrMarkedLiteralIPv4(t *testing.T) {
 	got, err := resolveUDPAddrMarked("192.0.2.25:5353")
 	if err != nil { t.Fatal(err) }
@@ -289,16 +308,27 @@ func TestSocks5UDPAssociateRelaysDatagram(t *testing.T) {
 	defer relay.Close()
 	_ = relay.SetDeadline(time.Now().Add(4 * time.Second))
 	dst := echo.LocalAddr().(*net.UDPAddr)
-	packet := []byte{0, 0, 0, 1, 127, 0, 0, 1, byte(dst.Port >> 8), byte(dst.Port)}
-	packet = append(packet, []byte("socks5-udp-e2e")...)
-	if _, err := relay.Write(packet); err != nil { t.Fatal(err) }
-	got := make([]byte, 2048)
-	n, err := relay.Read(got)
-	if err != nil { t.Fatal(err) }
-	if n < 10 || got[0] != 0 || got[1] != 0 || got[2] != 0 || got[3] != 1 {
-		t.Fatalf("invalid UDP relay response: %v", got[:n])
+	const count = 32
+	want := make(map[string]bool, count)
+	for i := 0; i < count; i++ {
+		payload := fmt.Sprintf("socks5-udp-parallel-%02d", i)
+		want[payload] = true
+		packet := []byte{0, 0, 0, 1, 127, 0, 0, 1, byte(dst.Port >> 8), byte(dst.Port)}
+		packet = append(packet, []byte(payload)...)
+		if _, err := relay.Write(packet); err != nil { t.Fatal(err) }
 	}
-	if string(got[10:n]) != "socks5-udp-e2e" { t.Fatalf("UDP payload = %q", got[10:n]) }
+	got := make([]byte, 2048)
+	for i := 0; i < count; i++ {
+		n, err := relay.Read(got)
+		if err != nil { t.Fatalf("UDP reply %d/%d: %v", i+1, count, err) }
+		if n < 10 || got[0] != 0 || got[1] != 0 || got[2] != 0 || got[3] != 1 {
+			t.Fatalf("invalid UDP relay response: %v", got[:n])
+		}
+		payload := string(got[10:n])
+		if !want[payload] { t.Fatalf("unexpected or duplicate UDP payload %q", payload) }
+		delete(want, payload)
+	}
+	if len(want) != 0 { t.Fatalf("missing UDP responses: %v", want) }
 }
 
 
