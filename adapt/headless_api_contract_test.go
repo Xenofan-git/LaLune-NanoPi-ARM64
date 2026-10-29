@@ -13,7 +13,7 @@ import (
 // These tests exercise the actual registered HTTP handlers without starting
 // LaLune, changing routes, or invoking network-dependent operations.
 func TestAPIReadOnlyEndpointsReturnValidJSON(t *testing.T) {
-	for _, path := range []string{"/ping", "/version"} {
+	for _, path := range []string{"/ping", "/version", "/socks5/status"} {
 		t.Run(path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			rec := httptest.NewRecorder()
