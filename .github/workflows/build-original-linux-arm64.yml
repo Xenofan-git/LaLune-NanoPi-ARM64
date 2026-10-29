@@ -87,7 +87,7 @@ jobs:
             throw new Error(JSON.stringify({ pages, first }));
           }
           for (const id of ["directDomains", "directIPs"]) {
-            if (!new RegExp('\\\\bid="' + id + '"').test(html)) {
+            if (!html.includes('id="' + id + '"')) {
               throw new Error("missing independent Direct field: " + id);
             }
           }
