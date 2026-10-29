@@ -382,7 +382,7 @@ func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 		// The VM resolver points at the isolated DNS fixture. A domain-form
 		// CONNECT proves that DNS itself is resolved through SO_MARK, not just
 		// that the final TCP socket is marked.
-		host := "marked.socks.test"
+		host := "marked.socks.test."
 		req := []byte{5, 1, 0, 3, byte(len(host))}
 		req = append(req, []byte(host)...)
 		req = append(req, byte(tcpPort >> 8), byte(tcpPort))
@@ -416,11 +416,12 @@ func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 		if err != nil { t.Fatal(err) }
 		defer relay.Close()
 		_ = relay.SetDeadline(time.Now().Add(20*time.Second))
-		ip := net.ParseIP(target).To4()
-		if ip == nil { t.Fatalf("invalid E2E target IPv4 address %q", target) }
+		host := "marked.socks.test."
 		const count = 100
 		for i := 0; i < count; i++ {
-			packet := []byte{0,0,0,1,ip[0],ip[1],ip[2],ip[3],byte(udpPort>>8),byte(udpPort)}
+			packet := []byte{0,0,0,3,byte(len(host))}
+			packet = append(packet, []byte(host)...)
+			packet = append(packet, byte(udpPort>>8), byte(udpPort))
 			packet = append(packet, []byte(fmt.Sprintf("marked-udp-%02d", i))...)
 			if _, err := relay.Write(packet); err != nil { t.Fatal(err) }
 			time.Sleep(100 * time.Millisecond)
