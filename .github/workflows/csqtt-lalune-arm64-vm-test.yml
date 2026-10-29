@@ -210,12 +210,26 @@ jobs:
             if ip netns exec socks-echo python3 -c 'import socket;s=socket.socket();s.settimeout(.2);s.connect(("198.18.86.2",18080));s.close()' 2>/dev/null; then break; fi
             sleep 0.2
           done
-          ip route get 198.18.86.2
-          ip route get 198.18.86.2 mark 0x4d53
-          if ip route get 198.18.86.2 | grep -q 'dev csqtt0'; then
-            echo "unmarked traffic unexpectedly selected the marked egress" >&2; exit 1
+          # The main-table blackhole is intentional. Linux reports RTNETLINK
+          # EINVAL for "ip route get" against an RTN_BLACKHOLE route, so a
+          # failed unmarked lookup is the expected isolation result, not a test
+          # setup error. Verify the blackhole exists, then require marked lookup
+          # to resolve through table 202 and csqtt0.
+          ip -4 route show table main type blackhole | grep -Fq 'blackhole 198.18.86.2'
+          if ip route get 198.18.86.2 >/tmp/socks5-unmarked-route.log 2>&1; then
+            echo "unmarked traffic unexpectedly resolved despite the main-table blackhole" >&2
+            cat /tmp/socks5-unmarked-route.log >&2
+            exit 1
+          else
+            unmarked_status=$?
+            test "$unmarked_status" -eq 2
+            grep -Fq 'RTNETLINK answers: Invalid argument' /tmp/socks5-unmarked-route.log
+            echo "UNMARKED_BLACKHOLE_ENFORCED_PASS"
           fi
-          ip route get 198.18.86.2 mark 0x4d53 | grep -q 'table 202'
+          marked_route="$(ip route get 198.18.86.2 mark 0x4d53)"
+          echo "MARKED_ROUTE: $marked_route"
+          grep -q 'table 202' <<<"$marked_route"
+          grep -q 'dev csqtt0' <<<"$marked_route"
           ip -4 rule show | grep -Eq 'fwmark 0x4d53/0xffff.*lookup 202'
           ip -4 route show table 202 | grep -Fq '198.18.86.2'
           ip link show dev csqtt0 | grep -q 'state UP'
