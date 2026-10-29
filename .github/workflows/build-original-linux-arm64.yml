@@ -82,7 +82,8 @@ jobs:
           const nav = html.slice(start, end);
           const buttons = nav.split("<button").slice(1).map(part => part.split("</button>")[0]);
           const pages = buttons.map(button => button.match(/data-page="([^"]+)"/)?.[1] ?? "");
-          const first = (buttons[0] ?? "").replace(/<[^>]*>/g, "").trim();
+          const firstButton = buttons[0] ?? "";
+          const first = firstButton.slice(firstButton.indexOf(">") + 1).replace(/<[^>]*>/g, "").trim();
           if (pages.join(",") !== "connect,settings,deploy,route,logs" || first !== "Подключение") {
             throw new Error(JSON.stringify({ pages, first }));
           }
