@@ -254,6 +254,17 @@ for contract in (
 
 # Keep the user-facing route save explicit: it stores rules but must not claim
 # that active routing changed immediately without a reconnect.
+# Deploy exposes only the actual eth1-bound listener; no configured/example IP is shown.
+if 'id="socks5DeployCard"' not in html or "req('/socks5/status')" not in js:
+    raise SystemExit("Deploy tab does not query live SOCKS5 listener state")
+if 'id="copySocks5Address"' not in html or "$('copySocks5Address').addEventListener('click'" not in js:
+    raise SystemExit("SOCKS5 copy control is missing")
+if 'mux.HandleFunc("/socks5/status"' not in backend:
+    raise SystemExit("SOCKS5 status API route is missing")
+if "state.socks5StatusAvailable&&s.listening&&s.address" not in js:
+    raise SystemExit("SOCKS5 address is not gated on a confirmed listener")
+if "Не удалось получить фактическое состояние SOCKS5" not in js:
+    raise SystemExit("SOCKS5 API failure is not represented as unknown")
 if "Переподключите туннель CSQTT" not in html:
     raise SystemExit("Direct rules must explain that reconnect is required to apply changes")
 
