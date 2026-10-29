@@ -70,9 +70,10 @@ jobs:
           test -f adapt/csqtt-panel-preview.html
           grep -q 'id="page-route"' adapt/csqtt-panel-preview.html
           grep -q 'id="directDomains"' adapt/csqtt-panel-preview.html
-          ! grep -q 'id="directIPs"' adapt/csqtt-panel-preview.html
+          grep -q 'id="directIPs"' adapt/csqtt-panel-preview.html
           grep -q 'id="saveDirectRules"' adapt/csqtt-panel-preview.html
           test "$(grep -o 'data-page="' adapt/csqtt-panel-preview.html | wc -l)" -eq 5
+          node -e 'const fs=require("fs");const h=fs.readFileSync("adapt/csqtt-panel-preview.html","utf8");const nav=h.match(/<nav class="tabs"[\\s\\S]*?<\\/nav>/);if(!nav)process.exit(2);const buttons=[...nav[0].matchAll(/<button\\b[\\s\\S]*?<\\/button>/g)];const pages=buttons.map(x=>x[0].match(/data-page="([^"]+)"/)[1]);const first=buttons[0][0].replace(/<[^>]+>/g,"").trim();if(pages.join(",")!=="connect,settings,deploy,route,logs"||first!=="Подключение"){console.error({pages,first});process.exit(1)}if(!h.includes("id=\\"directDomains\\"")||!h.includes("id=\\"directIPs\\""))process.exit(1)'
           grep -q 'function directRuleErrors()' adapt/csqtt-panel-preview.html
           grep -Fq 'func (t *LinuxTun) ApplyDirectRouting() error' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -q 't.applyDirectRoutingLocked()' adapt/apply-pinned-original-linux-arm64-policy.py
