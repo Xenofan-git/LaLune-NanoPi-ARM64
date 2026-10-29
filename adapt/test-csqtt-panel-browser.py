@@ -43,6 +43,7 @@ def main():
         "captchaMode": "auto", "clientIds": "8202606,6287487",
         "directDomains": "", "directIPs": "", "deviceId": "fixture-device",
     }
+    socks5_state = {"interface":"eth1","protocol":"SOCKS5","auth":"no-auth","monitoring":True,"listening":True,"address":"192.168.4.26:12500"}
     calls = []
     fail_paths = set()
 
@@ -104,6 +105,8 @@ def main():
                 body = {"ok": True}
             else:
                 body = {"ok": False}
+        elif path == "/socks5/status":
+            body = dict(socks5_state)
         elif path == "/deploy/status":
             body = {"deploying": False}
         elif path == "/deploy/log":
@@ -152,6 +155,20 @@ def main():
                     f"active tab missing aria-current state: {name}"
                 )
                 assert page.locator(f'button[data-page="{name}"]').get_attribute("aria-pressed") is None
+                if name == "deploy":
+                    page.wait_for_function("document.querySelector('#socks5Address').value === '192.168.4.26:12500'")
+                    assert page.locator("#socks5State").inner_text() == "Слушатель активен"
+                    assert page.locator("#copySocks5Address").is_enabled()
+                    assert any(method == "GET" and path == "/socks5/status" for method, path, _ in calls)
+                    socks5_state["listening"] = False
+                    socks5_state["address"] = ""
+                    page.evaluate("() => window.dispatchEvent(new Event('focus'))")
+                    page.locator('button[data-page="connect"]').click()
+                    page.locator('button[data-page="deploy"]').click()
+                    page.wait_for_function("document.querySelector('#socks5Address').value === '—'")
+                    assert page.locator("#copySocks5Address").is_disabled()
+                    socks5_state["listening"] = True
+                    socks5_state["address"] = "192.168.4.26:12500"
                 if name == "route":
                     # Route is a full-screen dialog; close it before using bottom navigation again.
                     page.locator("#routeClose").click()
@@ -522,7 +539,7 @@ def main():
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
-    print("CSQTT_CHROMIUM_UI_SMOKE_PASS widths=320,360,390,768,1280 tabs=5 profile-api=PASS connect-disconnect=PASS tunnel-settings=PASS direct-settings-api=PASS deploy-api=PASS logs=PASS captcha-bridge-trusted-origin=PASS captcha-bridge-fail-closed=PASS")
+    print("CSQTT_CHROMIUM_UI_SMOKE_PASS widths=320,360,390,768,1280 tabs=5 profile-api=PASS connect-disconnect=PASS tunnel-settings=PASS direct-settings-api=PASS deploy-api=PASS socks5-live-status=PASS socks5-address-hidden-when-inactive=PASS logs=PASS captcha-bridge-trusted-origin=PASS captcha-bridge-fail-closed=PASS")
 
 
 if __name__ == "__main__":
