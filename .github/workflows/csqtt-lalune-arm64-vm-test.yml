@@ -128,7 +128,7 @@ jobs:
           set -Eeuo pipefail
           RESOLV_BACKUP=/tmp/resolv.conf.socks5-e2e.backup
           cleanup() {
-            if [ -f "$RESOLV_BACKUP" ]; then cp -a "$RESOLV_BACKUP" /etc/resolv.conf; rm -f "$RESOLV_BACKUP"; fi
+            if [ -f "$RESOLV_BACKUP" ]; then cat "$RESOLV_BACKUP" > /etc/resolv.conf; rm -f "$RESOLV_BACKUP"; fi
             pkill -f '/tmp/socks5-echo.py' 2>/dev/null || true
             ip rule del pref 100 fwmark 0x4d53/0xffff lookup 202 2>/dev/null || true
             ip route del blackhole 198.18.86.2/32 2>/dev/null || true
@@ -138,7 +138,7 @@ jobs:
             ip netns del socks-echo 2>/dev/null || true
           }
           cleanup
-          cp -a /etc/resolv.conf "$RESOLV_BACKUP"
+          cp /etc/resolv.conf "$RESOLV_BACKUP"
           trap cleanup EXIT
           ip netns add socks-echo
           ip link add csqtt0 type veth peer name socks-peer
