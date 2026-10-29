@@ -73,7 +73,25 @@ jobs:
           grep -q 'id="directIPs"' adapt/csqtt-panel-preview.html
           grep -q 'id="saveDirectRules"' adapt/csqtt-panel-preview.html
           test "$(grep -o 'data-page="' adapt/csqtt-panel-preview.html | wc -l)" -eq 5
-          node -e 'const fs=require("fs");const h=fs.readFileSync("adapt/csqtt-panel-preview.html","utf8");const start=h.indexOf("<nav class=\\"tabs\\"");const end=h.indexOf("</nav>",start);if(start<0||end<0)process.exit(2);const nav=h.slice(start,end);const buttons=nav.split("<button").slice(1).map(x=>x.split("</button>")[0]);const pages=buttons.map(x=>x.match(/data-page="([^"]+)"/)[1]);const first=buttons[0].replace(/<[^>]*>/g,"").trim();if(pages.join(",")!=="connect,settings,deploy,route,logs"||first!=="Подключение"){console.error({pages,first});process.exit(1)}if(!h.includes("id=\\"directDomains\\"")||!h.includes("id=\\"directIPs\\""))process.exit(1)'
+          node <<'NODE'
+          const fs = require("fs");
+          const html = fs.readFileSync("adapt/csqtt-panel-preview.html", "utf8");
+          const start = html.indexOf('<nav class="tabs"');
+          const end = html.indexOf("</nav>", start);
+          if (start < 0 || end < 0) throw new Error("tabs navigation not found");
+          const nav = html.slice(start, end);
+          const buttons = nav.split("<button").slice(1).map(part => part.split("</button>")[0]);
+          const pages = buttons.map(button => button.match(/data-page="([^"]+)"/)?.[1] ?? "");
+          const first = (buttons[0] ?? "").replace(/<[^>]*>/g, "").trim();
+          if (pages.join(",") !== "connect,settings,deploy,route,logs" || first !== "Подключение") {
+            throw new Error(JSON.stringify({ pages, first }));
+          }
+          for (const id of ["directDomains", "directIPs"]) {
+            if (!new RegExp('\\\\bid="' + id + '"').test(html)) {
+              throw new Error("missing independent Direct field: " + id);
+            }
+          }
+          NODE
           grep -q 'function directRuleErrors()' adapt/csqtt-panel-preview.html
           grep -Fq 'func (t *LinuxTun) ApplyDirectRouting() error' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -q 't.applyDirectRoutingLocked()' adapt/apply-pinned-original-linux-arm64-policy.py
