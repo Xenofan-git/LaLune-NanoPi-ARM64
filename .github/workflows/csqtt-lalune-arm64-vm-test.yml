@@ -186,8 +186,12 @@ jobs:
           fi
           ip route get 198.18.86.2 mark 0x4d53 | grep -q 'table 202'
           chmod 0755 /home/tester/socks5-marked-e2e-arm64.test
-          CSQTT_SOCKS5_MARKED_E2E=1 CSQTT_SOCKS5_E2E_TARGET=198.18.86.2 /home/tester/socks5-marked-e2e-arm64.test -test.run '^TestSocks5MarkedSocketEndToEnd          set -euo pipefail
-          mkdir -p vm/backend-installer-test/server-assets
+          CSQTT_SOCKS5_MARKED_E2E=1 CSQTT_SOCKS5_E2E_TARGET=198.18.86.2 /home/tester/socks5-marked-e2e-arm64.test -test.run TestSocks5MarkedSocketEndToEnd -test.v
+          echo SOCKS5_TCP_UDP_SO_MARK_POLICY_ROUTING_E2E_PASS
+          SOCKS_MARKED_E2E
+
+      - name: Test backend installer lifecycle and ownership safety in disposable ARM64 VM
+        run: |
           cp vm/real/install-original-linux-backend.sh vm/backend-installer-test/
           cat > vm/backend-installer-test/fake-backend <<'EOF'
           #!/bin/sh
