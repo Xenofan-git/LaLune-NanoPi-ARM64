@@ -289,7 +289,8 @@ func (s *Socks5Server) dialTCP(addr string) (net.Conn, error) {
 		resolved, err = resolveTCPAddrMarked(ctx, addr)
 	}
 	if err != nil { return nil, err }
-	return laluneDialer("tcp").DialContext(ctx, "tcp", resolved)
+	tcpDialer := laluneDialer("tcp")
+	return tcpDialer.DialContext(ctx, "tcp", resolved)
 }
 
 // resolveTCPAddrMarked performs hostname resolution through sockets carrying
@@ -309,7 +310,8 @@ func resolveTCPAddrMarkedWithResolver(ctx context.Context, target string, resolv
 		resolver = &net.Resolver{
 			PreferGo: true,
 			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-				return laluneDialer(network).DialContext(ctx, network, address)
+				markedDialer := laluneDialer(network)
+				return markedDialer.DialContext(ctx, network, address)
 			},
 		}
 	}
@@ -585,7 +587,7 @@ func resolveUDPAddrMarkedContext(ctx context.Context, target string) (*net.UDPAd
 	resolver := &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			return laluneDialer(network).DialContext(ctx, network, address)
+			return markedDialer.DialContext(ctx, network, address)
 		},
 	}
 	ips, err := resolver.LookupIPAddr(ctx, host)
