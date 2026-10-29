@@ -415,14 +415,15 @@ func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 		relay, err := net.DialUDP("udp", nil, &net.UDPAddr{IP:relayIP, Port:int(binary.BigEndian.Uint16(reply[8:10]))})
 		if err != nil { t.Fatal(err) }
 		defer relay.Close()
-		_ = relay.SetDeadline(time.Now().Add(6*time.Second))
+		_ = relay.SetDeadline(time.Now().Add(20*time.Second))
 		ip := net.ParseIP(target).To4()
 		if ip == nil { t.Fatalf("invalid E2E target IPv4 address %q", target) }
-		const count = 32
+		const count = 100
 		for i := 0; i < count; i++ {
 			packet := []byte{0,0,0,1,ip[0],ip[1],ip[2],ip[3],byte(udpPort>>8),byte(udpPort)}
 			packet = append(packet, []byte(fmt.Sprintf("marked-udp-%02d", i))...)
 			if _, err := relay.Write(packet); err != nil { t.Fatal(err) }
+			time.Sleep(100 * time.Millisecond)
 		}
 		seen := make(map[string]bool, count)
 		got := make([]byte, 1024)
@@ -435,6 +436,7 @@ func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 			seen[payload] = true
 		}
 		if len(seen) != count { t.Fatalf("received %d/%d marked UDP replies", len(seen), count) }
+		t.Logf("UDP_SOAK_PASS duration>=10s sent=%d received=%d", count, len(seen))
 	})
 }
 
