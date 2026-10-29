@@ -126,7 +126,10 @@ jobs:
           "${SCP[@]}" vm/real/socks5-marked-e2e-arm64.test tester@127.0.0.1:/home/tester/socks5-marked-e2e-arm64.test
           "${SSH[@]}" 'sudo bash -se' <<'SOCKS_MARKED_E2E'
           set -Eeuo pipefail
+          RESOLV_BACKUP=/tmp/resolv.conf.socks5-e2e.backup
+          cp -a /etc/resolv.conf "$RESOLV_BACKUP"
           cleanup() {
+            if [ -f "$RESOLV_BACKUP" ]; then cp -a "$RESOLV_BACKUP" /etc/resolv.conf; rm -f "$RESOLV_BACKUP"; fi
             pkill -f '/tmp/socks5-echo.py' 2>/dev/null || true
             ip rule del pref 100 fwmark 0x4d53/0xffff lookup 202 2>/dev/null || true
             ip route del blackhole 198.18.86.2/32 2>/dev/null || true
@@ -156,7 +159,7 @@ jobs:
           ip route add 198.18.86.2/32 via 198.18.0.2 dev csqtt0 table 202
           ip rule add pref 100 fwmark 0x4d53/0xffff lookup 202
           cat >/tmp/socks5-echo.py <<'PY'
-          import socket, threading
+          import socket, threading, struct
           addr="198.18.86.2"
           tcp=socket.socket(); tcp.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); tcp.bind((addr,18080)); tcp.listen(32)
           def handle(c):
@@ -171,10 +174,34 @@ jobs:
                   c,_=tcp.accept(); threading.Thread(target=handle,args=(c,),daemon=True).start()
           threading.Thread(target=accept,daemon=True).start()
           udp=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); udp.bind((addr,18081))
-          while True:
-              b,a=udp.recvfrom(65535); udp.sendto(b,a)
+          def udp_echo():
+              while True:
+                  b,a=udp.recvfrom(65535); udp.sendto(b,a)
+          threading.Thread(target=udp_echo,daemon=True).start()
+          dns=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); dns.bind((addr,53))
+          def dns_answer():
+              while True:
+                  q,peer=dns.recvfrom(2048)
+                  if len(q)<17: continue
+                  p=12; labels=[]
+                  try:
+                      while q[p]:
+                          n=q[p]; p+=1; labels.append(q[p:p+n].decode("ascii").lower()); p+=n
+                      p+=1
+                      qtype,qclass=struct.unpack("!HH",q[p:p+4])
+                      question=q[12:p+4]
+                      name=".".join(labels)
+                      answer=b""
+                      if name=="marked.socks.test" and qtype==1 and qclass==1:
+                          answer=b"\\xc0\\x0c"+struct.pack("!HHIH",1,1,60,4)+socket.inet_aton(addr)
+                      header=q[:2]+struct.pack("!HHHHH",0x8180,1,1 if answer else 0,0,0)
+                      dns.sendto(header+question+answer,peer)
+                  except Exception: continue
+          threading.Thread(target=dns_answer,daemon=True).start()
+          threading.Event().wait()
           PY
           ip netns exec socks-echo nohup python3 /tmp/socks5-echo.py >/tmp/socks5-echo.log 2>&1 </dev/null &
+          printf 'nameserver 198.18.86.2\\noptions timeout:1 attempts:2\\n' > /etc/resolv.conf
           for n in $(seq 1 30); do
             if ip netns exec socks-echo python3 -c 'import socket;s=socket.socket();s.settimeout(.2);s.connect(("198.18.86.2",18080));s.close()' 2>/dev/null; then break; fi
             sleep 0.2
@@ -185,6 +212,17 @@ jobs:
             echo "unmarked traffic unexpectedly selected the marked egress" >&2; exit 1
           fi
           ip route get 198.18.86.2 mark 0x4d53 | grep -q 'table 202'
+          ip -4 rule show | grep -Eq 'fwmark 0x4d53/0xffff.*lookup 202'
+          ip -4 route show table 202 | grep -Fq '198.18.86.2'
+          ip link show dev csqtt0 | grep -q 'state UP'
+          # DNS must itself traverse the marked policy route; the DNS fixture
+          # is intentionally reachable only through table 202.
+          python3 - <<'PYDNS'
+          import socket,struct
+          q=b'\\x12\\x34\\x01\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00'+b''.join(bytes([len(x)])+x.encode() for x in 'marked.socks.test'.split('.'))+b'\\x00\\x00\\x01\\x00\\x01'
+          s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(2);s.sendto(q,('198.18.86.2',53));r,_=s.recvfrom(512)
+          assert len(r)>len(q) and struct.unpack('!H',r[6:8])[0]==1, r
+          PYDNS
           chmod 0755 /home/tester/socks5-marked-e2e-arm64.test
           CSQTT_SOCKS5_MARKED_E2E=1 CSQTT_SOCKS5_E2E_TARGET=198.18.86.2 /home/tester/socks5-marked-e2e-arm64.test -test.run TestSocks5MarkedSocketEndToEnd -test.v
           echo SOCKS5_TCP_UDP_SO_MARK_POLICY_ROUTING_E2E_PASS
