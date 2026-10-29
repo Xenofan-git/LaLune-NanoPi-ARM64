@@ -127,7 +127,6 @@ jobs:
           "${SSH[@]}" 'sudo bash -se' <<'SOCKS_MARKED_E2E'
           set -Eeuo pipefail
           RESOLV_BACKUP=/tmp/resolv.conf.socks5-e2e.backup
-          cp -a /etc/resolv.conf "$RESOLV_BACKUP"
           cleanup() {
             if [ -f "$RESOLV_BACKUP" ]; then cp -a "$RESOLV_BACKUP" /etc/resolv.conf; rm -f "$RESOLV_BACKUP"; fi
             pkill -f '/tmp/socks5-echo.py' 2>/dev/null || true
@@ -139,6 +138,7 @@ jobs:
             ip netns del socks-echo 2>/dev/null || true
           }
           cleanup
+          cp -a /etc/resolv.conf "$RESOLV_BACKUP"
           trap cleanup EXIT
           ip netns add socks-echo
           ip link add csqtt0 type veth peer name socks-peer
@@ -220,7 +220,7 @@ jobs:
           python3 - <<'PYDNS'
           import socket,struct
           q=b'\\x12\\x34\\x01\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00'+b''.join(bytes([len(x)])+x.encode() for x in 'marked.socks.test'.split('.'))+b'\\x00\\x00\\x01\\x00\\x01'
-          s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(2);s.sendto(q,('198.18.86.2',53));r,_=s.recvfrom(512)
+          s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.setsockopt(socket.SOL_SOCKET,36,0x4d53);s.settimeout(2);s.sendto(q,('198.18.86.2',53));r,_=s.recvfrom(512)
           assert len(r)>len(q) and struct.unpack('!H',r[6:8])[0]==1, r
           PYDNS
           chmod 0755 /home/tester/socks5-marked-e2e-arm64.test
