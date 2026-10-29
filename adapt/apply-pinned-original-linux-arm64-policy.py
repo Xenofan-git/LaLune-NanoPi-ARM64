@@ -446,7 +446,7 @@ SETTINGS_PAGE = UPSTREAM / "Frontend/Core/lib/pages/settings_page.dart"
 replace_once(
     COMMON,
     '''\tValidateVkHashes        bool   `json:"validateVkHashes"`\n\n\t// Экспериментальные функции.''',
-    '''\tValidateVkHashes        bool   `json:"validateVkHashes"`\n\tDirectDomains           string `json:"directDomains"`\n\n\t// Экспериментальные функции.''',
+    '''\tValidateVkHashes        bool   `json:"validateVkHashes"`\n\tDirectDomains           string `json:"directDomains"`\n\tDirectIPs               string `json:"directIPs"`\n\n\t// Экспериментальные функции.''',
 )
 
 linux_direct = r'''
@@ -567,7 +567,7 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \t\t}
 \t}()
 \tsettings := t.app.core.GetSettings()
-\tdomains, _, err := prepareDirectPlan(settings.DirectDomains)
+\tdomains, _, err := prepareDirectPlan(settings.DirectDomains + "," + settings.DirectIPs)
 \tif err != nil { return err }
 
 \tmutating = true
@@ -634,6 +634,9 @@ func (t *LinuxTun) applyDirectRoutingLocked() (retErr error) {
 \t\tif err := writeDirectFileAtomic(directDnsmasqPath, []byte(dnsmasq.String()), 0644); err != nil {
 \t\t\treturn fmt.Errorf("атомарная запись dnsmasq direct-конфига: %w", err)
 \t\t}
+\t\tif err := ensureDirectDnsmasqInclude(); err != nil {
+\t\t\treturn fmt.Errorf("подключение Direct dnsmasq-конфига: %w", err)
+\t\t}
 \t\tdnsmasqChanged = true
 \t}
 \tif dnsmasqChanged {
@@ -692,12 +695,12 @@ LINUX.write_text(s)
 # Add direct routing preferences to the persisted settings model.
 s = API_DART.read_text()
 replacements = [
-    ('''  final bool validateVkHashes;\n\n  /// Экспериментальные функции.''', '''  final bool validateVkHashes;\n  final String directDomains;\n\n  /// Экспериментальные функции.'''),
-    ('''    this.validateVkHashes = false,\n    this.enableSmartTunnel = false,''', '''    this.validateVkHashes = false,\n    this.directDomains = '',\n    this.enableSmartTunnel = false,'''),
-    ('''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      enableSmartTunnel:''', '''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      directDomains: (j['directDomains'] ?? '') as String,\n      enableSmartTunnel:'''),
-    ('''    'validateVkHashes': validateVkHashes,\n    'enableSmartTunnel': enableSmartTunnel,''', '''    'validateVkHashes': validateVkHashes,\n    'directDomains': directDomains,\n    'enableSmartTunnel': enableSmartTunnel,'''),
-    ('''    String? vkAuthMode, bool? allowHashRedistribution, bool? validateVkHashes,\n    bool? enableSmartTunnel,''', '''    String? vkAuthMode, bool? allowHashRedistribution, bool? validateVkHashes,\n    String? directDomains,\n    bool? enableSmartTunnel,'''),
-    ('''    validateVkHashes: validateVkHashes ?? this.validateVkHashes,\n    enableSmartTunnel:''', '''    validateVkHashes: validateVkHashes ?? this.validateVkHashes,\n    directDomains: directDomains ?? this.directDomains,\n    enableSmartTunnel:'''),
+    ('''  final bool validateVkHashes;\n\n  /// Экспериментальные функции.''', '''  final bool validateVkHashes;\n  final String directDomains;\n  final String directIPs;\n\n  /// Экспериментальные функции.'''),
+    ('''    this.validateVkHashes = false,\n    this.enableSmartTunnel = false,''', '''    this.validateVkHashes = false,\n    this.directDomains = '',\n    this.directIPs = '',\n    this.enableSmartTunnel = false,'''),
+    ('''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      enableSmartTunnel:''', '''      validateVkHashes: (j['validateVkHashes'] ?? false) as bool,\n      directDomains: (j['directDomains'] ?? '') as String,\n      directIPs: (j['directIPs'] ?? '') as String,\n      enableSmartTunnel:'''),
+    ('''    'validateVkHashes': validateVkHashes,\n    'enableSmartTunnel': enableSmartTunnel,''', '''    'validateVkHashes': validateVkHashes,\n    'directDomains': directDomains,\n    'directIPs': directIPs,\n    'enableSmartTunnel': enableSmartTunnel,'''),
+    ('''    String? vkAuthMode, bool? allowHashRedistribution, bool? validateVkHashes,\n    bool? enableSmartTunnel,''', '''    String? vkAuthMode, bool? allowHashRedistribution, bool? validateVkHashes,\n    String? directDomains, String? directIPs,\n    bool? enableSmartTunnel,'''),
+    ('''    validateVkHashes: validateVkHashes ?? this.validateVkHashes,\n    enableSmartTunnel:''', '''    validateVkHashes: validateVkHashes ?? this.validateVkHashes,\n    directDomains: directDomains ?? this.directDomains,\n    directIPs: directIPs ?? this.directIPs,\n    enableSmartTunnel:'''),
 ]
 for old, new in replacements:
     if s.count(old) != 1:

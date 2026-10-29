@@ -14,6 +14,7 @@ on:
       - feature/csqtt-original-app-panel
       - fix/socks5-dynamic-address
       - fix/production-recovery-single-artifact
+      - fix/direct-ip-hashmode-captcha-e2e
   workflow_dispatch:
 
 permissions:
@@ -69,9 +70,29 @@ jobs:
           test -f adapt/csqtt-panel-preview.html
           grep -q 'id="page-route"' adapt/csqtt-panel-preview.html
           grep -q 'id="directDomains"' adapt/csqtt-panel-preview.html
-          ! grep -q 'id="directIPs"' adapt/csqtt-panel-preview.html
+          grep -q 'id="directIPs"' adapt/csqtt-panel-preview.html
           grep -q 'id="saveDirectRules"' adapt/csqtt-panel-preview.html
           test "$(grep -o 'data-page="' adapt/csqtt-panel-preview.html | wc -l)" -eq 5
+          node <<'NODE'
+          const fs = require("fs");
+          const html = fs.readFileSync("adapt/csqtt-panel-preview.html", "utf8");
+          const start = html.indexOf('<nav class="tabs"');
+          const end = html.indexOf("</nav>", start);
+          if (start < 0 || end < 0) throw new Error("tabs navigation not found");
+          const nav = html.slice(start, end);
+          const buttons = nav.split("<button").slice(1).map(part => part.split("</button>")[0]);
+          const pages = buttons.map(button => button.match(/data-page="([^"]+)"/)?.[1] ?? "");
+          const firstButton = buttons[0] ?? "";
+          const first = firstButton.slice(firstButton.indexOf(">") + 1).replace(/<[^>]*>/g, "").trim();
+          if (pages.join(",") !== "connect,settings,deploy,route,logs" || first !== "Подключение") {
+            throw new Error(JSON.stringify({ pages, first }));
+          }
+          for (const id of ["directDomains", "directIPs"]) {
+            if (!html.includes('id="' + id + '"')) {
+              throw new Error("missing independent Direct field: " + id);
+            }
+          }
+          NODE
           grep -q 'function directRuleErrors()' adapt/csqtt-panel-preview.html
           grep -Fq 'func (t *LinuxTun) ApplyDirectRouting() error' adapt/apply-pinned-original-linux-arm64-policy.py
           grep -q 't.applyDirectRoutingLocked()' adapt/apply-pinned-original-linux-arm64-policy.py
@@ -256,6 +277,7 @@ jobs:
           cp adapt/headless_api_contract_test.go upstream-lalune/Desktop/Linux/headless_api_contract_test.go
           cp adapt/vktoken_input_test.go upstream-lalune/Desktop/Libs/vktoken_input_test.go
           cp adapt/linux_tun_vm_test.go upstream-lalune/Desktop/Linux/linux_tun_vm_test.go
+          cp adapt/lalune_socks5_linux_test.go upstream-lalune/Desktop/Linux/lalune_socks5_linux_test.go
           cp adapt/linux_core_argv_test.go upstream-lalune/Desktop/Linux/linux_core_argv_test.go
           mkdir -p upstream-lalune/Desktop/Linux/frontend
           cp -a upstream-lalune/Frontend/Core/build/web/. upstream-lalune/Desktop/Linux/frontend/
@@ -302,6 +324,10 @@ jobs:
           GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go test -c -o "$GITHUB_WORKSPACE/client-tun-tests-arm64" .
           file "$GITHUB_WORKSPACE/client-tun-tests-arm64"
           test -s "$GITHUB_WORKSPACE/client-tun-tests-arm64"
+          # Compile the real SOCKS5 fwmark E2E test for execution in the disposable ARM64 guest.
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go test -c -o "$GITHUB_WORKSPACE/socks5-marked-e2e-arm64.test" .
+          file "$GITHUB_WORKSPACE/socks5-marked-e2e-arm64.test"
+          test -s "$GITHUB_WORKSPACE/socks5-marked-e2e-arm64.test"
 
       - name: Build ARM64
         working-directory: upstream-lalune/Desktop/Linux
@@ -587,6 +613,7 @@ jobs:
           printf '%s\n' 'CSQTT-WIRE-4' > dist/CSQTT_SERVER_PROTOCOL
           cp upstream-lalune/Desktop/Linux/lalune-original-linux-arm64 dist/
           install -m 0755 client-tun-tests-arm64 dist/client-tun-tests-arm64
+          install -m 0755 socks5-marked-e2e-arm64.test dist/socks5-marked-e2e-arm64.test
           cp upstream-lalune/Core/DeployManager/target/aarch64-unknown-linux-gnu/release/deploy-manager dist/
           mkdir -p dist/deploy-e2e/server-assets
           install -m 0755 /tmp/lalune-original-linux-amd64-e2e dist/deploy-e2e/lalune-original-linux-amd64

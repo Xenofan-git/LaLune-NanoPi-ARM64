@@ -106,6 +106,18 @@ func csqttDeviceID(core *libs.AppCore) string {
     return strings.TrimSpace(id)
 }
 
+// validateTunnelAuth is shared by connect and reconnect so neither API path
+// can bypass the same fail-closed credential and stable-device-ID checks.
+func validateTunnelAuth(app *App) error {
+    if _, err := loadTunnelAuthPassword(); err != nil {
+        return fmt.Errorf("пароль туннеля не задан")
+    }
+    if app == nil || csqttDeviceID(app.core) == "" {
+        return fmt.Errorf("ID устройства LaLune не задан")
+    }
+    return nil
+}
+
 func writeRaw(w http.ResponseWriter, value string) {
     w.Header().Set("Content-Type", "application/json; charset=utf-8")
     w.WriteHeader(http.StatusOK)
@@ -382,8 +394,7 @@ func apiHandler(app *App) http.Handler {
             http.Error(w, "bad json", http.StatusBadRequest)
             return
         }
-        if _, err := loadTunnelAuthPassword(); err != nil { http.Error(w, "пароль туннеля не задан", http.StatusPreconditionRequired); return }
-        if csqttDeviceID(app.core) == "" { http.Error(w, "ID устройства LaLune не задан", http.StatusPreconditionRequired); return }
+        if err := validateTunnelAuth(app); err != nil { http.Error(w, err.Error(), http.StatusPreconditionRequired); return }
         writeJSON(w, map[string]bool{"ok": app.Connect(body.ID)})
     })
 
@@ -399,6 +410,7 @@ func apiHandler(app *App) http.Handler {
             http.Error(w, "bad json", http.StatusBadRequest)
             return
         }
+        if err := validateTunnelAuth(app); err != nil { http.Error(w, err.Error(), http.StatusPreconditionRequired); return }
         _ = app.Disconnect()
         writeJSON(w, map[string]bool{"ok": app.Connect(body.ID)})
     })
@@ -416,6 +428,19 @@ func apiHandler(app *App) http.Handler {
     mux.HandleFunc("/logs/clear", func(w http.ResponseWriter, r *http.Request) {
         if !method(w, r, http.MethodPost) { return }
         writeJSON(w, map[string]bool{"ok": app.ClearLogs()})
+    })
+
+    mux.HandleFunc("/socks5/status", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        if !privateClient(r) {
+            http.Error(w, "SOCKS5 status is available only from LAN or Tailscale", http.StatusForbidden)
+            return
+        }
+        if app == nil || app.socks == nil {
+            writeJSON(w, Socks5Status{Interface: "eth1", Protocol: "SOCKS5", Auth: "no-auth"})
+            return
+        }
+        writeJSON(w, app.socks.Status())
     })
 
     mux.HandleFunc("/deploy", func(w http.ResponseWriter, r *http.Request) {

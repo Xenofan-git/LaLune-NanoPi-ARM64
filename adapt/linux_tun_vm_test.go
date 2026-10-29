@@ -425,7 +425,7 @@ func TestDirectGeneratesDualStackNftDnsAndPolicyRules(t *testing.T) {
     logPath := installTunCommandShims(t, "")
     isolateDirectFilesystem(t)
     app := tunTestApp()
-    if !app.SaveSettings(`{"directDomains":"example.com\n192.0.2.44\n2001:db8::44"}`) {
+    if !app.SaveSettings(`{"directDomains":"example.com","directIPs":"192.0.2.44\n2001:db8::44"}`) {
         t.Fatal("could not persist Direct test settings")
     }
     if err := app.tun.SetupRoutes("192.0.2.10", "8.8.8.8"); err != nil {
@@ -448,9 +448,17 @@ func TestDirectGeneratesDualStackNftDnsAndPolicyRules(t *testing.T) {
         "nftset=/example.com/4#inet#lalune_direct#direct4",
         "nftset=/example.com/6#inet#lalune_direct#direct6",
     } {
-        if !strings.Contains(string(dns), required) { t.Fatalf("dnsmasq config missing %q:\n%s", required, dns) }
+        if !strings.Contains(string(dns), required) { t.Fatalf("dnsmasq config missing %q:\\n%s", required, dns) }
+    }
+    mainConfig, err := os.ReadFile(directDnsmasqMain)
+    if err != nil { t.Fatal(err) }
+    if !strings.Contains(string(mainConfig), directDnsmasqInclude) {
+        t.Fatalf("dnsmasq main config does not include Direct nftset rules:\\n%s", mainConfig)
     }
     log := readTunCommandLog(t, logPath)
+    if !strings.Contains(log, "SUDO systemctl restart dnsmasq") {
+        t.Fatalf("dnsmasq was not restarted after enabling domain Direct rules:\\n%s", log)
+    }
     for _, required := range []string{
         "SUDO nft -c -f " + directNftPath,
         "SUDO nft -f " + directNftPath,

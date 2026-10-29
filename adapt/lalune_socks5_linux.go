@@ -69,6 +69,29 @@ func NewSocks5Server(addr string) *Socks5Server {
 	return &Socks5Server{addr: addr, active: make(map[net.Conn]struct{})}
 }
 
+// Socks5Status is a read-only snapshot of the actual listener, not desired configuration.
+type Socks5Status struct {
+	Interface string `json:"interface"`
+	Protocol string `json:"protocol"`
+	Auth string `json:"auth"`
+	Monitoring bool `json:"monitoring"`
+	Listening bool `json:"listening"`
+	Address string `json:"address"`
+}
+
+func (s *Socks5Server) Status() Socks5Status {
+	status := Socks5Status{Interface: "eth1", Protocol: "SOCKS5", Auth: "no-auth"}
+	if s == nil { return status }
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	status.Monitoring = s.stop != nil && !s.stopped
+	if s.ln != nil {
+		status.Listening = true
+		status.Address = s.ln.Addr().String()
+	}
+	return status
+}
+
 func (s *Socks5Server) listenAddress() (string, error) {
 	if s.resolveAddr != nil { return s.resolveAddr() }
 	if s.addr == "eth1:12500" { return laluneSocks5ListenAddr() }

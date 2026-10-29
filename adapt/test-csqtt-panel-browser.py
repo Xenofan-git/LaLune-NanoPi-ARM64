@@ -31,6 +31,10 @@ def main():
     ]
     selected = {"profile": profiles[0]}
     vpn_connected = {"value": False}
+    hold_connecting = {"value": False}
+    captcha_state = {"pending": False}
+    captcha_results = []
+    vk_token = {"hasToken": True}
     # A fresh device has no tunnel password; the success path provisions one below.
     tunnel_auth = {"configured": False}
     settings = {
@@ -39,6 +43,7 @@ def main():
         "captchaMode": "auto", "clientIds": "8202606,6287487",
         "directDomains": "", "directIPs": "", "deviceId": "fixture-device",
     }
+    socks5_state = {"interface":"eth1","protocol":"SOCKS5","auth":"no-auth","monitoring":True,"listening":True,"address":"192.168.4.26:12500"}
     calls = []
     fail_paths = set()
 
@@ -82,17 +87,26 @@ def main():
         elif path == "/vpn/status":
             body = {"connected": vpn_connected["value"]}
         elif path == "/vpn/connect" and method == "POST":
-            vpn_connected["value"] = True
+            if not hold_connecting["value"]:
+                vpn_connected["value"] = True
             body = {"ok": True}
         elif path == "/vpn/disconnect" and method == "POST":
             vpn_connected["value"] = False
             body = {"ok": True}
         elif path == "/vk/state":
-            body = {"hasToken": False, "fetching": False}
+            body = {**vk_token, "fetching": False}
         elif path == "/captcha/state":
-            body = {"pending": False}
+            body = dict(captcha_state)
         elif path == "/captcha/result" and method == "POST":
-            body = {"ok": True}
+            result = json.loads(request.post_data or "{}")
+            captcha_results.append(result)
+            if result.get("sessionToken") == captcha_state.get("sessionToken") and result.get("result"):
+                captcha_state["pending"] = False
+                body = {"ok": True}
+            else:
+                body = {"ok": False}
+        elif path == "/socks5/status":
+            body = dict(socks5_state)
         elif path == "/deploy/status":
             body = {"deploying": False}
         elif path == "/deploy/log":
@@ -141,6 +155,20 @@ def main():
                     f"active tab missing aria-current state: {name}"
                 )
                 assert page.locator(f'button[data-page="{name}"]').get_attribute("aria-pressed") is None
+                if name == "deploy":
+                    page.wait_for_function("document.querySelector('#socks5Address').value === '192.168.4.26:12500'")
+                    assert page.locator("#socks5State").inner_text() == "Слушатель активен"
+                    assert page.locator("#copySocks5Address").is_enabled()
+                    assert any(method == "GET" and path == "/socks5/status" for method, path, _ in calls)
+                    socks5_state["listening"] = False
+                    socks5_state["address"] = ""
+                    page.evaluate("() => window.dispatchEvent(new Event('focus'))")
+                    page.locator('button[data-page="connect"]').click()
+                    page.locator('button[data-page="deploy"]').click()
+                    page.wait_for_function("document.querySelector('#socks5Address').value === '—'")
+                    assert page.locator("#copySocks5Address").is_disabled()
+                    socks5_state["listening"] = True
+                    socks5_state["address"] = "192.168.4.26:12500"
                 if name == "route":
                     # Route is a full-screen dialog; close it before using bottom navigation again.
                     page.locator("#routeClose").click()
@@ -219,19 +247,113 @@ def main():
             assert any(method == "POST" and path == "/vpn/connect" for method, path, _ in calls)
             assert any(method == "POST" and path == "/vpn/disconnect" for method, path, _ in calls)
 
+            # Hash acquisition mode contract: all three original CSQTT modes
+            # remain selectable and persist independently of VK credential mode.
+            page.locator('button[data-page="settings"]').click()
+            # Manual mode is usable without a VK token; both automatic modes
+            # must refuse persistence until token state confirms authorization.
+            vk_token["hasToken"] = False
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_function("document.querySelector('#profileList .profile') !== null")
+            page.locator('button[data-page="settings"]').click()
+            page.wait_for_function("document.querySelector('#vkBadge').textContent.includes('Нет токена')")
+            page.locator("#authMode").select_option("manual")
+            page.locator("#saveSettings").click()
+            page.wait_for_function("document.querySelector('#toast').textContent.includes('Настройки сохранены')")
+            saved_before_token = len([1 for method, path, raw in calls if method == "POST" and path == "/settings" and raw])
+            for mode in ("autoApi", "autoVk"):
+                page.locator("#authMode").select_option(mode)
+                page.locator("#saveSettings").click()
+                page.wait_for_function("document.querySelector('#toast').textContent.includes('сначала авторизуйтесь в VK')")
+                saved_now = len([1 for method, path, raw in calls if method == "POST" and path == "/settings" and raw])
+                assert saved_now == saved_before_token, f"{mode} was persisted without a VK token"
+            vk_token["hasToken"] = True
+            page.reload(wait_until="domcontentloaded")
+            page.wait_for_function("document.querySelector('#profileList .profile') !== null")
+            page.locator('button[data-page="settings"]').click()
+            page.wait_for_function("document.querySelector('#vkBadge').textContent.includes('Токен есть')")
+            for mode in ("manual", "autoApi", "autoVk"):
+                page.locator("#authMode").select_option(mode)
+                page.locator("#saveSettings").click()
+                page.wait_for_function(
+                    "(mode) => document.querySelector('#authMode').value === mode",
+                    arg=mode,
+                )
+                page.wait_for_function("document.querySelector('#toast').textContent.includes('Настройки сохранены')")
+                stored_modes = [json.loads(raw) for method, path, raw in calls
+                                if method == "POST" and path == "/settings" and raw]
+                assert stored_modes[-1]["authMode"] == mode, f"hash mode {mode} did not persist"
+
+            # Exhausted automatic CAPTCHA attempts are represented by a pending
+            # manual challenge from the backend. The real modal must appear only
+            # after Connect has armed the current connection attempt.
+            page.locator('button[data-page="connect"]').click()
+            hold_connecting["value"] = True
+            captcha_state.update({
+                "pending": True,
+                "mode": "manual",
+                "sessionToken": "fixture-manual-captcha-session",
+                "redirectUri": "https://id.vk.ru/not_robot_captcha?expired_at=4102444800",
+            })
+            page.locator("#power").click()
+            page.wait_for_function(
+                "() => !document.querySelector('#captchaOverlay').classList.contains('hidden')"
+            )
+            assert "Автоматические попытки завершены" in page.locator("#captchaModalText").inner_text()
+            assert page.locator("#openCaptchaModal").is_visible()
+            page.locator("#captchaModalAnswer").fill("fixture-manual-vk-success-token")
+            page.locator("#submitCaptchaModal").click()
+            page.wait_for_function(
+                "() => document.querySelector('#captchaOverlay').classList.contains('hidden')"
+            )
+            assert captcha_results and captcha_results[-1] == {
+                "sessionToken": "fixture-manual-captcha-session",
+                "result": "fixture-manual-vk-success-token",
+            }, "manual CAPTCHA answer did not reach /captcha/result with the active session"
+            assert captcha_state["pending"] is False, "fixture backend did not complete the pending CAPTCHA"
+
+            # Stale/foreign session tokens must be rejected by the API contract.
+            stale = page.evaluate("""async () => {
+              const r = await fetch('/api/captcha/result', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({sessionToken:'old-or-foreign-session', result:'forged-answer'})
+              });
+              return {status:r.status, body:await r.json()};
+            }""")
+            assert stale["status"] == 200 and stale["body"].get("ok") is False, (
+                f"stale CAPTCHA session was not rejected: {stale!r}"
+            )
+            hold_connecting["value"] = False
+            vpn_connected["value"] = True
+            page.wait_for_timeout(5500)
+            page.wait_for_function(
+                "() => document.querySelector('#power').getAttribute('aria-pressed') === 'true'"
+            )
+            vpn_connected["value"] = False
+            captcha_state.update({"pending": False, "mode": "", "sessionToken": "", "redirectUri": ""})
+
             # Direct rules are validated and persisted through the settings API.
             page.locator('button[data-page="route"]').click()
             assert page.locator("#directDomains").count() == 1
-            assert page.locator("#directIPs").count() == 0, "Route tab must use one combined Direct list"
-            page.locator("#directDomains").fill("example.com\n192.0.2.1\n2001:db8::1")
+            assert page.locator("#directIPs").count() == 1, "Route tab must expose a separate IP list"
+            page.locator("#directDomains").fill("example.com\napi.example.com")
+            page.locator("#directIPs").fill("192.0.2.1\n2001:db8::1")
             page.locator("#saveDirectRules").click()
             page.wait_for_function("document.querySelector('#routeMessage').textContent.includes('Правила сохранены')")
             saved = [json.loads(raw) for method, path, raw in calls
                      if method == "POST" and path == "/settings" and raw]
-            assert saved and saved[-1]["directDomains"] == "example.com\n192.0.2.1\n2001:db8::1", (
-                "Direct domains were not persisted by the settings API"
+            assert saved and saved[-1]["directDomains"] == "example.com\napi.example.com", (
+                "Direct domains were not persisted separately by the settings API"
             )
-            assert "directIPs" not in saved[-1], "Direct IP rules must not be sent to the settings API"
+            assert saved[-1]["directIPs"] == "192.0.2.1\n2001:db8::1", (
+                "Direct IPv4/IPv6 rules were not persisted separately by the settings API"
+            )
+            prior_saves = len(saved)
+            page.locator("#directIPs").fill("192.0.2.999\nhttps://example.com")
+            page.locator("#saveDirectRules").click()
+            page.wait_for_function("document.querySelector('#routeMessage').textContent.includes('Некорректный Direct IP:')")
+            saved_after_invalid = [raw for method, path, raw in calls if method == "POST" and path == "/settings" and raw]
+            assert len(saved_after_invalid) == prior_saves, "invalid Direct IP input reached the settings API"
 
             assert page.locator("#page-route").is_visible()
             assert not page.locator("#deploySecretsOverlay").is_visible()
@@ -316,6 +438,15 @@ def main():
             bridge_main_source = (ROOT / "captcha-bridge" / "captcha-bridge-main.js").read_text()
             bridge_isolated_source = (ROOT / "captcha-bridge" / "captcha-bridge.js").read_text()
             origin_policy_source = (ROOT / "captcha-bridge" / "origin-policy.js").read_text()
+            # The extension bridge and the panel share the same fixture
+            # backend. Arm the exact session embedded in the VK fixture so the
+            # panel's authenticated result endpoint accepts this bridge result.
+            captcha_state.update({
+                "pending": True,
+                "mode": "auto",
+                "sessionToken": "fixture-bridge-session",
+                "redirectUri": "",
+            })
             panel_origin = f"http://127.0.0.1:{server.server_port}"
             vk_origin = "https://id.vk.com"
             bridge_page = browser.new_page()
@@ -408,7 +539,7 @@ def main():
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
-    print("CSQTT_CHROMIUM_UI_SMOKE_PASS widths=320,360,390,768,1280 tabs=5 profile-api=PASS connect-disconnect=PASS tunnel-settings=PASS direct-settings-api=PASS deploy-api=PASS logs=PASS captcha-bridge-trusted-origin=PASS captcha-bridge-fail-closed=PASS")
+    print("CSQTT_CHROMIUM_UI_SMOKE_PASS widths=320,360,390,768,1280 tabs=5 profile-api=PASS connect-disconnect=PASS tunnel-settings=PASS direct-settings-api=PASS deploy-api=PASS socks5-live-status=PASS socks5-address-hidden-when-inactive=PASS logs=PASS captcha-bridge-trusted-origin=PASS captcha-bridge-fail-closed=PASS")
 
 
 if __name__ == "__main__":

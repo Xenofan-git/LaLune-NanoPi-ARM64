@@ -11,6 +11,7 @@ from html.parser import HTMLParser
 
 HTML_PATH = Path("adapt/csqtt-panel-preview.html")
 BACKEND_PATH = Path("adapt/headless_main.go")
+ADAPT_SCRIPT_PATH = Path("adapt/apply-pinned-original-linux-arm64-policy.py")
 
 
 class PanelParser(HTMLParser):
@@ -32,6 +33,7 @@ class PanelParser(HTMLParser):
 
 html = HTML_PATH.read_text(encoding="utf-8")
 backend = BACKEND_PATH.read_text(encoding="utf-8")
+adapt_script = ADAPT_SCRIPT_PATH.read_text(encoding="utf-8")
 scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.S)
 if not scripts:
     raise SystemExit("CSQTT panel has no inline JavaScript")
@@ -106,15 +108,32 @@ for token in (
     if token not in html:
         raise SystemExit("CSQTT credential-mode contract missing: " + token)
 
-# The Route tab is intentionally Direct-domain-only; old IP/CIDR controls and
-# payload serialization must not return.
+# Direct is represented by two independent lists. Do not regress to the old
+# domain-only contract or merge IP literals into the domain textarea.
 route_html = html.split('id="page-route"', 1)[1].split("</section>", 1)[0]
-if 'id="directIPs"' in html or "Маршрутизация IP-адресов" in route_html:
-    raise SystemExit("Route tab must contain Direct domains only, without IP/CIDR controls")
-if 'id="directDomains"' not in route_html:
-    raise SystemExit("Route tab is missing the Direct domain list")
-if "delete s.directIPs;" not in js:
-    raise SystemExit("legacy Direct IP settings must be stripped before saving domain-only settings")
+for control in ('id="directDomains"', 'id="directIPs"'):
+    if control not in route_html:
+        raise SystemExit("Route tab is missing separate Direct control: " + control)
+if "s.directDomains=$('directDomains').value.trim()" not in js:
+    raise SystemExit("Direct domain list is not serialized")
+if "s.directIPs=$('directIPs').value.trim()" not in js:
+    raise SystemExit("Direct IP list is not serialized")
+if "delete s.directIPs;" in js:
+    raise SystemExit("Direct IP settings must not be deleted before saving")
+if "function directRuleErrors()" not in js or "Некорректный Direct IP:" not in js:
+    raise SystemExit("Direct IP validation is missing")
+if 'Режим получения хешей' not in html:
+    raise SystemExit("hash acquisition mode label is missing")
+if "s.authMode=$('authMode').value||'manual'" not in js:
+    raise SystemExit("hash acquisition mode is not serialized")
+if "s.authMode==='autoApi'||s.authMode==='autoVk'" not in js:
+    raise SystemExit("automatic hash modes are not gated on VK token state")
+if "if(await saveSettings(false,true))" not in js or "saveSettings(false,false)" in js:
+    raise SystemExit("Direct settings save bypasses automatic-mode VK token validation")
+if adapt_script.count("ensureDirectDnsmasqInclude()") < 2:
+    raise SystemExit("Direct domain nftset config is written but not included by dnsmasq")
+if 'settings.DirectDomains + "," + settings.DirectIPs' not in adapt_script:
+    raise SystemExit("Direct domains and IPs are not merged into the production planner")
 
 # Accessibility contract: navigation state is exposed to assistive technology,
 # focus is visible, live updates are announced, and mobile safe areas are respected.
@@ -203,8 +222,8 @@ if "Оригинальный CSQTT на 46000/46002" in html:
 
 # Polling every 1.6 seconds fans out to multiple API endpoints and needlessly
 # loads the ARM64 gateway; poll at a calmer cadence and pause in hidden tabs.
-if "setInterval(()=>{if(!document.hidden)refreshAll()},5000)" not in js:
-    raise SystemExit("panel polling must pause while hidden and use a 5-second interval")
+if "setInterval(()=>{if(!document.hidden){refreshAll();refreshSocks5Status()}},5000)" not in js:
+    raise SystemExit("panel polling must pause while hidden and refresh the SOCKS5 listener every 5 seconds")
 
 # Deployment completion is derived from the backend log, so a reload keeps the result visible.
 if "const done=state.deployLogAvailable&&!busy&&state.deployLog.includes('CSQTT_LALUNE_DEPLOY_OK')" not in js:
@@ -235,6 +254,17 @@ for contract in (
 
 # Keep the user-facing route save explicit: it stores rules but must not claim
 # that active routing changed immediately without a reconnect.
+# Deploy exposes only the actual eth1-bound listener; no configured/example IP is shown.
+if 'id="socks5DeployCard"' not in html or "req('/socks5/status')" not in js:
+    raise SystemExit("Deploy tab does not query live SOCKS5 listener state")
+if 'id="copySocks5Address"' not in html or "$('copySocks5Address').addEventListener('click'" not in js:
+    raise SystemExit("SOCKS5 copy control is missing")
+if 'mux.HandleFunc("/socks5/status"' not in backend:
+    raise SystemExit("SOCKS5 status API route is missing")
+if "state.socks5StatusAvailable&&s.listening&&s.address" not in js:
+    raise SystemExit("SOCKS5 address is not gated on a confirmed listener")
+if "Не удалось получить фактическое состояние SOCKS5" not in js:
+    raise SystemExit("SOCKS5 API failure is not represented as unknown")
 if "Переподключите туннель CSQTT" not in html:
     raise SystemExit("Direct rules must explain that reconnect is required to apply changes")
 
