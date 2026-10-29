@@ -146,6 +146,13 @@ jobs:
           ip link set socks-peer netns socks-echo
           ip addr add 198.18.0.1/30 dev csqtt0
           ip link set csqtt0 up
+          # csqtt0 is an asymmetric policy-routing egress: the reverse route
+          # for replies exists in table 202, while main has an intentional
+          # blackhole. Disable reverse-path filtering only on this test link.
+          sysctl -w net.ipv4.conf.all.rp_filter=0
+          sysctl -w net.ipv4.conf.default.rp_filter=0
+          sysctl -w net.ipv4.conf.csqtt0.rp_filter=0
+          echo "RP_FILTER all=$(sysctl -n net.ipv4.conf.all.rp_filter) csqtt0=$(sysctl -n net.ipv4.conf.csqtt0.rp_filter)"
           ip link add eth1 type dummy
           ip addr add 10.67.68.1/24 dev eth1
           ip link set eth1 up
@@ -186,7 +193,9 @@ jobs:
           def dns_answer():
               while True:
                   q,peer=dns.recvfrom(2048)
-                  if len(q)<17: continue
+                  print("DNS_RX bytes=%d peer=%r" % (len(q),peer), flush=True)
+                  if len(q)<17:
+                      print("DNS_DROP short_query", flush=True); continue
                   p=12; labels=[]
                   try:
                       while q[p]:
@@ -197,10 +206,13 @@ jobs:
                       name=".".join(labels)
                       answer=b""
                       if name=="marked.socks.test" and qtype==1 and qclass==1:
-                          answer=b"\xc0\x0c"+struct.pack("!HHIH",1,1,60,4)+socket.inet_aton(addr)
+                          answer=b"\\xc0\\x0c"+struct.pack("!HHIH",1,1,60,4)+socket.inet_aton(addr)
                       header=q[:2]+struct.pack("!HHHHH",0x8180,1,1 if answer else 0,0,0)
-                      dns.sendto(header+question+answer,peer)
-                  except Exception: continue
+                      response=header+question+answer
+                      sent=dns.sendto(response,peer)
+                      print("DNS_TX name=%s qtype=%d bytes=%d peer=%r" % (name,qtype,sent,peer), flush=True)
+                  except Exception as exc:
+                      print("DNS_HANDLER_ERROR %r" % (exc,), flush=True)
           threading.Thread(target=dns_answer,daemon=True).start()
           threading.Event().wait()
           PY
@@ -233,13 +245,33 @@ jobs:
           ip -4 rule show | grep -Eq 'fwmark 0x4d53/0xffff.*lookup 202'
           ip -4 route show table 202 | grep -Fq '198.18.86.2'
           ip link show dev csqtt0 | grep -q 'state UP'
-          # DNS must itself traverse the marked policy route; the DNS fixture
-          # is intentionally reachable only through table 202.
+          # DNS must itself traverse the marked policy route. Retry briefly
+          # for fixture startup and dump both endpoints if the UDP reply is lost.
           python3 - <<'PYDNS'
-          import socket,struct
+          import socket,struct,time,subprocess
           q=bytes.fromhex("123401000001000000000000")+b"".join(bytes([len(x)])+x.encode() for x in "marked.socks.test".split("."))+bytes.fromhex("0000010001")
-          s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.setsockopt(socket.SOL_SOCKET,36,0x4d53);s.settimeout(2);s.sendto(q,('198.18.86.2',53));r,_=s.recvfrom(512)
-          assert len(r)>len(q) and struct.unpack('!H',r[6:8])[0]==1, r
+          last=None
+          for attempt in range(1,11):
+              s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+              s.setsockopt(socket.SOL_SOCKET,36,0x4d53); s.settimeout(1)
+              try:
+                  s.sendto(q,('198.18.86.2',53))
+                  r,peer=s.recvfrom(512)
+                  assert len(r)>len(q) and struct.unpack('!H',r[6:8])[0]==1, r
+                  print("MARKED_DNS_UDP_PASS attempt=%d peer=%r response_bytes=%d" % (attempt,peer,len(r)))
+                  break
+              except Exception as exc:
+                  last=exc
+                  print("MARKED_DNS_UDP_RETRY attempt=%d error=%r" % (attempt,exc),flush=True)
+                  time.sleep(0.25)
+              finally:
+                  s.close()
+          else:
+              print("DNS_FIXTURE_LOG_BEGIN",flush=True)
+              subprocess.run(["cat","/tmp/socks5-echo.log"],check=False)
+              for cmd in (["sysctl","net.ipv4.conf.all.rp_filter","net.ipv4.conf.csqtt0.rp_filter"],["ip","-s","link","show","csqtt0"],["ip","-n","socks-echo","-s","link","show","socks-peer"],["ip","-n","socks-echo","route","show","table","all"],["ip","-4","route","show","table","202"],["ip","-4","rule","show"]):
+                  subprocess.run(cmd,check=False)
+              raise SystemExit("marked DNS UDP test failed: %r" % (last,))
           PYDNS
           chmod 0755 /home/tester/socks5-marked-e2e-arm64.test
           CSQTT_SOCKS5_MARKED_E2E=1 CSQTT_SOCKS5_E2E_TARGET=198.18.86.2 /home/tester/socks5-marked-e2e-arm64.test -test.run TestSocks5MarkedSocketEndToEnd -test.v
