@@ -205,6 +205,15 @@ func TestResolveTCPAddrMarkedRejectsMissingPort(t *testing.T) {
 	}
 }
 
+func TestUDPNetworkForIPSelectsAddressFamily(t *testing.T) {
+	if network, local := udpNetworkForIP(net.ParseIP("192.0.2.1")); network != "udp4" || local != "0.0.0.0:0" {
+		t.Fatalf("IPv4 socket = %s %s", network, local)
+	}
+	if network, local := udpNetworkForIP(net.ParseIP("2001:db8::1")); network != "udp6" || local != "[::]:0" {
+		t.Fatalf("IPv6 socket = %s %s", network, local)
+	}
+}
+
 func TestResolveUDPAddrMarkedLiteralIPv4(t *testing.T) {
 	got, err := resolveUDPAddrMarked("192.0.2.25:5353")
 	if err != nil { t.Fatal(err) }
