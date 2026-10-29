@@ -328,15 +328,17 @@ func (s *Socks5Server) dialUDP() (*net.UDPConn, error) {
 	return s.dialUDPFor(net.IPv4zero)
 }
 
+func udpNetworkForIP(destination net.IP) (network, local string) {
+	if destination.To4() == nil { return "udp6", "[::]:0" }
+	return "udp4", "0.0.0.0:0"
+}
+
 func (s *Socks5Server) dialUDPFor(destination net.IP) (*net.UDPConn, error) {
 	if s.dialUDPOverride != nil { return s.dialUDPOverride() }
 	if _, err := net.InterfaceByName("csqtt0"); err != nil {
 		return nil, errors.New("LaLune TUN is not active")
 	}
-	network, local := "udp4", "0.0.0.0:0"
-	if destination.To4() == nil {
-		network, local = "udp6", "[::]:0"
-	}
+	network, local := udpNetworkForIP(destination)
 	lc := net.ListenConfig{Control: laluneDialer(network).Control}
 	pc, err := lc.ListenPacket(context.Background(), network, local)
 	if err != nil { return nil, err }
