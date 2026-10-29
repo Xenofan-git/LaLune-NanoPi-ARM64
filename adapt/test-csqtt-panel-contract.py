@@ -222,8 +222,8 @@ if "Оригинальный CSQTT на 46000/46002" in html:
 
 # Polling every 1.6 seconds fans out to multiple API endpoints and needlessly
 # loads the ARM64 gateway; poll at a calmer cadence and pause in hidden tabs.
-if "setInterval(()=>{if(!document.hidden)refreshAll()},5000)" not in js:
-    raise SystemExit("panel polling must pause while hidden and use a 5-second interval")
+if "setInterval(()=>{if(!document.hidden){refreshAll();refreshSocks5Status()}},5000)" not in js:
+    raise SystemExit("panel polling must pause while hidden and refresh the SOCKS5 listener every 5 seconds")
 
 # Deployment completion is derived from the backend log, so a reload keeps the result visible.
 if "const done=state.deployLogAvailable&&!busy&&state.deployLog.includes('CSQTT_LALUNE_DEPLOY_OK')" not in js:
