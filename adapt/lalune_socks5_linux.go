@@ -587,6 +587,7 @@ func resolveUDPAddrMarkedContext(ctx context.Context, target string) (*net.UDPAd
 	resolver := &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			markedDialer := laluneDialer(network)
 			return markedDialer.DialContext(ctx, network, address)
 		},
 	}
