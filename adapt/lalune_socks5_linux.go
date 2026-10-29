@@ -62,6 +62,7 @@ type Socks5Server struct {
 	handlers sync.WaitGroup
 
 	dialTCPOverride func(string) (net.Conn, error)
+	resolveTCPOverride func(context.Context, string) (string, error)
 	dialUDPOverride func() (*net.UDPConn, error)
 }
 
@@ -278,17 +279,66 @@ func (s *Socks5Server) dialTCP(addr string) (net.Conn, error) {
 	if _, err := net.InterfaceByName("csqtt0"); err != nil {
 		return nil, errors.New("LaLune TUN is not active")
 	}
-	d := laluneDialer("tcp")
-	return d.Dial("tcp", addr)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	resolved := addr
+	var err error
+	if s.resolveTCPOverride != nil {
+		resolved, err = s.resolveTCPOverride(ctx, addr)
+	} else {
+		resolved, err = resolveTCPAddrMarked(ctx, addr)
+	}
+	if err != nil { return nil, err }
+	return laluneDialer("tcp").DialContext(ctx, "tcp", resolved)
+}
+
+// resolveTCPAddrMarked performs hostname resolution through sockets carrying
+// the same SO_MARK as the subsequent TCP connection. Resolving with the
+// process default resolver here would leak DNS outside table 202.
+func resolveTCPAddrMarked(ctx context.Context, target string) (string, error) {
+	return resolveTCPAddrMarkedWithResolver(ctx, target, nil)
+}
+
+func resolveTCPAddrMarkedWithResolver(ctx context.Context, target string, resolver *net.Resolver) (string, error) {
+	host, portText, err := net.SplitHostPort(target)
+	if err != nil { return "", err }
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 { return "", errors.New("invalid TCP target port") }
+	if ip := net.ParseIP(host); ip != nil { return net.JoinHostPort(ip.String(), portText), nil }
+	if resolver == nil {
+		resolver = &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				return laluneDialer(network).DialContext(ctx, network, address)
+			},
+		}
+	}
+	ips, err := resolver.LookupIPAddr(ctx, host)
+	if err != nil { return "", err }
+	for _, candidate := range ips {
+		if ip4 := candidate.IP.To4(); ip4 != nil { return net.JoinHostPort(ip4.String(), portText), nil }
+	}
+	for _, candidate := range ips {
+		if ip6 := candidate.IP.To16(); ip6 != nil { return net.JoinHostPort(ip6.String(), portText), nil }
+	}
+	return "", errors.New("TCP target hostname resolved to no usable addresses")
 }
 
 func (s *Socks5Server) dialUDP() (*net.UDPConn, error) {
+	return s.dialUDPFor(net.IPv4zero)
+}
+
+func (s *Socks5Server) dialUDPFor(destination net.IP) (*net.UDPConn, error) {
 	if s.dialUDPOverride != nil { return s.dialUDPOverride() }
 	if _, err := net.InterfaceByName("csqtt0"); err != nil {
 		return nil, errors.New("LaLune TUN is not active")
 	}
-	lc := net.ListenConfig{Control: laluneDialer("udp").Control}
-	pc, err := lc.ListenPacket(context.Background(), "udp", "0.0.0.0:0")
+	network, local := "udp4", "0.0.0.0:0"
+	if destination.To4() == nil {
+		network, local = "udp6", "[::]:0"
+	}
+	lc := net.ListenConfig{Control: laluneDialer(network).Control}
+	pc, err := lc.ListenPacket(context.Background(), network, local)
 	if err != nil { return nil, err }
 	return pc.(*net.UDPConn), nil
 }
@@ -418,48 +468,62 @@ func (s *Socks5Server) handleUDPAssociate(c net.Conn) {
 	if err != nil { _ = writeSocksReply(c, 1, &net.TCPAddr{}); return }
 	if !s.trackConn(u) { return }
 	defer func() { s.untrackConn(u); _ = u.Close() }()
-
 	if err := writeSocksReply(c, 0, u.LocalAddr()); err != nil { return }
 	c.SetDeadline(time.Time{})
 
-	// RFC 1928 keeps the UDP relay alive only while its TCP control
-	// connection remains open. Closing that connection must unblock ReadFromUDP.
-	go func() {
-		_, _ = io.Copy(io.Discard, c)
-		_ = u.Close()
-	}()
+	// RFC 1928 ties the relay lifetime to its TCP control connection.
+	go func() { _, _ = io.Copy(io.Discard, c); _ = u.Close() }()
 
+	// A single association may carry independent UDP requests. Process them
+	// concurrently, but cap in-flight upstream sockets to bound memory/fds.
+	const maxInflight = 64
+	sem := make(chan struct{}, maxInflight)
+	var workers sync.WaitGroup
+	defer workers.Wait()
 	buf := make([]byte, 65535)
 	var client *net.UDPAddr
 	for {
 		_ = u.SetReadDeadline(time.Now().Add(12 * time.Hour))
-		n, src, err := u.ReadFromUDP(buf)
-		if err != nil { return }
-		if client == nil { client = src }
+		n, src, readErr := u.ReadFromUDP(buf)
+		if readErr != nil { return }
+		if client == nil { client = cloneUDPAddr(src) }
 		if !src.IP.Equal(client.IP) || src.Port != client.Port { continue }
 		if n < 7 || buf[0] != 0 || buf[1] != 0 || buf[2] != 0 { continue }
-
-		target, off, err := readUDPAddr(buf[:n], 3)
-		if err != nil { continue }
-		dst, err := resolveUDPAddrMarked(target)
-		if err != nil { continue }
-
-		out, err := s.dialUDP()
-		if err != nil { continue }
-		if !s.trackConn(out) { continue }
-		_ = out.SetReadDeadline(time.Now().Add(5 * time.Second))
-		if _, err = out.WriteToUDP(buf[off:n], dst); err == nil {
-			rn, ra, er := out.ReadFromUDP(buf)
-			if er == nil {
-				packet, buildErr := buildUDPReply(ra, buf[:rn])
-				if buildErr == nil {
-					_, _ = u.WriteToUDP(packet, client)
-				}
-			}
+		target, off, parseErr := readUDPAddr(buf[:n], 3)
+		if parseErr != nil { continue }
+		payload := append([]byte(nil), buf[off:n]...)
+		select {
+		case sem <- struct{}{}:
+		default:
+			// Drop rather than blocking the association reader when saturated.
+			continue
 		}
-		s.untrackConn(out)
-		_ = out.Close()
+		workers.Add(1)
+		go func(target string, payload []byte, client *net.UDPAddr) {
+			defer workers.Done()
+			defer func() { <-sem }()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			dst, resolveErr := resolveUDPAddrMarkedContext(ctx, target)
+			if resolveErr != nil { return }
+			out, dialErr := s.dialUDPFor(dst.IP)
+			if dialErr != nil { return }
+			if !s.trackConn(out) { return }
+			defer func() { s.untrackConn(out); _ = out.Close() }()
+			_ = out.SetDeadline(time.Now().Add(5 * time.Second))
+			if _, writeErr := out.WriteToUDP(payload, dst); writeErr != nil { return }
+			replyBuf := make([]byte, 65535)
+			rn, ra, replyErr := out.ReadFromUDP(replyBuf)
+			if replyErr != nil { return }
+			packet, buildErr := buildUDPReply(ra, replyBuf[:rn])
+			if buildErr == nil { _, _ = u.WriteToUDP(packet, client) }
+		}(target, payload, cloneUDPAddr(client))
 	}
+}
+
+func cloneUDPAddr(addr *net.UDPAddr) *net.UDPAddr {
+	if addr == nil { return nil }
+	return &net.UDPAddr{IP: append(net.IP(nil), addr.IP...), Port: addr.Port, Zone: addr.Zone}
 }
 
 func readUDPAddr(b []byte, off int) (string, int, error) {
@@ -505,29 +569,30 @@ func buildUDPReply(addr *net.UDPAddr, payload []byte) ([]byte, error) {
 }
 
 func resolveUDPAddrMarked(target string) (*net.UDPAddr, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return resolveUDPAddrMarkedContext(ctx, target)
+}
+
+func resolveUDPAddrMarkedContext(ctx context.Context, target string) (*net.UDPAddr, error) {
 	host, portText, err := net.SplitHostPort(target)
 	if err != nil { return nil, err }
 	port, err := strconv.Atoi(portText)
-	if err != nil || port < 0 || port > 65535 { return nil, errors.New("invalid UDP target port") }
-	if ip := net.ParseIP(host); ip != nil {
-		return &net.UDPAddr{IP: ip, Port: port}, nil
-	}
+	if err != nil || port < 1 || port > 65535 { return nil, errors.New("invalid UDP target port") }
+	if ip := net.ParseIP(host); ip != nil { return &net.UDPAddr{IP: ip, Port: port}, nil }
 	resolver := &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			d := laluneDialer(network)
-			return d.DialContext(ctx, network, address)
+			return laluneDialer(network).DialContext(ctx, network, address)
 		},
 	}
-	ips, err := resolver.LookupIPAddr(context.Background(), host)
+	ips, err := resolver.LookupIPAddr(ctx, host)
 	if err != nil { return nil, err }
 	for _, candidate := range ips {
-		if ip4 := candidate.IP.To4(); ip4 != nil {
-			return &net.UDPAddr{IP: ip4, Port: port}, nil
-		}
+		if ip4 := candidate.IP.To4(); ip4 != nil { return &net.UDPAddr{IP: ip4, Port: port}, nil }
 	}
-	if len(ips) > 0 {
-		return &net.UDPAddr{IP: ips[0].IP, Port: port}, nil
+	for _, candidate := range ips {
+		if ip6 := candidate.IP.To16(); ip6 != nil { return &net.UDPAddr{IP: ip6, Port: port}, nil }
 	}
-	return nil, errors.New("UDP target hostname resolved to no addresses")
+	return nil, errors.New("UDP target hostname resolved to no usable addresses")
 }
