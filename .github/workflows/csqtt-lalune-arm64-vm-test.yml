@@ -2347,9 +2347,6 @@ jobs:
         if: always()
         run: |
           if [ -f vm/qemu.pid ]; then kill "$(cat vm/qemu.pid)" || true; fi
- -test.v
-          echo SOCKS5_TCP_UDP_SO_MARK_POLICY_ROUTING_E2E_PASS
-          SOCKS_MARKED_E2E
 
       - name: Test backend installer lifecycle and ownership safety in disposable ARM64 VM
         run: |
@@ -3411,9 +3408,6 @@ jobs:
         if: always()
         run: |
           if [ -f vm/qemu.pid ]; then kill "$(cat vm/qemu.pid)" || true; fi
- -test.v
-          echo SOCKS5_TCP_UDP_SO_MARK_POLICY_ROUTING_E2E_PASS
-          SOCKS_MARKED_E2E
 
       - name: Test backend installer lifecycle and ownership safety in disposable ARM64 VM
         run: |
