@@ -125,7 +125,8 @@ jobs:
           SCP=(scp -i vm/id_ed25519 -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
           "${SCP[@]}" vm/real/socks5-marked-e2e-arm64.test tester@127.0.0.1:/home/tester/socks5-marked-e2e-arm64.test
           "${SSH[@]}" 'sudo bash -se' <<'SOCKS_MARKED_E2E'
-          set -Eeuo pipefail
+          set -Eeuxo pipefail
+          trap 'rc=$?; echo "REMOTE_E2E_FAILURE line=${LINENO} rc=${rc} command=${BASH_COMMAND}" >&2; ip -br addr >&2 || true; ip -4 rule show >&2 || true; ip -4 route show table all >&2 || true; exit "$rc"' ERR
           RESOLV_BACKUP=/tmp/resolv.conf.socks5-e2e.backup
           cleanup() {
             if [ -f "$RESOLV_BACKUP" ]; then cat "$RESOLV_BACKUP" > /etc/resolv.conf; rm -f "$RESOLV_BACKUP"; fi
