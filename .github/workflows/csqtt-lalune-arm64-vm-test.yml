@@ -156,6 +156,9 @@ jobs:
           # The unmarked main-table route is an explicit blackhole. Only the
           # SOCKS5 production SO_MARK value can select table 202 and reach echo.
           ip route add blackhole 198.18.86.2/32
+          # Table 202 needs its own connected route so the kernel can validate
+          # the next hop before accepting the marked destination route.
+          ip route add 198.18.0.0/30 dev csqtt0 scope link table 202
           ip route add 198.18.86.2/32 via 198.18.0.2 dev csqtt0 table 202
           ip rule add pref 100 fwmark 0x4d53/0xffff lookup 202
           cat >/tmp/socks5-echo.py <<'PY'
