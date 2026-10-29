@@ -430,6 +430,19 @@ func apiHandler(app *App) http.Handler {
         writeJSON(w, map[string]bool{"ok": app.ClearLogs()})
     })
 
+    mux.HandleFunc("/socks5/status", func(w http.ResponseWriter, r *http.Request) {
+        if !method(w, r, http.MethodGet) { return }
+        if !privateClient(r) {
+            http.Error(w, "SOCKS5 status is available only from LAN or Tailscale", http.StatusForbidden)
+            return
+        }
+        if app == nil || app.socks == nil {
+            writeJSON(w, Socks5Status{Interface: "eth1", Protocol: "SOCKS5", Auth: "no-auth"})
+            return
+        }
+        writeJSON(w, app.socks.Status())
+    })
+
     mux.HandleFunc("/deploy", func(w http.ResponseWriter, r *http.Request) {
         if !method(w, r, http.MethodPost) { return }
         if !privateClient(r) {
