@@ -177,7 +177,9 @@ jobs:
           sysctl -w net.ipv4.conf.csqtt0.rp_filter=0
           test "$(sysctl -n net.ipv4.conf.csqtt0.rp_filter)" = 0
           echo "RP_FILTER_PRE_DNS all=$(sysctl -n net.ipv4.conf.all.rp_filter) default=$(sysctl -n net.ipv4.conf.default.rp_filter) csqtt0=$(sysctl -n net.ipv4.conf.csqtt0.rp_filter)"
-          ip route get 198.18.86.2 from 198.18.0.1
+          # Do not run an unmarked route lookup here: the intentional main-table
+          # blackhole makes ip route get return EINVAL. Marked-path lookup is
+          # asserted below after the fixture is ready.
           cat >/tmp/socks5-echo.py <<'PY'
           import socket, threading, struct
           addr="198.18.86.2"
