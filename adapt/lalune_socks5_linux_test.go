@@ -518,3 +518,26 @@ func TestSocks5StartRejectsAmbiguousAddressResolution(t *testing.T) {
         t.Fatalf("failed Start left live state: stopped=%v stop=%v done=%v listener=%v", s.stopped, s.stop != nil, s.done != nil, s.ln)
     }
 }
+
+func TestSocks5StatusReportsOnlyActualListener(t *testing.T) {
+	s := NewSocks5Server("127.0.0.1:0")
+	before := s.Status()
+	if before.Listening || before.Monitoring || before.Address != "" {
+		t.Fatalf("stopped server status = %+v", before)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil { t.Fatal(err) }
+	defer ln.Close()
+	s.mu.Lock()
+	s.stop = make(chan struct{})
+	s.stopped = false
+	s.ln = ln
+	s.mu.Unlock()
+	got := s.Status()
+	if !got.Monitoring || !got.Listening || got.Address != ln.Addr().String() {
+		t.Fatalf("active listener status = %+v, actual=%s", got, ln.Addr())
+	}
+	if got.Interface != "eth1" || got.Protocol != "SOCKS5" || got.Auth != "no-auth" {
+		t.Fatalf("unexpected SOCKS5 contract: %+v", got)
+	}
+}
