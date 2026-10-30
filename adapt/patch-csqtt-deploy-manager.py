@@ -297,6 +297,12 @@ replace_once(
 replace_once(
     deploy_go,
     '\tif strings.TrimSpace(req.Host) == "" {',
+    '''\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") {
+\t\tif err := validateCSQTTDeployTarget(req.Host); err != nil { deployAppend("[deploy] "+err.Error()); return false }
+\t}
+\tif strings.TrimSpace(req.Host) == "" {''',
+)
+
     '''\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") && !req.Uninstall {
 \t\tif !validCSQTTSecret(req.MainPassword) || !validCSQTTSecret(req.WebUser) || !validCSQTTSecret(req.WebPassword) {
 \t\t\tdeployAppend("[deploy] CSQTT: задайте пароль туннеля, логин и пароль WEB только латиницей и цифрами")
@@ -308,7 +314,37 @@ replace_once(
 )
 replace_once(
     deploy_go,
+    'import (\\n',
+    'import (\\n\\t"net"\\n',
+)
+replace_once(
+    deploy_go,
     'func DeployProtocol(reqJSON string) bool {',
+    '''func validateCSQTTDeployTarget(host string) error {
+\thost = strings.TrimSpace(strings.Trim(host, "[]"))
+\tif host == "" { return fmt.Errorf("хост сервера не задан") }
+\tips, err := net.LookupIP(host)
+\tif err != nil || len(ips) == 0 { return fmt.Errorf("не удалось безопасно разрешить адрес сервера %q", host) }
+\tlocal := map[string]bool{}
+\tifaces, _ := net.Interfaces()
+\tfor _, iface := range ifaces {
+\t\taddrs, _ := iface.Addrs()
+\t\tfor _, addr := range addrs {
+\t\t\tif ipnet, ok := addr.(*net.IPNet); ok { local[ipnet.IP.String()] = true }
+\t\t\tif ipaddr, ok := addr.(*net.IPAddr); ok { local[ipaddr.IP.String()] = true }
+\t\t}
+\t}
+\tfor _, ip := range ips {
+\t\tif local[ip.String()] || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
+\t\t\treturn fmt.Errorf("адрес %s относится к локальной/частной сети; деплой CSQTT разрешён только на отдельный удалённый VPS (публичный адрес или адрес Tailscale)", ip)
+\t\t}
+\t}
+\treturn nil
+}
+
+func DeployProtocol(reqJSON string) bool {''',
+)
+'func DeployProtocol(reqJSON string) bool {',
     '''func validCSQTTSecret(value string) bool {
 \tif value == "" { return false }
 \tfor _, r := range value { if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) { return false } }
