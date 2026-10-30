@@ -372,6 +372,7 @@ func TestSocks5MarkedSocketEndToEnd(t *testing.T) {
 
 	t.Run("TCP", func(t *testing.T) {
 		s := NewSocks5Server("eth1:12500")
+		s.tracef = t.Logf
 		if err := s.Start(); err != nil { t.Fatal(err) }
 		defer s.Stop()
 		client, err := net.DialTimeout("tcp", "10.67.68.1:12500", 2*time.Second)
