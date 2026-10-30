@@ -312,6 +312,7 @@ jobs:
 
       - name: Test backend installer lifecycle and ownership safety in disposable ARM64 VM
         run: |
+          mkdir -p vm/backend-installer-test/server-assets
           cp vm/real/install-original-linux-backend.sh vm/backend-installer-test/
           cat > vm/backend-installer-test/fake-backend <<'EOF'
           #!/bin/sh
