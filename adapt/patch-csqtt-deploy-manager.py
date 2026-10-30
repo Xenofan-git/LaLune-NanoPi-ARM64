@@ -317,6 +317,32 @@ replace_once(
     'import (\\n',
     'import (\\n\\t"fmt"\\n\\t"net"\\n',
 )
+target_test = ROOT / "Desktop/Libs/deploy_target_test.go"
+target_test.write_text("""package libs
+
+import "testing"
+
+func TestValidateCSQTTDeployTargetRejectsLocalAndPrivateAddresses(t *testing.T) {
+    for _, host := range []string{"127.0.0.1", "::1", "10.0.0.1", "172.16.0.1", "192.168.1.1", "169.254.1.1", "localhost"} {
+        t.Run(host, func(t *testing.T) {
+            if err := validateCSQTTDeployTarget(host); err == nil {
+                t.Fatalf("local/private target %s was accepted", host)
+            }
+        })
+    }
+}
+
+func TestValidateCSQTTDeployTargetAllowsPublicAndTailscaleAddresses(t *testing.T) {
+    for _, host := range []string{"8.8.8.8", "100.70.73.57", "fd7a:115c:a1e0::1234"} {
+        t.Run(host, func(t *testing.T) {
+            if err := validateCSQTTDeployTarget(host); err != nil {
+                t.Fatalf("valid remote target %s was rejected: %v", host, err)
+            }
+        })
+    }
+}
+""")
+
 replace_once(
     deploy_go,
     'func DeployProtocol(reqJSON string) bool {',
@@ -337,7 +363,14 @@ replace_once(
 \t\t}
 \t}
 \tfor _, ip := range ips {
-\t\tif local[ip.String()] || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
+\t\ttailscale := false
+\t\tif v4 := ip.To4(); v4 != nil {
+\t\t\ttailscale = v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127
+\t\t} else {
+\t\t\t_, tailnet, _ := net.ParseCIDR("fd7a:115c:a1e0::/48")
+\t\t\ttailscale = tailnet != nil && tailnet.Contains(ip)
+\t\t}
+\t\tif local[ip.String()] || (!tailscale && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast())) {
 \t\t\treturn fmt.Errorf("адрес %s относится к локальной/частной сети; деплой CSQTT разрешён только на отдельный удалённый VPS (публичный адрес или адрес Tailscale)", ip)
 \t\t}
 \t}
