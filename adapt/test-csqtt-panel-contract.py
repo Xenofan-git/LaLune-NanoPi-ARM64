@@ -221,7 +221,7 @@ if "Удалить только csqtt-lalune.service" in html:
     raise SystemExit("misleading service-only uninstall promise remains")
 
 # The deploy API must fail closed for NanoPi/Keenetic/local targets.
-for token in ("validateCSQTTDeployTarget", "net.LookupIP(host)", "ip.IsPrivate()", "ip.IsLoopback()", "local[ip.String()]"):
+for token in ("validateCSQTTDeployTarget", "net.LookupIP(host)", "ip.IsPrivate()", "ip.IsLoopback()", "local[ip.String()]", "CSQTT_DEPLOY_ALLOW_LOCAL_TARGETS"):
     if token not in deploy_patcher:
         raise SystemExit("CSQTT deployment target guard is incomplete: " + token)
 if 'validateCSQTTDeployTarget(req.Host)' not in deploy_patcher:
