@@ -1134,6 +1134,7 @@ jobs:
           # The E2E backend runs outside systemd, so provide the same mandatory
           # per-install credential explicitly. This is a disposable test secret.
           export LALUNE_PANEL_PASSWORD="ci-panel-password-for-isolated-vm"
+          export CSQTT_DEPLOY_ALLOW_LOCAL_TARGETS=1 # disposable VM only; production never sets this
           cd vm/real/deploy-e2e
           ./lalune-original-linux-amd64 > "$GITHUB_WORKSPACE/vm/deploy-e2e-backend.log" 2>&1 &
           BACKEND_PID=$!
