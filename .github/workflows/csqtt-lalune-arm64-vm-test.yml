@@ -939,7 +939,7 @@ jobs:
           threading.Thread(target=tcp, daemon=True).start()
           udp()
           PY
-            sudo ip netns exec socks5-echo python3 -u /home/tester/socks5-echo-namespaced.py >/tmp/socks5-echo.log 2>&1 &
+            sudo ip netns exec socks5-echo python3 -u /home/tester/socks5-echo-namespaced.py >/home/tester/socks5-echo-namespaced.log 2>&1 &
             for attempt in $(seq 1 20); do
               if sudo ip netns exec socks5-echo ss -H -ltn | grep -q "198.18.77.2:18080"; then break; fi
               sleep 0.2
@@ -950,7 +950,7 @@ jobs:
             set -e
             echo "SOCKS5_TEST_STATUS=$socks5_test_status"
             echo "=== SOCKS5 echo server log ==="
-            sudo cat /tmp/socks5-echo.log || true
+            sudo cat /home/tester/socks5-echo-namespaced.log || true
             echo "=== namespace addresses/routes/neighbors ==="
             sudo ip -n socks5-echo -br addr || true
             sudo ip -n socks5-echo route show table all || true
