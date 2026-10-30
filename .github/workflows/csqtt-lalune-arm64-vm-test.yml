@@ -229,11 +229,11 @@ jobs:
           PY
           ip netns exec socks-echo nohup python3 /tmp/socks5-echo.py >/tmp/socks5-echo.log 2>&1 </dev/null &
           rm -f /etc/resolv.conf
-printf 'nameserver 198.18.86.2\noptions timeout:1 attempts:2\n' > /etc/resolv.conf
-test -f /etc/resolv.conf
-test ! -L /etc/resolv.conf
-echo 'RESOLV_CONF_E2E_BEGIN'
-cat /etc/resolv.conf
+          printf '%s\n' 'nameserver 198.18.86.2' 'options timeout:1 attempts:2' > /etc/resolv.conf
+          test -f /etc/resolv.conf
+          test ! -L /etc/resolv.conf
+          echo 'RESOLV_CONF_E2E_BEGIN'
+          cat /etc/resolv.conf
 
           for n in $(seq 1 30); do
             if ip netns exec socks-echo python3 -c 'import socket;s=socket.socket();s.settimeout(.2);s.connect(("198.18.86.2",18080));s.close()' 2>/dev/null; then break; fi
