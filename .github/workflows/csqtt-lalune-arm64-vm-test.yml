@@ -1249,6 +1249,79 @@ jobs:
           diff -u vm/runner-main-routes.before vm/runner-main-routes.after
           diff -u vm/runner-ip-rules.before vm/runner-ip-rules.after
           echo DEPLOY_BUTTON_INSTALL_UNINSTALL_E2E_PASS
+      - name: Clean runtime bundle acceptance on real Debian 13 ARM64 guest
+        run: |
+          set -euxo pipefail
+          mkdir -p vm/clean-runtime/server-assets vm/clean-runtime/web-dist
+          cp vm/real/lalune-original-linux-arm64 vm/clean-runtime/
+          cp vm/real/client-linux-arm64 vm/clean-runtime/
+          cp vm/real/deploy-manager vm/clean-runtime/
+          cp vm/real/install-original-linux-backend.sh vm/clean-runtime/
+          cp vm/real/UPSTREAM_COMMIT vm/real/CSQTT_CLIENT_VERSION vm/real/CSQTT_SERVER_PROTOCOL vm/real/protocols-source.sha256 vm/real/adaptation-source.sha256 vm/clean-runtime/
+          cp vm/real/web-dist/index.html vm/clean-runtime/web-dist/
+          for asset in deploy-csqtt-lalune.sh csqtt-lalune-linux-arm64 csqtt-lalune-linux-amd64 LaLune-CAPTCHA-Bridge.zip LaLuneTokenFetcher_Linux_ARM64.zip install-vk-chromium.sh csqtt-lalune-help.txt csqtt-lalune-amd64-help.txt csqtt.server-provenance.json; do
+            cp "vm/real/server-assets/$asset" vm/clean-runtime/server-assets/
+          done
+          (
+            cd vm/clean-runtime
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+            tar -czf ../clean-runtime.tar.gz .
+          )
+          mkdir -p vm/clean-runtime-roundtrip
+          tar -xzf vm/clean-runtime.tar.gz -C vm/clean-runtime-roundtrip
+          (cd vm/clean-runtime-roundtrip && sha256sum -c SHA256SUMS)
+          scp -i vm/id_ed25519 -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null vm/clean-runtime.tar.gz tester@127.0.0.1:/home/tester/clean-runtime.tar.gz
+          ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo apt-get update -qq && sudo apt-get install -y -qq unzip curl binutils'
+          ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'set -eu
+            mkdir -p /home/tester/clean-runtime
+            tar -xzf /home/tester/clean-runtime.tar.gz -C /home/tester/clean-runtime
+            cd /home/tester/clean-runtime
+            sha256sum -c SHA256SUMS
+            test "$(uname -m)" = aarch64
+            file lalune-original-linux-arm64 | grep -q "ARM aarch64"
+            file deploy-manager | grep -q "ARM aarch64"
+            file server-assets/csqtt-lalune-linux-arm64 | grep -q "ARM aarch64"
+            readelf -l lalune-original-linux-arm64 | grep -q "Requesting program interpreter" && exit 1 || true
+            ldd ./deploy-manager | tee /tmp/lalune-deploy-manager.ldd
+            ! grep -q "not found" /tmp/lalune-deploy-manager.ldd
+            sudo sh ./install-original-linux-backend.sh ./lalune-original-linux-arm64 "$PWD"
+            sudo systemctl is-active --quiet lalune-backend.service
+            sudo systemctl is-enabled --quiet lalune-backend.service
+            sudo test -x /usr/local/bin/lalune-backend
+            sudo test -x /usr/local/bin/deploy-manager
+            sudo test -f /usr/local/lib/lalune/server-assets/deploy-csqtt-lalune.sh
+            sudo test -f /usr/local/lib/lalune/server-assets/csqtt-lalune-linux-arm64
+            sudo test -f /etc/lalune-backend.env
+            sudo test "$(stat -c %a /etc/lalune-backend.env)" = 600
+            password="$(sudo sed -n "s/^LALUNE_PANEL_PASSWORD=//p" /etc/lalune-backend.env)"
+            test "${#password}" = 64
+            ready=0
+            for attempt in $(seq 1 40); do
+              if curl -fsS --max-time 3 -u "admin:$password" http://127.0.0.1:1062/deploy/status >/tmp/lalune-runtime-panel.json; then ready=1; break; fi
+              sleep 2
+            done
+            test "$ready" = 1
+            python3 -c "import json; x=json.load(open(\"/tmp/lalune-runtime-panel.json\")); assert isinstance(x,dict),x"
+            echo REAL_BACKEND_SYSTEMD_AND_AUTHENTICATED_PANEL_PASS
+            timeout 12 /usr/local/bin/deploy-manager --help >/tmp/lalune-deploy-manager-help.log 2>&1 || rc=$?
+            rc="${rc:-0}"
+            test "$rc" = 0 -o "$rc" = 1 -o "$rc" = 2 -o "$rc" = 124
+            test -s /tmp/lalune-deploy-manager-help.log
+            echo REAL_ARM64_DEPLOY_MANAGER_STARTUP_PASS
+            mkdir -p /opt/lalune-runtime-support/tokenfetcher
+            unzip -q server-assets/LaLuneTokenFetcher_Linux_ARM64.zip -d /opt/lalune-runtime-support/tokenfetcher
+            apphost="$(find /opt/lalune-runtime-support/tokenfetcher -type f -name LaLuneTokenFetcher -perm -u+x | head -n 1)"
+            test -n "$apphost"
+            file "$apphost" | grep -q "ARM aarch64"
+            ldd "$apphost" | tee /tmp/lalune-tokenfetcher.ldd
+            ! grep -q "not found" /tmp/lalune-tokenfetcher.ldd
+            echo VK_TOKENFETCHER_ARM64_ARCHIVE_AND_NATIVE_DEPENDENCIES_PASS
+            sudo systemctl restart lalune-backend.service
+            sudo systemctl is-active --quiet lalune-backend.service
+            echo CLEAN_RUNTIME_ACCEPTANCE_PASS
+          '
+          ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo systemctl stop lalune-backend.service'
       - name: Upload guest diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
