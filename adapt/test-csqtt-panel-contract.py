@@ -12,6 +12,7 @@ from html.parser import HTMLParser
 HTML_PATH = Path("adapt/csqtt-panel-preview.html")
 BACKEND_PATH = Path("adapt/headless_main.go")
 ADAPT_SCRIPT_PATH = Path("adapt/apply-pinned-original-linux-arm64-policy.py")
+DEPLOY_PATCHER_PATH = Path("adapt/patch-csqtt-deploy-manager.py")
 
 
 class PanelParser(HTMLParser):
@@ -34,6 +35,7 @@ class PanelParser(HTMLParser):
 html = HTML_PATH.read_text(encoding="utf-8")
 backend = BACKEND_PATH.read_text(encoding="utf-8")
 adapt_script = ADAPT_SCRIPT_PATH.read_text(encoding="utf-8")
+deploy_patcher = DEPLOY_PATCHER_PATH.read_text(encoding="utf-8")
 scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.S)
 if not scripts:
     raise SystemExit("CSQTT panel has no inline JavaScript")
@@ -217,6 +219,13 @@ for token in ("вспомогательные службы LaLune", "TUN-инт�
         raise SystemExit("uninstall confirmation is missing scope detail: " + token)
 if "Удалить только csqtt-lalune.service" in html:
     raise SystemExit("misleading service-only uninstall promise remains")
+
+# The deploy API must fail closed for NanoPi/Keenetic/local targets.
+for token in ("validateCSQTTDeployTarget", "net.LookupIP(host)", "ip.IsPrivate()", "ip.IsLoopback()", "local[ip.String()]"):
+    if token not in deploy_patcher:
+        raise SystemExit("CSQTT deployment target guard is incomplete: " + token)
+if 'validateCSQTTDeployTarget(req.Host)' not in deploy_patcher:
+    raise SystemExit("CSQTT deployment target guard is not called before SSH deployment")
 
 # Deployment failures may be logged with different English capitalization.
 if "state.deployLog.toLowerCase().includes('error')" not in js:
