@@ -312,8 +312,8 @@ replace_once(
 
 replace_once(
     deploy_go,
-    'import (\\n',
-    'import (\\n\\t"fmt"\\n\\t"net"\\n',
+    'import (\n',
+    'import (\n\t"fmt"\n\t"net"\n',
 )
 target_test = ROOT / "Desktop/Libs/deploy_target_test.go"
 target_test.write_text("""package libs
