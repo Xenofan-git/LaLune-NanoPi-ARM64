@@ -901,7 +901,7 @@ jobs:
             sudo ip -n socks5-echo route get 198.18.77.1
             sudo ip rule add pref 22015 fwmark 0x4d53/0xffff lookup 202
             sudo ip route get 198.18.77.2 mark 0x4d53 | grep -q "table 202"
-            cat > /tmp/socks5-echo.py <<'PY'
+            cat > /home/tester/socks5-echo-namespaced.py <<'PY'
           import socket
           import threading
 
@@ -939,7 +939,7 @@ jobs:
           threading.Thread(target=tcp, daemon=True).start()
           udp()
           PY
-            sudo ip netns exec socks5-echo python3 -u /tmp/socks5-echo.py >/tmp/socks5-echo.log 2>&1 &
+            sudo ip netns exec socks5-echo python3 -u /home/tester/socks5-echo-namespaced.py >/tmp/socks5-echo.log 2>&1 &
             for attempt in $(seq 1 20); do
               if sudo ip netns exec socks5-echo ss -H -ltn | grep -q "198.18.77.2:18080"; then break; fi
               sleep 0.2
