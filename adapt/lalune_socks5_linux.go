@@ -64,6 +64,7 @@ type Socks5Server struct {
 	dialTCPOverride func(string) (net.Conn, error)
 	resolveTCPOverride func(context.Context, string) (string, error)
 	dialUDPOverride func() (*net.UDPConn, error)
+	tracef func(string, ...any)
 }
 
 func NewSocks5Server(addr string) *Socks5Server {
@@ -274,6 +275,8 @@ func laluneDialer(network string) net.Dialer {
 	}
 }
 
+func (s *Socks5Server) trace(format string, args ...any) { if s.tracef != nil { s.tracef(format, args...) } }
+
 func (s *Socks5Server) dialTCP(addr string) (net.Conn, error) {
 	if s.dialTCPOverride != nil { return s.dialTCPOverride(addr) }
 	if _, err := net.InterfaceByName("csqtt0"); err != nil {
@@ -288,9 +291,12 @@ func (s *Socks5Server) dialTCP(addr string) (net.Conn, error) {
 	} else {
 		resolved, err = resolveTCPAddrMarked(ctx, addr)
 	}
-	if err != nil { return nil, err }
+	if err != nil { s.trace("TCP resolve target=%q failed: %v", addr, err); return nil, err }
+	s.trace("TCP resolved target=%q to=%q", addr, resolved)
 	tcpDialer := laluneDialer("tcp")
-	return tcpDialer.DialContext(ctx, "tcp", resolved)
+	conn, dialErr := tcpDialer.DialContext(ctx, "tcp", resolved)
+	if dialErr != nil { s.trace("TCP marked dial target=%q failed: %v", resolved, dialErr) } else { s.trace("TCP marked dial target=%q connected local=%s remote=%s", resolved, conn.LocalAddr(), conn.RemoteAddr()) }
+	return conn, dialErr
 }
 
 // resolveTCPAddrMarked performs hostname resolution through sockets carrying
@@ -438,7 +444,7 @@ func (s *Socks5Server) handleConnect(c net.Conn) {
 	addr, err := readSocksAddr(c)
 	if err != nil { _ = writeSocksReply(c, 8, &net.TCPAddr{}); return }
 	out, err := s.dialTCP(addr)
-	if err != nil { _ = writeSocksReply(c, 1, &net.TCPAddr{}); return }
+	if err != nil { s.trace("SOCKS CONNECT target=%q failed: %v", addr, err); _ = writeSocksReply(c, 1, &net.TCPAddr{}); return }
 	if !s.trackConn(out) { return }
 	defer func() { s.untrackConn(out); _ = out.Close() }()
 
@@ -492,9 +498,10 @@ func (s *Socks5Server) handleUDPAssociate(c net.Conn) {
 		if readErr != nil { return }
 		if client == nil { client = cloneUDPAddr(src) }
 		if !src.IP.Equal(client.IP) || src.Port != client.Port { continue }
-		if n < 7 || buf[0] != 0 || buf[1] != 0 || buf[2] != 0 { continue }
+		if n < 7 || buf[0] != 0 || buf[1] != 0 || buf[2] != 0 { s.trace("UDP relay dropped malformed datagram bytes=%d", n); continue }
 		target, off, parseErr := readUDPAddr(buf[:n], 3)
-		if parseErr != nil { continue }
+		if parseErr != nil { s.trace("UDP relay address parse failed: %v", parseErr); continue }
+		s.trace("UDP relay received target=%q bytes=%d from=%s", target, n-off, src)
 		payload := append([]byte(nil), buf[off:n]...)
 		select {
 		case sem <- struct{}{}:
@@ -509,18 +516,23 @@ func (s *Socks5Server) handleUDPAssociate(c net.Conn) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			dst, resolveErr := resolveUDPAddrMarkedContext(ctx, target)
-			if resolveErr != nil { return }
+			if resolveErr != nil { s.trace("UDP resolve target=%q failed: %v", target, resolveErr); return }
+			s.trace("UDP resolved target=%q to=%s", target, dst)
 			out, dialErr := s.dialUDPFor(dst.IP)
-			if dialErr != nil { return }
+			if dialErr != nil { s.trace("UDP marked socket create target=%s failed: %v", dst, dialErr); return }
+			s.trace("UDP marked socket created local=%s target=%s", out.LocalAddr(), dst)
 			if !s.trackConn(out) { return }
 			defer func() { s.untrackConn(out); _ = out.Close() }()
 			_ = out.SetDeadline(time.Now().Add(5 * time.Second))
-			if _, writeErr := out.WriteToUDP(payload, dst); writeErr != nil { return }
+			if _, writeErr := out.WriteToUDP(payload, dst); writeErr != nil { s.trace("UDP marked send target=%s failed: %v", dst, writeErr); return }
+			s.trace("UDP marked packet sent target=%s bytes=%d", dst, len(payload))
 			replyBuf := make([]byte, 65535)
 			rn, ra, replyErr := out.ReadFromUDP(replyBuf)
-			if replyErr != nil { return }
+			if replyErr != nil { s.trace("UDP marked receive target=%s failed: %v", dst, replyErr); return }
+			s.trace("UDP marked reply from=%s bytes=%d", ra, rn)
 			packet, buildErr := buildUDPReply(ra, replyBuf[:rn])
-			if buildErr == nil { _, _ = u.WriteToUDP(packet, client) }
+			if buildErr != nil { s.trace("UDP reply build from=%s failed: %v", ra, buildErr); return }
+			if _, relayErr := u.WriteToUDP(packet, client); relayErr != nil { s.trace("UDP relay reply to=%s failed: %v", client, relayErr) } else { s.trace("UDP relay reply delivered to=%s bytes=%d", client, len(packet)) }
 		}(target, payload, cloneUDPAddr(client))
 	}
 }
