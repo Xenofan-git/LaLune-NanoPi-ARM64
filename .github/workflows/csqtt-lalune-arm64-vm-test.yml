@@ -290,8 +290,18 @@ jobs:
               raise SystemExit("marked DNS UDP test failed: %r" % (last,))
           PYDNS
           chmod 0755 /home/tester/socks5-marked-e2e-arm64.test
-          CSQTT_SOCKS5_MARKED_E2E=1 CSQTT_SOCKS5_E2E_TARGET=198.18.86.2 /home/tester/socks5-marked-e2e-arm64.test -test.run TestSocks5MarkedSocketEndToEnd -test.v
-          echo SOCKS5_TCP_UDP_SO_MARK_POLICY_ROUTING_E2E_PASS
+          if CSQTT_SOCKS5_MARKED_E2E=1 CSQTT_SOCKS5_E2E_TARGET=198.18.86.2 /home/tester/socks5-marked-e2e-arm64.test -test.run TestSocks5MarkedSocketEndToEnd -test.v; then
+            echo SOCKS5_TCP_UDP_SO_MARK_POLICY_ROUTING_E2E_PASS
+          else
+            echo "SOCKS5_E2E_FIXTURE_LOG_BEGIN" >&2
+            cat /tmp/socks5-echo.log >&2 || true
+            echo "SOCKS5_E2E_INTERFACE_COUNTERS_BEGIN" >&2
+            ip -s link show csqtt0 >&2 || true
+            ip -n socks-echo -s link show socks-peer >&2 || true
+            echo "SOCKS5_E2E_NAMESPACE_ROUTES_BEGIN" >&2
+            ip -n socks-echo route show table all >&2 || true
+            exit 1
+          fi
           SOCKS_MARKED_E2E
 
       - name: Test backend installer lifecycle and ownership safety in disposable ARM64 VM
