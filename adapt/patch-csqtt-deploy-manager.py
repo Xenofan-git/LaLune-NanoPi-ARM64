@@ -342,10 +342,7 @@ replace_once(
 \treturn nil
 }
 
-func DeployProtocol(reqJSON string) bool {''',
-)
-'func DeployProtocol(reqJSON string) bool {',
-    '''func validCSQTTSecret(value string) bool {
+func validCSQTTSecret(value string) bool {
 \tif value == "" { return false }
 \tfor _, r := range value { if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) { return false } }
 \treturn true
