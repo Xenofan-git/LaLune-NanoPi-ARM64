@@ -209,6 +209,15 @@ if "apiStatus" in render_status:
 if "if(!answer){toast('Введите ответ CAPTCHA или откройте страницу проверки VK',true);return}" not in js:
     raise SystemExit("CAPTCHA form does not validate an empty answer before calling the backend")
 
+# Uninstall confirmation must describe the actual full namespaced runtime cleanup.
+if "Полностью удалить runtime LaLune CSQTT" not in html:
+    raise SystemExit("uninstall confirmation still understates the removal scope")
+for token in ("вспомогательные службы LaLune", "TUN-интерфейс", "правила firewall с маркерами LaLune", "База SQLite, файл конфигурации и сертификаты сохраняются", "Оригинальный CSQTT и другие службы/маршруты не должны затрагиваться"):
+    if token not in html:
+        raise SystemExit("uninstall confirmation is missing scope detail: " + token)
+if "Удалить только csqtt-lalune.service" in html:
+    raise SystemExit("misleading service-only uninstall promise remains")
+
 # Deployment failures may be logged with different English capitalization.
 if "state.deployLog.toLowerCase().includes('error')" not in js:
     raise SystemExit("deployment error status is case-sensitive")
