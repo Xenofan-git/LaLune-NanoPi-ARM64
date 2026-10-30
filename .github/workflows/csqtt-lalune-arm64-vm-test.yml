@@ -1309,9 +1309,9 @@ jobs:
             test "$rc" = 0 -o "$rc" = 1 -o "$rc" = 2 -o "$rc" = 124
             test -s /tmp/lalune-deploy-manager-help.log
             echo REAL_ARM64_DEPLOY_MANAGER_STARTUP_PASS
-            mkdir -p /opt/lalune-runtime-support/tokenfetcher
-            unzip -q server-assets/LaLuneTokenFetcher_Linux_ARM64.zip -d /opt/lalune-runtime-support/tokenfetcher
-            apphost="$(find /opt/lalune-runtime-support/tokenfetcher -type f -name LaLuneTokenFetcher -perm -u+x | head -n 1)"
+            sudo mkdir -p /opt/lalune-runtime-support/tokenfetcher
+            sudo unzip -q server-assets/LaLuneTokenFetcher_Linux_ARM64.zip -d /opt/lalune-runtime-support/tokenfetcher
+            apphost="$(sudo find /opt/lalune-runtime-support/tokenfetcher -type f -name LaLuneTokenFetcher -perm -u+x | head -n 1)"
             test -n "$apphost"
             file "$apphost" | grep -q "ARM aarch64"
             ldd "$apphost" | tee /tmp/lalune-tokenfetcher.ldd
