@@ -321,6 +321,8 @@ replace_once(
     deploy_go,
     'func DeployProtocol(reqJSON string) bool {',
     '''func validateCSQTTDeployTarget(host string) error {
+\t// The only local-target exception is explicitly enabled inside the disposable CI VM.
+\tif os.Getenv("CSQTT_DEPLOY_ALLOW_LOCAL_TARGETS") == "1" { return nil }
 \thost = strings.TrimSpace(strings.Trim(host, "[]"))
 \tif host == "" { return fmt.Errorf("хост сервера не задан") }
 \tips, err := net.LookupIP(host)
