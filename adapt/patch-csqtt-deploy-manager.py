@@ -315,7 +315,7 @@ replace_once(
 replace_once(
     deploy_go,
     'import (\\n',
-    'import (\\n\\t"net"\\n',
+    'import (\\n\\t"fmt"\\n\\t"net"\\n',
 )
 replace_once(
     deploy_go,
