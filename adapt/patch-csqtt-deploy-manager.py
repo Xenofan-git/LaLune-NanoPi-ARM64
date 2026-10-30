@@ -299,19 +299,17 @@ replace_once(
     '\tif strings.TrimSpace(req.Host) == "" {',
     '''\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") {
 \t\tif err := validateCSQTTDeployTarget(req.Host); err != nil { deployAppend("[deploy] "+err.Error()); return false }
+\t\tif !req.Uninstall {
+\t\t\tif !validCSQTTSecret(req.MainPassword) || !validCSQTTSecret(req.WebUser) || !validCSQTTSecret(req.WebPassword) {
+\t\t\t\tdeployAppend("[deploy] CSQTT: задайте пароль туннеля, логин и пароль WEB только латиницей и цифрами")
+\t\t\t\treturn false
+\t\t\t}
+\t\t\tif !validCSQTTDeviceID(req.DeviceID) { deployAppend("[deploy] не удалось получить ID устройства LaLune"); return false }
+\t\t}
 \t}
 \tif strings.TrimSpace(req.Host) == "" {''',
 )
 
-    '''\tif strings.EqualFold(strings.TrimSpace(req.Protocol), "CSQTT") && !req.Uninstall {
-\t\tif !validCSQTTSecret(req.MainPassword) || !validCSQTTSecret(req.WebUser) || !validCSQTTSecret(req.WebPassword) {
-\t\t\tdeployAppend("[deploy] CSQTT: задайте пароль туннеля, логин и пароль WEB только латиницей и цифрами")
-\t\t\treturn false
-\t\t}
-\t\tif !validCSQTTDeviceID(req.DeviceID) { deployAppend("[deploy] не удалось получить ID устройства LaLune"); return false }
-\t}
-\tif strings.TrimSpace(req.Host) == "" {''',
-)
 replace_once(
     deploy_go,
     'import (\\n',
