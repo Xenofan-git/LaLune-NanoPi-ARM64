@@ -1282,7 +1282,7 @@ jobs:
             file lalune-original-linux-arm64 | grep -q "ARM aarch64"
             file deploy-manager | grep -q "ARM aarch64"
             file server-assets/csqtt-lalune-linux-arm64 | grep -q "ARM aarch64"
-            readelf -l lalune-original-linux-arm64 | grep -q "Requesting program interpreter" && exit 1 || true
+            if readelf -l lalune-original-linux-arm64 | grep -q "Requesting program interpreter"; then echo "backend unexpectedly requires a dynamic loader" >&2; exit 1; fi
             ldd ./deploy-manager | tee /tmp/lalune-deploy-manager.ldd
             ! grep -q "not found" /tmp/lalune-deploy-manager.ldd
             sudo sh ./install-original-linux-backend.sh ./lalune-original-linux-arm64 "$PWD"
