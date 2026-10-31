@@ -433,6 +433,32 @@ jobs:
           strings -a client-assets/client-linux-arm64 | grep -Fq 'CSQTT_LIVENESS_V1'
           sha256sum client-assets/client-linux-arm64 | tee client-assets/SHA256SUMS
           echo PRODUCTION_WIRE4_LIVENESS_ARM64_CLIENT_BUILD_PASS
+      - name: Build CI-only ARM64 client with isolated TURN test adapter
+        run: |
+          set -euxo pipefail
+          # The production client was already built and copied before this test-only
+          # instrumentation is applied. This second binary uses the same pinned,
+          # NanoPi-adapted WIRE-4 source but injects disposable TURN credentials and
+          # counters so the real ARM64 process can be tested without VK secrets.
+          python3 scripts/ci/patch-csqtt-process-e2e-auth.py
+          grep -Fq 'CSQTT_TEST_TUNCONF_PARSED' client-source/rust-client/session.rs
+          grep -Fq 'CSQTT_TEST_TURN_USERNAME' client-source/rust-client/auth.rs
+          CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+            cargo +1.97.1 build --locked --release --target aarch64-unknown-linux-gnu --manifest-path client-source/rust-client/Cargo.toml --bin client
+          install -m 0755 client-source/rust-client/target/aarch64-unknown-linux-gnu/release/client /tmp/csqtt-client-arm64-e2e
+          file /tmp/csqtt-client-arm64-e2e
+          readelf -h /tmp/csqtt-client-arm64-e2e | grep -Fq 'AArch64'
+          strings -a /tmp/csqtt-client-arm64-e2e | grep -Fq 'CSQTT_LIVENESS_V1'
+          strings -a /tmp/csqtt-client-arm64-e2e | grep -Fq 'CSQTT_TEST_TUNCONF_PARSED'
+          sha256sum /tmp/csqtt-client-arm64-e2e
+          echo ARM64_WIRE4_CLIENT_PROCESS_RECOVERY_TEST_ARTIFACT_PASS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lalune-csqtt-arm64-e2e-client
+          path: /tmp/csqtt-client-arm64-e2e
+          if-no-files-found: error
+
       - name: Audit production ARM64 client liveness marker
         run: |
           set -euxo pipefail
