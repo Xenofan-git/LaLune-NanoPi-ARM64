@@ -69,9 +69,9 @@ else:
     session_patched = session_source
     print("PASS: receive-idle watchdog injection disabled; stock TransportReader::recv wait retained.")
 
-# Instrument the actual inbound TUNCONF parser in session.rs. The older
-# handshake ConfigResponse branch was removed upstream; the active path is the
-# packet-reader branch below. Do not guess at a second parse site.
+# Instrument unsolicited inbound TUNCONF packets in the long-lived reader.
+# Reconnect handshakes use the separate register()/ConfigResponse path instrumented
+# below; both paths are required to measure recovery accurately.
 reader_marker = """        if packet.as_slice().starts_with(b"TUNCONF:") {
             if let Ok(ConfigResponse::Config(config)) = parse_config_response(packet.as_slice()) {
                 let _ = config_tx.try_send(config);"""
