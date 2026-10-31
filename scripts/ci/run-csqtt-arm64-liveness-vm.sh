@@ -111,8 +111,8 @@ for attempt in $(seq 1 40); do
   sleep 0.25
 done
 grep -Fq CSQTT_TEST_TUN_BRIDGE_READY "$BRIDGE_LOG"
-CLIENT_TUN_IP="$(sed -n 's/.*\\[КЛИЕНТ\\] Tunnel IP: *\\([0-9.]*\\).*/\\1/p' "$CLIENT_LOG" | tail -n 1)"
-if [[ ! "$CLIENT_TUN_IP" =~ ^10\\.67\\.68\\.[0-9]{1,3}$ ]]; then
+CLIENT_TUN_IP="$(sed -n 's/.*\[КЛИЕНТ\] Tunnel IP: *\([0-9.]*\).*/\1/p' "$CLIENT_LOG" | tail -n 1)"
+if [[ ! "$CLIENT_TUN_IP" =~ ^10\.67\.68\.[0-9]{1,3}$ ]]; then
   echo "client received unexpected LaLune TUN address: $CLIENT_TUN_IP" >&2
   tail -n 120 "$CLIENT_LOG" "$SERVER_LOG" >&2
   exit 1
