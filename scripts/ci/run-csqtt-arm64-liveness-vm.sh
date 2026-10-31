@@ -68,7 +68,7 @@ done
 start_server() {
   local previous_count
   previous_count=$(grep -Fc 'RTP AEAD: 10.200.0.1:46000' "$SERVER_LOG" || true)
-  ip netns exec "$SERVER_NS" "$SERVER" --listen 10.200.0.1:46000 --web-port 0 \
+  ip netns exec "$SERVER_NS" env CSQTT_TEST_LIVENESS_DIAGNOSTICS=1 "$SERVER" --listen 10.200.0.1:46000 --web-port 0 \
     --config-dir "$ROOT/server-config" --password ci-e2e-password \
     --device-id ci-e2e-device --web-pass ci-e2e-web-password >>"$SERVER_LOG" 2>&1 &
   server_pid=$!
@@ -85,6 +85,7 @@ start_server() {
 start_server
 
 ip netns exec "$CLIENT_NS" env \
+  CSQTT_TEST_LIVENESS_DIAGNOSTICS=1 \
   CSQTT_TEST_TURN_USERNAME=ci-e2e-user \
   CSQTT_TEST_TURN_PASSWORD=ci-e2e-turn-password \
   CSQTT_TEST_TURN_SERVER=10.200.0.1 \
