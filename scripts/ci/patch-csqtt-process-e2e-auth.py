@@ -69,22 +69,9 @@ else:
     session_patched = session_source
     print("PASS: receive-idle watchdog injection disabled; stock TransportReader::recv wait retained.")
 
-# Instrument both client-side protocol parse paths, before optional config
-# delivery/deduplication, so the test can distinguish server send from client
-# actually parsing the response.
-handshake_marker = """            ConfigResponse::Config(value) => {
-                if value.ends_with(":stream-v1")"""
-handshake_replacement = """            ConfigResponse::Config(value) => {
-                if let Ok(path) = std::env::var("CSQTT_TEST_TUNCONF_COUNTER_FILE") {
-                    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-                        let _ = std::io::Write::write_all(&mut file, b"TUNCONF\\n");
-                    }
-                }
-                crate::log_error!("CSQTT_TEST_TUNCONF_PARSED");
-                if value.ends_with(":stream-v1")"""
-if session_patched.count(handshake_marker) != 1:
-    raise SystemExit("Expected exactly one client handshake TUNCONF parse branch; refusing instrumentation")
-session_patched = session_patched.replace(handshake_marker, handshake_replacement, 1)
+# Instrument the actual inbound TUNCONF parser in session.rs. The older
+# handshake ConfigResponse branch was removed upstream; the active path is the
+# packet-reader branch below. Do not guess at a second parse site.
 reader_marker = """        if packet.as_slice().starts_with(b"TUNCONF:") {
             if let Ok(ConfigResponse::Config(config)) = parse_config_response(packet.as_slice()) {
                 let _ = config_tx.try_send(config);"""
