@@ -141,7 +141,13 @@ replace_once("server-source/rust-server/protocol.rs",
         let text = std::str::from_utf8(payload)?;''',
 '''    if payload.starts_with(LIVENESS_PREFIX) {
         if let Some(pong) = liveness_pong(payload) {
+            let offset = LIVENESS_PREFIX.len();
+            let sequence = u64::from_be_bytes(pong[offset + 2..offset + 10].try_into()?);
+            eprintln!("[LIVENESS_DIAG] SERVER_RX_PING session={} bytes={} valid=1 seq={}", session.id, payload.len(), sequence);
             writer.write(&pong).await?;
+            eprintln!("[LIVENESS_DIAG] SERVER_TX_PONG session={} seq={}", session.id, sequence);
+        } else {
+            eprintln!("[LIVENESS_DIAG] SERVER_RX_PING session={} bytes={} valid=0", session.id, payload.len());
         }
         return Ok(());
     }
@@ -235,6 +241,7 @@ replace_once("client-source/rust-client/session.rs",
     config_tx: mpsc::Sender<String>,
     writer: mpsc::Sender<WriterCommand>,
     liveness_enabled: bool,
+    stream_id: usize,
 }''', "reader runtime liveness fields")
 
 replace_once("client-source/rust-client/session.rs",
@@ -291,6 +298,7 @@ replace_once("client-source/rust-client/session.rs",
             config_tx: runtime.config_tx.clone(),
             writer: writer_command_tx.clone(),
             liveness_enabled,
+            stream_id: config.id,
         },''', "wire reader liveness state")
 
 replace_once("client-source/rust-client/session.rs",
@@ -348,6 +356,7 @@ replace_once("client-source/rust-client/session.rs",
         config_tx,
         writer,
         liveness_enabled,
+        stream_id,
     } = runtime;
     let mut liveness_tick = tokio::time::interval(LIVENESS_INTERVAL);
     liveness_tick.tick().await;
@@ -368,6 +377,7 @@ replace_once("client-source/rust-client/session.rs",
                         .ok_or_else(|| anyhow::anyhow!("CSQTT liveness sequence exhausted"))?;
                     let nonce = rand::random::<[u8; 16]>();
                     let frame = liveness_frame(LIVENESS_PING, sequence, &nonce);
+                    eprintln!("[LIVENESS_DIAG] CLIENT_TX_PING stream={} seq={} bytes={}", stream_id, sequence, frame.len());
                     send_writer_bytes(&writer, &frame).await.context("send CSQTT liveness PING")?;
                     pending_probe = Some((sequence, nonce, tokio::time::Instant::now()));
                 }
@@ -376,11 +386,16 @@ replace_once("client-source/rust-client/session.rs",
             result = transport.recv() => result?,
         };
         if liveness_enabled && packet.as_slice().starts_with(LIVENESS_PREFIX) {
+            let parsed = parse_liveness_pong(packet.as_slice());
+            eprintln!("[LIVENESS_DIAG] CLIENT_RX_FRAME stream={} bytes={} parsed={}", stream_id, packet.len(), u8::from(parsed.is_some()));
             if let (Some((expected_sequence, expected_nonce, _)), Some((sequence, nonce))) =
-                (pending_probe, parse_liveness_pong(packet.as_slice()))
+                (pending_probe, parsed)
             {
                 if sequence == expected_sequence && nonce == expected_nonce {
+                    eprintln!("[LIVENESS_DIAG] CLIENT_RX_PONG stream={} seq={}", stream_id, sequence);
                     pending_probe = None;
+                } else {
+                    eprintln!("[LIVENESS_DIAG] CLIENT_RX_PONG_MISMATCH stream={} expected_seq={} received_seq={} nonce_match={}", stream_id, expected_sequence, sequence, u8::from(expected_nonce == nonce));
                 }
             }
             continue;
@@ -395,5 +410,5 @@ replace_once("client-source/rust-client/protocol.rs",
         b"\\xffCSQTT_LIVENESS_V1",
     ]''', "classify liveness as control")
 
-# Server advertises liveness only to WIRE-4 clients; WIRE-3 clients retain legacy behavior.
-print("PASS: installed WIRE-4 negotiated authenticated liveness PING/PONG in pinned client/server source clones.")
+# Diagnostics are emitted only by the CI recovery binary and disposable server.
+print("PASS: installed per-stream WIRE-4 PING/PONG diagnostics in CI-only source clones.")
