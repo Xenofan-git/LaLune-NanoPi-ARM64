@@ -431,6 +431,10 @@ jobs:
           readelf -h client-assets/client-linux-arm64 | grep -Fq 'AArch64'
           strings -a client-assets/client-linux-arm64 | grep -Fq 'fallback'
           strings -a client-assets/client-linux-arm64 | grep -Fq 'CSQTT_LIVENESS_V1'
+          # The production artifact must never contain CI-only TURN credentials
+          # or TUNCONF counters; those are injected only after this binary is copied.
+          ! strings -a client-assets/client-linux-arm64 | grep -Fq 'CSQTT_TEST_TURN_USERNAME'
+          ! strings -a client-assets/client-linux-arm64 | grep -Fq 'CSQTT_TEST_TUNCONF_COUNTER_FILE'
           sha256sum client-assets/client-linux-arm64 | tee client-assets/SHA256SUMS
           echo PRODUCTION_WIRE4_LIVENESS_ARM64_CLIENT_BUILD_PASS
       - name: Build CI-only ARM64 client with isolated TURN test adapter
