@@ -171,7 +171,7 @@ if [ "$recovered" -ne 1 ]; then
   echo "ARM64 liveness event counters since test start:" >&2
   for event in CLIENT_TX_PING CLIENT_RX_FRAME CLIENT_RX_PONG CLIENT_RX_PONG_MISMATCH SERVER_RX_PING SERVER_TX_PONG; do
     printf '  %s=' "$event" >&2
-    grep -cF "[LIVENESS_DIAG] $event " "$CLIENT_LOG" "$SERVER_LOG" 2>/dev/null | awk -F: '{sum += $NF} END {print sum+0}' >&2
+    grep -cF "[LIVENESS_DIAG] $event " "$CLIENT_LOG" "$SERVER_LOG" 2>/dev/null | awk -F: '{sum += $NF} END {print sum+0}' >&2 || true
   done
   echo "ARM64 liveness per-stream client PING/PONG counts:" >&2
   grep -E '\[LIVENESS_DIAG\] CLIENT_(TX_PING|RX_PONG|RX_PONG_MISMATCH) ' "$CLIENT_LOG" | tail -n 120 >&2 || true
