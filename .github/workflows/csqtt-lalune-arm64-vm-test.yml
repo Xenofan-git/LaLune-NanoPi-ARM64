@@ -21,6 +21,11 @@ jobs:
         with:
           name: lalune-original-linux-arm64
           path: vm/artifact
+      - name: Download CI-only ARM64 WIRE-4 recovery client
+        uses: actions/download-artifact@v4
+        with:
+          name: lalune-csqtt-arm64-e2e-client
+          path: vm/e2e-client
 
       - name: Extract actual isolated server and installer
         run: |
@@ -1250,6 +1255,17 @@ jobs:
           diff -u vm/runner-main-routes.before vm/runner-main-routes.after
           diff -u vm/runner-ip-rules.before vm/runner-ip-rules.after
           echo DEPLOY_BUTTON_INSTALL_UNINSTALL_E2E_PASS
+      - name: Exercise same-process recovery with the ARM64 WIRE-4 client and production server
+        timeout-minutes: 15
+        run: |
+          set -euxo pipefail
+          ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo apt-get update -qq && sudo apt-get install -y -qq coturn iproute2 iputils-ping python3'
+          SCP=(scp -i vm/id_ed25519 -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+          SSH=(ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1)
+          test -x vm/e2e-client/csqtt-client-arm64-e2e
+          "${SCP[@]}" vm/e2e-client/csqtt-client-arm64-e2e vm/real/server-assets/csqtt-lalune-linux-arm64 scripts/ci/csqtt-test-tun-udp-bridge.py scripts/ci/run-csqtt-arm64-liveness-vm.sh tester@127.0.0.1:/home/tester/
+          "${SSH[@]}" 'chmod 0755 /home/tester/csqtt-client-arm64-e2e /home/tester/csqtt-lalune-linux-arm64 /home/tester/run-csqtt-arm64-liveness-vm.sh && sudo bash /home/tester/run-csqtt-arm64-liveness-vm.sh /home/tester/csqtt-client-arm64-e2e /home/tester/csqtt-lalune-linux-arm64 /home/tester/csqtt-test-tun-udp-bridge.py'
+          echo PRODUCTION_SOURCE_ARM64_WIRE4_SAME_PROCESS_RECOVERY_E2E_PASS
       - name: Clean runtime bundle acceptance on real Debian 13 ARM64 guest
         run: |
           set -euxo pipefail
