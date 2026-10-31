@@ -111,7 +111,13 @@ for attempt in $(seq 1 40); do
   sleep 0.25
 done
 grep -Fq CSQTT_TEST_TUN_BRIDGE_READY "$BRIDGE_LOG"
-ip -n "$CLIENT_NS" addr add 10.67.68.2/32 dev csqtt-client0
+CLIENT_TUN_IP="$(sed -n 's/.*\\[КЛИЕНТ\\] Tunnel IP: *\\([0-9.]*\\).*/\\1/p' "$CLIENT_LOG" | tail -n 1)"
+if [[ ! "$CLIENT_TUN_IP" =~ ^10\\.67\\.68\\.[0-9]{1,3}$ ]]; then
+  echo "client received unexpected LaLune TUN address: $CLIENT_TUN_IP" >&2
+  tail -n 120 "$CLIENT_LOG" "$SERVER_LOG" >&2
+  exit 1
+fi
+ip -n "$CLIENT_NS" addr add "$CLIENT_TUN_IP/32" dev csqtt-client0
 ip -n "$CLIENT_NS" link set csqtt-client0 mtu 1300 up
 ip -n "$CLIENT_NS" route replace 10.67.68.1/32 dev csqtt-client0
 
