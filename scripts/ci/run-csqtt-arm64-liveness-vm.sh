@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs only inside the disposable ARM64 system VM created by the CI workflow.
-# Requires the experimental patched Rust client/server and the TUN bridge script.
+# Uses the test-instrumented client built from the production WIRE-4 source, the production ARM64 server artifact, and the isolated TUN bridge.
 set -euo pipefail
 
 CLIENT="${1:-/home/tester/csqtt-client-arm64-liveness-experimental}"
@@ -111,12 +111,12 @@ for attempt in $(seq 1 40); do
   sleep 0.25
 done
 grep -Fq CSQTT_TEST_TUN_BRIDGE_READY "$BRIDGE_LOG"
-ip -n "$CLIENT_NS" addr add 10.66.67.2/32 dev csqtt-client0
+ip -n "$CLIENT_NS" addr add 10.67.68.2/32 dev csqtt-client0
 ip -n "$CLIENT_NS" link set csqtt-client0 mtu 1300 up
-ip -n "$CLIENT_NS" route replace 10.66.67.1/32 dev csqtt-client0
+ip -n "$CLIENT_NS" route replace 10.67.68.1/32 dev csqtt-client0
 
 echo "ARM64_LIVENESS_VM: bidirectional dataplane before restart"
-ip netns exec "$CLIENT_NS" ping -I csqtt-client0 -c 3 -W 3 10.66.67.1 | tee "$ROOT/ping-before.log"
+ip netns exec "$CLIENT_NS" ping -I csqtt-client0 -c 3 -W 3 10.67.68.1 | tee "$ROOT/ping-before.log"
 grep -Eq '0% packet loss|0 packets lost' "$ROOT/ping-before.log"
 
 # Keep the TUN payload idle for multiple five-second liveness periods.
@@ -174,7 +174,7 @@ echo "ARM64_LIVENESS_VM: dataplane recovery after restart (bounded warm-up)"
 # measured burst so the test does not mask persistent packet loss.
 warmed=0
 for attempt in $(seq 1 5); do
-  if ip netns exec "$CLIENT_NS" ping -I csqtt-client0 -c 1 -W 3 10.66.67.1 >"$ROOT/ping-warmup-$attempt.log" 2>&1; then
+  if ip netns exec "$CLIENT_NS" ping -I csqtt-client0 -c 1 -W 3 10.67.68.1 >"$ROOT/ping-warmup-$attempt.log" 2>&1; then
     warmed=1
     break
   fi
@@ -182,7 +182,7 @@ for attempt in $(seq 1 5); do
 done
 test "$warmed" -eq 1 || { cat "$ROOT"/ping-warmup-*.log >&2; echo "TUN dataplane did not recover during bounded warm-up" >&2; exit 1; }
 echo "ARM64_LIVENESS_VM: stable dataplane after warm-up"
-ip netns exec "$CLIENT_NS" ping -I csqtt-client0 -c 5 -W 3 10.66.67.1 | tee "$ROOT/ping-after.log"
+ip netns exec "$CLIENT_NS" ping -I csqtt-client0 -c 5 -W 3 10.67.68.1 | tee "$ROOT/ping-after.log"
 grep -Eq '0% packet loss|0 packets lost' "$ROOT/ping-after.log"
 echo "CSQTT_EXPERIMENTAL_ARM64_VM_LIVENESS_TUN_RECOVERY_PASS"
 echo "--- CLIENT LOG TAIL ---"; tail -n 80 "$CLIENT_LOG"
