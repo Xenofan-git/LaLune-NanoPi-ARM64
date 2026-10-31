@@ -37,7 +37,11 @@ set -eu
 printf '%s\n' "$*" >> "$TEST_SYSTEMCTL_LOG"
 case "$1" in
   is-active) [[ -f "$TEST_ACTIVE" ]];;
-  start) touch "$TEST_ACTIVE";;
+  start)
+    if [[ "${SYSTEMCTL_START_FAIL:-0}" == 1 ]]; then exit 1; fi
+    if [[ "${SYSTEMCTL_START_INACTIVE:-0}" == 1 ]]; then exit 0; fi
+    touch "$TEST_ACTIVE"
+    ;;
   stop|disable) rm -f "$TEST_ACTIVE";;
   disable) rm -f "$TEST_ACTIVE";;
   *) exit 0;;
@@ -167,6 +171,35 @@ if SS_MODE=clear IP_RULES= IP_ROUTE_PRESENT=0 IP_TUN_PRESENT=0 IPTABLES_RULES= "
 fi
 grep -q 'regular --secrets-file is required' "$ROOT/out"
 [[ ! -e "$ROOT/host/etc/csqtt-lalune" && ! -e "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
+
+# Case 2c: systemd start failure must never be reported as a successful install.
+# The installer deliberately retains its namespaced files and unit for diagnosis.
+if SYSTEMCTL_START_FAIL=1 SS_MODE=clear IP_RULES= IP_ROUTE_PRESENT=0 IP_TUN_PRESENT=0 IPTABLES_RULES= \
+  "$ROOT/package/install.sh" --secrets-file "$ROOT/package/server-secrets.txt" >"$ROOT/out" 2>&1; then
+  echo "FAIL: installer reported success after systemd start failure" >&2; exit 1
+fi
+grep -q 'service failed to start; LaLune files were retained for diagnosis' "$ROOT/out"
+[[ -x "$ROOT/host/usr/local/bin/csqtt-lalune" ]]
+[[ -f "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
+[[ -f "$ROOT/host/etc/csqtt-lalune/server.env" ]]
+[[ "$(stat -c %a "$ROOT/host/etc/csqtt-lalune/server.env")" == 600 ]]
+[[ ! -e "$ROOT/host/etc/systemd/system/csqtt-lalune.service.new" ]]
+rm -rf "$ROOT/host/etc/csqtt-lalune" "$ROOT/host/usr/local/lib/csqtt-lalune" \
+  "$ROOT/host/var/lib/csqtt-lalune" "$ROOT/host/var/log/csqtt-lalune" \
+  "$ROOT/host/usr/local/bin/csqtt-lalune" "$ROOT/host/etc/systemd/system/csqtt-lalune.service"
+
+# Case 2d: systemd may return success while the service is not active; this is also failure.
+if SYSTEMCTL_START_INACTIVE=1 SS_MODE=clear IP_RULES= IP_ROUTE_PRESENT=0 IP_TUN_PRESENT=0 IPTABLES_RULES= \
+  "$ROOT/package/install.sh" --secrets-file "$ROOT/package/server-secrets.txt" >"$ROOT/out" 2>&1; then
+  echo "FAIL: installer accepted a service that remained inactive" >&2; exit 1
+fi
+grep -q 'service is not active' "$ROOT/out"
+[[ -x "$ROOT/host/usr/local/bin/csqtt-lalune" ]]
+[[ -f "$ROOT/host/etc/systemd/system/csqtt-lalune.service" ]]
+[[ ! -e "$ROOT/host/etc/systemd/system/csqtt-lalune.service.new" ]]
+rm -rf "$ROOT/host/etc/csqtt-lalune" "$ROOT/host/usr/local/lib/csqtt-lalune" \
+  "$ROOT/host/var/lib/csqtt-lalune" "$ROOT/host/var/log/csqtt-lalune" \
+  "$ROOT/host/usr/local/bin/csqtt-lalune" "$ROOT/host/etc/systemd/system/csqtt-lalune.service"
 
 # Case 3: successful isolated install in the temporary root.
 printf '%s\n' 'mainPass123' 'webUser123' 'webPass123' '01234567-89ab-cdef-0123-456789abcdef' > "$ROOT/package/server-secrets.txt"
