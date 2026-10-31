@@ -87,6 +87,29 @@ reader_replacement = """        if packet.as_slice().starts_with(b"TUNCONF:") {
 if session_patched.count(reader_marker) != 1:
     raise SystemExit("Expected exactly one client inbound TUNCONF parse branch; refusing instrumentation")
 session_patched = session_patched.replace(reader_marker, reader_replacement, 1)
+
+# Worker reconnects receive their configuration in register()/handshake before
+# the long-lived reader loop is started. Count that path separately: it is the
+# expected path during same-process recovery.
+handshake_marker = """                if let Some(sender) = &config_tx {
+                    let _ = sender.try_send(value);
+                }
+                crate::log_error!("[ВОРКЕР #{}] Конфиг получен", config.id);"""
+handshake_replacement = """                if value.starts_with("TUNCONF:") {
+                    if let Ok(path) = std::env::var("CSQTT_TEST_TUNCONF_COUNTER_FILE") {
+                        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                            let _ = std::io::Write::write_all(&mut file, b"TUNCONF_HANDSHAKE\\n");
+                        }
+                    }
+                    crate::log_error!("CSQTT_TEST_TUNCONF_HANDSHAKE_PARSED");
+                }
+                if let Some(sender) = &config_tx {
+                    let _ = sender.try_send(value);
+                }
+                crate::log_error!("[ВОРКЕР #{}] Конфиг получен", config.id);"""
+if session_patched.count(handshake_marker) != 1:
+    raise SystemExit(f"Expected exactly one reconnect handshake config branch; found {session_patched.count(handshake_marker)}")
+session_patched = session_patched.replace(handshake_marker, handshake_replacement, 1)
 session_path.write_text(session_patched, encoding="utf-8")
 
 # Instrument the disposable client so recovery assertions count every valid
