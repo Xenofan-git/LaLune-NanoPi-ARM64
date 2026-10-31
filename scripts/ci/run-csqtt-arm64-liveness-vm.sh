@@ -168,6 +168,15 @@ for attempt in $(seq 1 100); do
 done
 if [ "$recovered" -ne 1 ]; then
   echo "ARM64 recovery counts: server=$((server_now-server_before)) client=$((client_now-client_before)) ready=$((ready_now-ready_before))" >&2
+  echo "ARM64 liveness event counters since test start:" >&2
+  for event in CLIENT_TX_PING CLIENT_RX_FRAME CLIENT_RX_PONG CLIENT_RX_PONG_MISMATCH SERVER_RX_PING SERVER_TX_PONG; do
+    printf '  %s=' "$event" >&2
+    grep -cF "[LIVENESS_DIAG] $event " "$CLIENT_LOG" "$SERVER_LOG" 2>/dev/null | awk -F: '{sum += $NF} END {print sum+0}' >&2
+  done
+  echo "ARM64 liveness per-stream client PING/PONG counts:" >&2
+  grep -E '\[LIVENESS_DIAG\] CLIENT_(TX_PING|RX_PONG|RX_PONG_MISMATCH) ' "$CLIENT_LOG" | tail -n 120 >&2 || true
+  echo "ARM64 liveness server receive/send counts:" >&2
+  grep -E '\[LIVENESS_DIAG\] SERVER_(RX_PING|TX_PONG) ' "$SERVER_LOG" | tail -n 120 >&2 || true
   tail -n 160 "$CLIENT_LOG" "$SERVER_LOG" "$TURN_LOG" "$BRIDGE_LOG" >&2
   exit 1
 fi
