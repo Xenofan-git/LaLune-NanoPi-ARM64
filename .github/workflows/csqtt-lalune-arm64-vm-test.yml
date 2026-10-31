@@ -1262,7 +1262,9 @@ jobs:
           ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1 'sudo apt-get update -qq && sudo apt-get install -y -qq coturn iproute2 iputils-ping python3'
           SCP=(scp -i vm/id_ed25519 -P 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
           SSH=(ssh -i vm/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null tester@127.0.0.1)
-          test -x vm/e2e-client/csqtt-client-arm64-e2e
+          # GitHub Actions artifacts do not preserve Unix executable mode.
+          test -s vm/e2e-client/csqtt-client-arm64-e2e
+          chmod 0755 vm/e2e-client/csqtt-client-arm64-e2e
           "${SCP[@]}" vm/e2e-client/csqtt-client-arm64-e2e vm/real/server-assets/csqtt-lalune-linux-arm64 scripts/ci/csqtt-test-tun-udp-bridge.py scripts/ci/run-csqtt-arm64-liveness-vm.sh tester@127.0.0.1:/home/tester/
           "${SSH[@]}" 'chmod 0755 /home/tester/csqtt-client-arm64-e2e /home/tester/csqtt-lalune-linux-arm64 /home/tester/run-csqtt-arm64-liveness-vm.sh && sudo bash /home/tester/run-csqtt-arm64-liveness-vm.sh /home/tester/csqtt-client-arm64-e2e /home/tester/csqtt-lalune-linux-arm64 /home/tester/csqtt-test-tun-udp-bridge.py'
           echo PRODUCTION_SOURCE_ARM64_WIRE4_SAME_PROCESS_RECOVERY_E2E_PASS
