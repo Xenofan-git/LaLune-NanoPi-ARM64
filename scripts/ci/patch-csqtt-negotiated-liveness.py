@@ -143,10 +143,14 @@ replace_once("server-source/rust-server/protocol.rs",
         if let Some(pong) = liveness_pong(payload) {
             let offset = LIVENESS_PREFIX.len();
             let sequence = u64::from_be_bytes(pong[offset + 2..offset + 10].try_into()?);
-            eprintln!("[LIVENESS_DIAG] SERVER_RX_PING session={} bytes={} valid=1 seq={}", session.id, payload.len(), sequence);
+            if std::env::var_os("CSQTT_TEST_LIVENESS_DIAGNOSTICS").is_some() {
+                eprintln!("[LIVENESS_DIAG] SERVER_RX_PING session={} bytes={} valid=1 seq={}", session.id, payload.len(), sequence);
+            }
             writer.write(&pong).await?;
-            eprintln!("[LIVENESS_DIAG] SERVER_TX_PONG session={} seq={}", session.id, sequence);
-        } else {
+            if std::env::var_os("CSQTT_TEST_LIVENESS_DIAGNOSTICS").is_some() {
+                eprintln!("[LIVENESS_DIAG] SERVER_TX_PONG session={} seq={}", session.id, sequence);
+            }
+        } else if std::env::var_os("CSQTT_TEST_LIVENESS_DIAGNOSTICS").is_some() {
             eprintln!("[LIVENESS_DIAG] SERVER_RX_PING session={} bytes={} valid=0", session.id, payload.len());
         }
         return Ok(());
@@ -377,7 +381,9 @@ replace_once("client-source/rust-client/session.rs",
                         .ok_or_else(|| anyhow::anyhow!("CSQTT liveness sequence exhausted"))?;
                     let nonce = rand::random::<[u8; 16]>();
                     let frame = liveness_frame(LIVENESS_PING, sequence, &nonce);
-                    eprintln!("[LIVENESS_DIAG] CLIENT_TX_PING stream={} seq={} bytes={}", stream_id, sequence, frame.len());
+                    if std::env::var_os("CSQTT_TEST_LIVENESS_DIAGNOSTICS").is_some() {
+                        eprintln!("[LIVENESS_DIAG] CLIENT_TX_PING stream={} seq={} bytes={}", stream_id, sequence, frame.len());
+                    }
                     send_writer_bytes(&writer, &frame).await.context("send CSQTT liveness PING")?;
                     pending_probe = Some((sequence, nonce, tokio::time::Instant::now()));
                 }
@@ -387,14 +393,18 @@ replace_once("client-source/rust-client/session.rs",
         };
         if liveness_enabled && packet.as_slice().starts_with(LIVENESS_PREFIX) {
             let parsed = parse_liveness_pong(packet.as_slice());
-            eprintln!("[LIVENESS_DIAG] CLIENT_RX_FRAME stream={} bytes={} parsed={}", stream_id, packet.len(), u8::from(parsed.is_some()));
+            if std::env::var_os("CSQTT_TEST_LIVENESS_DIAGNOSTICS").is_some() {
+                eprintln!("[LIVENESS_DIAG] CLIENT_RX_FRAME stream={} bytes={} parsed={}", stream_id, packet.len(), u8::from(parsed.is_some()));
+            }
             if let (Some((expected_sequence, expected_nonce, _)), Some((sequence, nonce))) =
                 (pending_probe, parsed)
             {
                 if sequence == expected_sequence && nonce == expected_nonce {
-                    eprintln!("[LIVENESS_DIAG] CLIENT_RX_PONG stream={} seq={}", stream_id, sequence);
+                    if std::env::var_os("CSQTT_TEST_LIVENESS_DIAGNOSTICS").is_some() {
+                        eprintln!("[LIVENESS_DIAG] CLIENT_RX_PONG stream={} seq={}", stream_id, sequence);
+                    }
                     pending_probe = None;
-                } else {
+                } else if std::env::var_os("CSQTT_TEST_LIVENESS_DIAGNOSTICS").is_some() {
                     eprintln!("[LIVENESS_DIAG] CLIENT_RX_PONG_MISMATCH stream={} expected_seq={} received_seq={} nonce_match={}", stream_id, expected_sequence, sequence, u8::from(expected_nonce == nonce));
                 }
             }
