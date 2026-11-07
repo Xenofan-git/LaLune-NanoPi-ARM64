@@ -290,17 +290,52 @@ func (m *SingBoxManager) LoadConfig() (singBoxConfigInput, error) {
 		if csqtt["type"] != "socks" { return input, fmt.Errorf("invalid CSQTT outbound type") }
 		csqttHost, _ := csqtt["server"].(string)
 		csqttPort, ok := csqtt["server_port"].(float64)
-		if csqttHost == "" || !ok || csqttPort < 1 || csqttPort > 65535 { return input, fmt.Errorf("invalid CSQTT SOCKS endpoint") }
-		input.CSQTTAddress = net.JoinHostPort(csqttHost, strconv.Itoa(int(csqttPort)))
+		if !ok || csqttPort < 1 || csqttPort > 65535 || csqttPort != float64(int(csqttPort)) {
+			return input, fmt.Errorf("invalid CSQTT SOCKS endpoint")
+		}
+		csqttIP := net.ParseIP(strings.TrimSpace(csqttHost))
+		if csqttIP == nil || !csqttIP.IsLoopback() {
+			return input, fmt.Errorf("CSQTT SOCKS outbound must use the local loopback listener")
+		}
+		if input.ListenAddress == net.JoinHostPort(csqttIP.String(), strconv.Itoa(int(csqttPort))) {
+			return input, fmt.Errorf("sing-box inbound and CSQTT SOCKS outbound must use different endpoints")
+		}
+		input.CSQTTAddress = net.JoinHostPort(csqttIP.String(), strconv.Itoa(int(csqttPort)))
 		input.CSQTTEnabled = true
 	}
 	for tag, entry := range known {
 		if !strings.HasPrefix(tag, "socks-") { continue }
-		host, _ := entry["server"].(string); port, ok := entry["server_port"].(float64)
-		if !ok || port < 1 || port > 65535 { return input, fmt.Errorf("invalid SOCKS5 outbound %q", tag) }
-		username, _ := entry["username"].(string); password, _ := entry["password"].(string)
-		input.SOCKS5 = append(input.SOCKS5, singBoxSOCKS5Outbound{ID:strings.TrimPrefix(tag,"socks-"), Server:host, ServerPort:int(port), Username:username, Password:password, Enabled:true})
+		if entry["type"] != "socks" {
+			return input, fmt.Errorf("invalid SOCKS5 outbound type for %q", tag)
+		}
+		host, _ := entry["server"].(string)
+		port, ok := entry["server_port"].(float64)
+		if !ok || port < 1 || port > 65535 || port != float64(int(port)) {
+			return input, fmt.Errorf("invalid SOCKS5 outbound %q", tag)
+		}
+		id := strings.TrimPrefix(tag, "socks-")
+		if !singBoxIDPattern.MatchString(id) {
+			return input, fmt.Errorf("invalid SOCKS5 outbound ID in tag %q", tag)
+		}
+		if _, _, err := singBoxOutboundHostPort(host, strconv.Itoa(int(port)), "SOCKS5 outbound "+tag); err != nil {
+			return input, err
+		}
+		username, hasUsername := entry["username"].(string)
+		password, hasPassword := entry["password"].(string)
+		if _, exists := entry["username"]; exists && !hasUsername {
+			return input, fmt.Errorf("SOCKS5 outbound %q username must be a string", tag)
+		}
+		if _, exists := entry["password"]; exists && !hasPassword {
+			return input, fmt.Errorf("SOCKS5 outbound %q password must be a string", tag)
+		}
+		if (username == "") != (password == "") {
+			return input, fmt.Errorf("SOCKS5 outbound %q must provide both username and password", tag)
+		}
+		input.SOCKS5 = append(input.SOCKS5, singBoxSOCKS5Outbound{ID:id, Server:strings.TrimSpace(host), ServerPort:int(port), Username:username, Password:password, Enabled:true})
 	}
+	// Go map iteration is intentionally randomized. Keep the panel model stable
+	// across loads so outbound ordering does not flicker between API responses.
+	sort.Slice(input.SOCKS5, func(i, j int) bool { return input.SOCKS5[i].ID < input.SOCKS5[j].ID })
 	route, _ := raw["route"].(map[string]any)
 	input.FinalOutbound, _ = route["final"].(string)
 	for _, rawSet := range anySlice(route["rule_set"]) {

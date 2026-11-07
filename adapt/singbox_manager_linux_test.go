@@ -7,6 +7,7 @@ import (
 	"context"
 	"net"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,10 +27,73 @@ func writeValidSingBoxConfigForTest(t *testing.T, path string) {
 	t.Helper()
 	encoded, err := buildSingBoxConfig(singBoxConfigInput{
 		ListenAddress: "127.0.0.1:19080",
-		CSQTTAddress: "127.0.0.1:19081",
+		CSQTTAddress: "127.0.0.1:19081", FinalOutbound: singBoxDirectTag,
 	})
 	if err != nil { t.Fatal(err) }
 	if err := os.WriteFile(path, encoded, 0600); err != nil { t.Fatal(err) }
+}
+
+func TestSingBoxManagerLoadConfigSortsExternalSOCKS5Outbounds(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, "config.json")
+	raw := `{"inbounds":[{"type":"socks","tag":"csqtt-route-in","listen":"127.0.0.1","listen_port":19080}],"outbounds":[{"type":"direct","tag":"direct"},{"type":"socks","tag":"socks-zeta","server":"zeta.example","server_port":1080},{"type":"socks","tag":"socks-alpha","server":"alpha.example","server_port":1081},{"type":"socks","tag":"csqtt","server":"127.0.0.1","server_port":19081}],"route":{"final":"direct","rules":[]}}`
+	if err := os.WriteFile(config, []byte(raw), 0600); err != nil { t.Fatal(err) }
+	manager := NewSingBoxManager("unused", config, filepath.Join(dir, "sing-box.log"))
+	for attempt := 0; attempt < 5; attempt++ {
+		loaded, err := manager.LoadConfig()
+		if err != nil { t.Fatalf("LoadConfig: %v", err) }
+		if len(loaded.SOCKS5) != 2 { t.Fatalf("loaded %d external outbounds, want 2: %#v", len(loaded.SOCKS5), loaded.SOCKS5) }
+		if loaded.SOCKS5[0].ID != "alpha" || loaded.SOCKS5[1].ID != "zeta" {
+			t.Fatalf("external SOCKS5 outbounds are not stable and sorted: %#v", loaded.SOCKS5)
+		}
+	}
+}
+
+func TestSingBoxManagerLoadConfigRejectsMalformedExternalSOCKS5(t *testing.T) {
+	cases := []struct {
+		name string
+		outbound string
+	}{
+		{name: "empty host", outbound: `{"type":"socks","tag":"socks-alpha","server":"","server_port":1080}`},
+		{name: "invalid host", outbound: `{"type":"socks","tag":"socks-alpha","server":"bad host","server_port":1080}`},
+		{name: "fractional port", outbound: `{"type":"socks","tag":"socks-alpha","server":"proxy.example","server_port":1080.5}`},
+		{name: "invalid id", outbound: `{"type":"socks","tag":"socks-bad/id","server":"proxy.example","server_port":1080}`},
+		{name: "incomplete credentials", outbound: `{"type":"socks","tag":"socks-alpha","server":"proxy.example","server_port":1080,"username":"user"}`},
+		{name: "wrong outbound type", outbound: `{"type":"direct","tag":"socks-alpha","server":"proxy.example","server_port":1080}`},
+		{name: "non-string credentials", outbound: `{"type":"socks","tag":"socks-alpha","server":"proxy.example","server_port":1080,"username":123,"password":"secret"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			config := filepath.Join(dir, "config.json")
+			raw := `{"inbounds":[{"type":"socks","tag":"csqtt-route-in","listen":"127.0.0.1","listen_port":19080}],"outbounds":[{"type":"direct","tag":"direct"},` + tc.outbound + `],"route":{"final":"direct","rules":[]}}`
+			if err := os.WriteFile(config, []byte(raw), 0600); err != nil { t.Fatal(err) }
+			manager := NewSingBoxManager("unused", config, filepath.Join(dir, "sing-box.log"))
+			if _, err := manager.LoadConfig(); err == nil {
+				t.Fatal("malformed persisted external SOCKS5 outbound was accepted")
+			}
+		})
+	}
+}
+
+func TestSingBoxManagerLoadConfigRejectsUnsafeCSQTTOutbound(t *testing.T) {
+	cases := []struct { name, server string; port int }{
+		{name: "non-loopback address", server: "192.168.1.20", port: 12500},
+		{name: "public address", server: "203.0.113.10", port: 12500},
+		{name: "same endpoint as inbound", server: "127.0.0.1", port: 19080},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			config := filepath.Join(dir, "config.json")
+			raw := fmt.Sprintf(`{"inbounds":[{"type":"socks","tag":"csqtt-route-in","listen":"127.0.0.1","listen_port":19080}],"outbounds":[{"type":"direct","tag":"direct"},{"type":"socks","tag":"csqtt","server":%q,"server_port":%d}],"route":{"final":"direct","rules":[]}}`, tc.server, tc.port)
+			if err := os.WriteFile(config, []byte(raw), 0600); err != nil { t.Fatal(err) }
+			manager := NewSingBoxManager("unused", config, filepath.Join(dir, "sing-box.log"))
+			if _, err := manager.LoadConfig(); err == nil {
+				t.Fatal("unsafe persisted CSQTT outbound was accepted")
+			}
+		})
+	}
 }
 
 func TestSingBoxListenIPAssignedMatchesExactInterfaceAddress(t *testing.T) {
@@ -128,7 +192,7 @@ func TestSingBoxManagerSaveConfigIsAtomicAndValidated(t *testing.T) {
 	binary := newFakeSingBox(t, "if [ \"$1\" = check ]; then grep -q 'invalid-marker' \"$3\" && { echo invalid >&2; exit 9; }; exit 0; fi\nexit 0")
 	manager := NewSingBoxManager(binary, config, filepath.Join(dir, "sing-box.log"))
 	input := singBoxConfigInput{
-		ListenAddress: "127.0.0.1:19080", CSQTTAddress: "127.0.0.1:19081",
+		ListenAddress: "127.0.0.1:19080", CSQTTAddress: "127.0.0.1:19081", FinalOutbound: singBoxDirectTag,
 		DirectDomainSuffixes: []string{".example.org"},
 		Rules: []singBoxRouteRule{{ID:"route-a", DomainKeywords:[]string{"stream"}, DomainRegexes:[]string{"video"}, IPCIDRs:[]string{"198.51.100.0/24"}, Outbound:singBoxCSQTTTag, Enabled:true}},
 	}
@@ -185,6 +249,7 @@ func TestSingBoxManagerStartRejectsTamperedPersistedRuleSetPathBeforeBinary(t *t
 	encoded, err := buildSingBoxConfig(singBoxConfigInput{
 		ListenAddress: "127.0.0.1:19080",
 		CSQTTAddress: "127.0.0.1:19081",
+		FinalOutbound: singBoxDirectTag,
 		RuleSets: []singBoxRuleSet{{Type: "local", Tag: "tampered", Format: "binary", Path: outside}},
 	})
 	if err != nil { t.Fatalf("build persisted tampered config fixture: %v", err) }
@@ -422,7 +487,7 @@ func TestSingBoxManagerUploadRuleSetRejectsNonCanonicalRegisteredPath(t *testing
 	nonCanonical := filepath.Join(setsDir, "other.json")
 	if err := os.WriteFile(nonCanonical, []byte(`{"version":3,"rules":[]}`), 0600); err != nil { t.Fatal(err) }
 	encoded, err := buildSingBoxConfig(singBoxConfigInput{
-		ListenAddress: "127.0.0.1:19080", CSQTTAddress: "127.0.0.1:19081",
+		ListenAddress: "127.0.0.1:19080", CSQTTAddress: "127.0.0.1:19081", FinalOutbound: singBoxDirectTag,
 		RuleSets: []singBoxRuleSet{{Type:"local", Tag:"stable", Format:"source", Path:nonCanonical}},
 	})
 	if err != nil { t.Fatal(err) }
@@ -456,7 +521,7 @@ func TestSingBoxManagerUploadRuleSetRejectsRegisteredRemoteAndFormatChange(t *te
 		t.Run(tc.name, func(t *testing.T) {
 			dir:=t.TempDir()
 			config:=filepath.Join(dir,"config.json")
-			encoded,err:=buildSingBoxConfig(singBoxConfigInput{ListenAddress:"127.0.0.1:19080",CSQTTAddress:"127.0.0.1:19081",RuleSets:[]singBoxRuleSet{tc.set}})
+			encoded,err:=buildSingBoxConfig(singBoxConfigInput{ListenAddress:"127.0.0.1:19080",CSQTTAddress:"127.0.0.1:19081",FinalOutbound:singBoxDirectTag,RuleSets:[]singBoxRuleSet{tc.set}})
 			if err!=nil { t.Fatal(err) }
 			if err:=os.WriteFile(config,encoded,0600);err!=nil { t.Fatal(err) }
 			manager:=NewSingBoxManager(ruleSetValidationFakeBinary(t,"normal"),config,filepath.Join(dir,"sing-box.log"))
@@ -475,7 +540,7 @@ func TestSingBoxManagerDeleteRuleSetRejectsAdvancedNestedRouteReference(t *testi
  if err := os.MkdirAll(ruleSetDir, 0700); err != nil { t.Fatal(err) }
  path := filepath.Join(ruleSetDir, "hidden-ref.srs")
  if err := os.WriteFile(path, []byte("managed ruleset"), 0600); err != nil { t.Fatal(err) }
- encoded, err := buildSingBoxConfig(singBoxConfigInput{ListenAddress:"127.0.0.1:19080", CSQTTAddress:"127.0.0.1:19081"})
+ encoded, err := buildSingBoxConfig(singBoxConfigInput{ListenAddress:"127.0.0.1:19080", CSQTTAddress:"127.0.0.1:19081",FinalOutbound:singBoxDirectTag})
  if err != nil { t.Fatal(err) }
  var raw map[string]any
  if err := json.Unmarshal(encoded, &raw); err != nil { t.Fatal(err) }
@@ -531,5 +596,180 @@ func TestSingBoxManagerRoundTripsExternalDefaultWithoutCSQTT(t *testing.T) {
 	}
 	if loaded.SOCKS5[0].Username != "route-user" || loaded.SOCKS5[0].Password != "route-pass" {
 		t.Fatalf("SOCKS5 credentials did not round-trip: %#v", loaded.SOCKS5[0])
+	}
+}
+
+
+// TestSingBoxManagerRecoversAfterUnexpectedExit verifies that the manager's
+// waiter releases the previous process generation after a crash, preserves the
+// failure in Status, and permits a clean subsequent Start.
+func TestSingBoxManagerRecoversAfterUnexpectedExit(t *testing.T) {
+	dir := t.TempDir()
+	counter := filepath.Join(dir, "run-count")
+	script := "if [ \"$1\" = check ]; then exit 0; fi\n" +
+		"count=0\n" +
+		"if [ -f " + shellQuoteForTest(counter) + " ]; then read count < " + shellQuoteForTest(counter) + "; fi\n" +
+		"count=$((count + 1))\n" +
+		"echo $count > " + shellQuoteForTest(counter) + "\n" +
+		"if [ \"$count\" -eq 1 ]; then echo simulated-crash >&2; exit 17; fi\n" +
+		"exec sleep 60"
+	binary := newFakeSingBox(t, script)
+	config := filepath.Join(dir, "config.json")
+	writeValidSingBoxConfigForTest(t, config)
+	manager := NewSingBoxManager(binary, config, filepath.Join(dir, "sing-box.log"))
+
+	if err := manager.Start(context.Background()); err != nil {
+		t.Fatalf("first Start: %v", err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		status := manager.Status()
+		if !status.Running && status.Error != "" {
+			if !strings.Contains(status.Error, "exit status 17") {
+				t.Fatalf("unexpected crash status: %+v", status)
+			}
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if status := manager.Status(); status.Running || !strings.Contains(status.Error, "exit status 17") {
+		t.Fatalf("manager did not publish unexpected exit: %+v", status)
+	}
+
+	if err := manager.Start(context.Background()); err != nil {
+		t.Fatalf("Start after unexpected exit: %v", err)
+	}
+	status := manager.Status()
+	if !status.Running || status.PID == 0 {
+		t.Fatalf("manager did not start a new process generation: %+v", status)
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	var data []byte
+	var err error
+	for time.Now().Before(deadline) {
+		data, err = os.ReadFile(counter)
+		if err == nil && strings.TrimSpace(string(data)) == "2" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err != nil || strings.TrimSpace(string(data)) != "2" {
+		t.Fatalf("run count = %q, err=%v; want second run", data, err)
+	}
+	if status.Error != "" {
+		t.Fatalf("stale crash error remained after successful restart: %+v", status)
+	}
+	if err := manager.Stop(); err != nil {
+		t.Fatalf("Stop after recovery: %v", err)
+	}
+	if status := manager.Status(); status.Running || status.PID != 0 {
+		t.Fatalf("manager retained restarted process after Stop: %+v", status)
+	}
+}
+
+
+// TestSingBoxManagerRecoversRealSingBoxAfterForcedExit exercises the manager
+// against the pinned sing-box binary: start, complete a real SOCKS5 CONNECT,
+// kill the process unexpectedly, wait for waiter cleanup, restart, and relay
+// another real payload through the same inbound endpoint.
+func TestSingBoxManagerRecoversRealSingBoxAfterForcedExit(t *testing.T) {
+	binaryPath := strings.TrimSpace(os.Getenv("CSQTT_SING_BOX_BINARY"))
+	if binaryPath == "" {
+		t.Skip("requires pinned sing-box binary from CI")
+	}
+
+	echo, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil { t.Fatal(err) }
+	defer echo.Close()
+	go func() {
+		for {
+			conn, acceptErr := echo.Accept()
+			if acceptErr != nil { return }
+			go func(c net.Conn) { defer c.Close(); _, _ = io.Copy(c, c) }(conn)
+		}
+	}()
+
+	listenAddress := reserveSingBoxTestAddress(t)
+	input := singBoxConfigInput{ListenAddress: listenAddress, FinalOutbound: singBoxDirectTag}
+	config, err := buildSingBoxConfig(input)
+	if err != nil { t.Fatal(err) }
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "sing-box-recovery.json")
+	if err := os.WriteFile(configPath, config, 0600); err != nil { t.Fatal(err) }
+	manager := NewSingBoxManager(binaryPath, configPath, filepath.Join(dir, "sing-box.log"))
+
+	waitInbound := func() {
+		t.Helper()
+		deadline := time.Now().Add(8 * time.Second)
+		for time.Now().Before(deadline) {
+			conn, dialErr := net.DialTimeout("tcp", listenAddress, 150*time.Millisecond)
+			if dialErr == nil {
+				_ = conn.Close()
+				return
+			}
+			if !manager.Status().Running { break }
+			time.Sleep(50 * time.Millisecond)
+		}
+		t.Fatalf("sing-box inbound did not become ready; status=%+v", manager.Status())
+	}
+	connectAndEcho := func(payload string) {
+		t.Helper()
+		conn, dialErr := net.DialTimeout("tcp", listenAddress, time.Second)
+		if dialErr != nil { t.Fatalf("dial sing-box inbound: %v", dialErr) }
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+		if _, err := conn.Write([]byte{5, 1, 0}); err != nil { t.Fatal(err) }
+		var greeting [2]byte
+		if _, err := io.ReadFull(conn, greeting[:]); err != nil { t.Fatal(err) }
+		if greeting != [2]byte{5, 0} { t.Fatalf("SOCKS greeting = %v", greeting) }
+
+		target := echo.Addr().(*net.TCPAddr)
+		request := []byte{5, 1, 0, 1, 127, 0, 0, 1, byte(target.Port >> 8), byte(target.Port)}
+		if _, err := conn.Write(request); err != nil { t.Fatal(err) }
+		var reply [10]byte
+		if _, err := io.ReadFull(conn, reply[:]); err != nil { t.Fatalf("SOCKS CONNECT: %v", err) }
+		if reply[1] != 0 { t.Fatalf("SOCKS CONNECT reply = %v", reply) }
+		data := []byte(payload)
+		if _, err := conn.Write(data); err != nil { t.Fatal(err) }
+		got := make([]byte, len(data))
+		if _, err := io.ReadFull(conn, got); err != nil { t.Fatalf("echo payload: %v", err) }
+		if string(got) != payload { t.Fatalf("echo = %q, want %q", got, payload) }
+	}
+
+	if err := manager.Start(context.Background()); err != nil { t.Fatalf("initial Start: %v", err) }
+	waitInbound()
+	first := manager.Status()
+	if !first.Running || first.PID <= 0 { t.Fatalf("initial process not running: %+v", first) }
+	connectAndEcho("before-forced-exit")
+
+	process, err := os.FindProcess(first.PID)
+	if err != nil { t.Fatalf("find sing-box PID %d: %v", first.PID, err) }
+	if err := process.Kill(); err != nil { t.Fatalf("force-kill sing-box PID %d: %v", first.PID, err) }
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		status := manager.Status()
+		if !status.Running && status.PID == 0 && status.Error != "" { break }
+		time.Sleep(20 * time.Millisecond)
+	}
+	crashed := manager.Status()
+	if crashed.Running || crashed.PID != 0 || crashed.Error == "" {
+		t.Fatalf("manager did not observe forced process exit: %+v", crashed)
+	}
+
+	if err := manager.Start(context.Background()); err != nil {
+		t.Fatalf("restart after forced exit: %v; previous status: %+v", err, crashed)
+	}
+	restarted := manager.Status()
+	if !restarted.Running || restarted.PID <= 0 || restarted.PID == first.PID {
+		t.Fatalf("manager did not create a new process generation: first=%+v restarted=%+v", first, restarted)
+	}
+	if restarted.Error != "" { t.Fatalf("stale crash error after restart: %+v", restarted) }
+	waitInbound()
+	connectAndEcho("after-forced-exit")
+
+	if err := manager.Stop(); err != nil { t.Fatalf("Stop after recovery: %v", err) }
+	if status := manager.Status(); status.Running || status.PID != 0 {
+		t.Fatalf("manager retained process after final Stop: %+v", status)
 	}
 }
